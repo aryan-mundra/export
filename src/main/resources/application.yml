@@ -1,0 +1,44 @@
+# H2 holds the export module's own tables.
+# Record generation is mocked unless the postgres profile is active:
+#   mvn spring-boot:run -Dspring-boot.run.arguments=--spring.profiles.active=postgres
+server:
+  port: 8082
+  servlet:
+    session:
+      cookie:
+        http-only: true
+        same-site: lax
+        secure: false
+
+spring:
+  profiles:
+    active: mock
+  application:
+    name: export-module
+  datasource:
+    url: jdbc:h2:mem:regliss;DB_CLOSE_DELAY=-1;MODE=PostgreSQL
+    driver-class-name: org.h2.Driver
+    username: sa
+    password: ""
+  jpa:
+    hibernate:
+      ddl-auto: create-drop
+    open-in-view: false
+  jackson:
+    serialization:
+      write-dates-as-timestamps: false
+  web:
+    resources:
+      cache:
+        period: 0
+
+export:
+  mock:
+    enabled: true
+    records-per-subscriber: 50
+  storage:
+    directory: data/exports
+
+logging:
+  level:
+    com.bnpp.export: INFO

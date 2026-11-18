@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#00965A">
+    <title>REGLISS Export Module</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@500;600;700&family=Source+Sans+3:ital,wght@0,400;0,600;0,700;1,400&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/css/app.css">
+</head>
+<body class="signed-out">
+<div id="login-screen" class="login-screen">
+    <section class="login-aside">
+        <div class="login-brand">
+            <img src="/img/bnp-paribas.svg" alt="BNP Paribas" width="300" height="105">
+        </div>
+        <p class="login-kicker">REGLISS NG · Export</p>
+        <h1>List exports, reviewed before they leave.</h1>
+        <p>Sign in to build a format template, or to approve one before it can be used.</p>
+        <ul class="login-points">
+            <li>A new template waits until an approver accepts it.</li>
+            <li>Exports keep the last approved version until then.</li>
+            <li>Each subscriber is delivered in its own format.</li>
+        </ul>
+    </section>
+    <section class="login-panel">
+        <div class="login-card">
+            <form id="login-form">
+                <p class="kicker">Secure access</p>
+                <h2>Sign in</h2>
+                <p class="lede">Use your maker or approver account to continue.</p>
+                <label>Username<input name="username" autocomplete="username" required></label>
+                <label>Password<input name="password" type="password" autocomplete="current-password" required></label>
+                <p id="login-error" class="login-error" hidden></p>
+                <button class="btn-primary" type="submit">Sign in</button>
+            </form>
+            <div class="demo-accounts" hidden>
+                <div class="database-label">Demo accounts</div>
+            </div>
+        </div>
+    </section>
+</div>
+<aside class="sidebar">
+    <div class="brand">
+        <div class="brand-plate">
+            <img class="brand-logo" src="/img/bnp-paribas.svg" alt="BNP Paribas">
+        </div>
+        <div class="brand-product">REGLISS <span>Export</span></div>
+    </div>
+    <div class="nav-label">Workspace</div>
+    <nav class="nav">
+        <a href="#/approvals" data-page="approvals" hidden>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.2 4.2L19 7"></path></svg>
+            Approvals
+        </a>
+        <a href="#/dashboard" data-page="dashboard">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1.5"></rect><rect x="14" y="3" width="7" height="7" rx="1.5"></rect><rect x="3" y="14" width="7" height="7" rx="1.5"></rect><rect x="14" y="14" width="7" height="7" rx="1.5"></rect></svg>
+            Dashboard
+        </a>
+        <a href="#/export" data-page="export">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 16V4"></path><path d="M7 8l5-5 5 5"></path><path d="M5 20h14"></path></svg>
+            Export
+        </a>
+        <a href="#/history" data-page="history">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8"></circle><path d="M12 8v5l3 2"></path></svg>
+            History
+        </a>
+        <a href="#/subscribers" data-page="subscribers">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="8" r="3"></circle><circle cx="17" cy="9" r="2.2"></circle><path d="M3.5 19c.6-3 2.8-4.5 5.5-4.5S14 16 14.6 19"></path><path d="M15 14.6c1.6.2 3 1.2 3.6 3.4"></path></svg>
+            Subscribers
+        </a>
+        <a href="#/templates" data-page="templates">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 4h12v16H6z"></path><path d="M9 8h6"></path><path d="M9 12h6"></path><path d="M9 16h4"></path></svg>
+            Format Templates
+        </a>
+        <a href="#/quarantine" data-page="quarantine">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="10" width="12" height="9" rx="1.5"></rect><path d="M8 10V8a4 4 0 0 1 8 0v2"></path></svg>
+            Quarantine
+        </a>
+    </nav>
+    <div class="sidebar-foot">
+        <div class="signed-in" id="signed-in" hidden>
+            <div class="avatar" aria-hidden="true"></div>
+            <div class="who">
+                <div id="signed-name"></div>
+                <div id="signed-role" class="muted"></div>
+            </div>
+            <button id="logout" type="button">Sign out</button>
+        </div>
+        <div class="database">
+            <div class="database-label">Database</div>
+            <div class="db-switch">
+                <button type="button" id="db-h2" class="selected">H2 Mock</button>
+                <button type="button" id="db-postgres">PostgreSQL</button>
+            </div>
+        </div>
+    </div>
+</aside>
+<main id="main"></main>
+<div id="toast" class="toast" role="status"></div>
+<div id="modal-root"></div>
+<script src="/js/app.js"></script>
+</body>
+</html>
