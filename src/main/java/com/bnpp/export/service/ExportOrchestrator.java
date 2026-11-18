@@ -387,6 +387,19 @@ public class ExportOrchestrator {
                 .body(resource);
     }
 
+    public ResponseEntity<Resource> downloadLastSubscriberFile(Long subscriberId) {
+        DeliveryRecord delivery = deliveryRepository.findFirstBySubscriberIdOrderByCreatedAtDesc(subscriberId)
+                .filter(record -> StringUtils.isNotBlank(record.getFilePath()))
+                .orElseThrow(() -> new ResponseStatusException(NOT_FOUND, "Export file not found"));
+        Resource resource = storageService.load(delivery.getFilePath());
+        String fileName = Path.of(delivery.getFilePath()).getFileName().toString();
+        MediaType mediaType = fileName.endsWith(".csv") ? MediaType.parseMediaType("text/csv") : MediaType.APPLICATION_XML;
+        return ResponseEntity.ok()
+                .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + fileName + "\"")
+                .contentType(mediaType)
+                .body(resource);
+    }
+
     private ExportPreview.SubscriberPreview previewSubscriber(CertifiedVersion version,
                                                               SubscriberProfile subscriber,
                                                               LocalDate fromDate,
@@ -580,11 +593,15 @@ public class ExportOrchestrator {
     }
 
     private void rememberTemplate(ExportJobSubscriberStatus status, ExportJob job) {
-        if (!"CSV".equalsIgnoreCase(status.getFormatType()) || job.getFormatTemplateId() == null) {
+        if ("CSV".equalsIgnoreCase(status.getFormatType()) && job.getFormatTemplateId() != null) {
+            status.setFormatTemplateId(job.getFormatTemplateId());
+            status.setFormatTemplateVersion(job.getFormatTemplateVersion());
             return;
         }
-        status.setFormatTemplateId(job.getFormatTemplateId());
-        status.setFormatTemplateVersion(job.getFormatTemplateVersion());
+        formatTemplateService.activeTemplate(status.getFormatType()).ifPresent(template -> {
+            status.setFormatTemplateId(template.getId());
+            status.setFormatTemplateVersion(template.getVersionNumber());
+        });
     }
 
     private byte[] render(ExportJob job, SubscriberProfile subscriber, ExportFormat format, List<Map<String, Object>> rows) {
@@ -603,7 +620,7 @@ public class ExportOrchestrator {
         Collected collected = new Collected();
         recordBatchProvider.stream(
                 version.getVersionId(),
-                version.getListCode(),
+                subscriber.getScope(),
                 subscriber.getExportMode(),
                 fromDate,
                 toDate,
@@ -679,9 +696,7 @@ public class ExportOrchestrator {
     }
 
     private boolean onList(SubscriberProfile subscriber, String listCode) {
-        return subscriber.getScope() == null
-                || "ALL".equalsIgnoreCase(subscriber.getScope())
-                || listCode.equalsIgnoreCase(subscriber.getScope());
+        return true;
     }
 
     private DeliveryRecord deliverWithRetry(SubscriberProfile subscriber,

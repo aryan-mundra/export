@@ -208,24 +208,17 @@ function exportHtml() {
     const csvNote = csv
         ? `<div class="note">CSV exports use <strong>${esc(csv.name)}</strong> version ${csv.versionNumber}: ${esc(csv.fields.map(field => field.headerName).join(", "))}.</div>`
         : "";
-    const chosen = state.previewRequest ? state.previewRequest.versionId : "";
-    const options = (state.versions || []).map(version =>
-        `<option value="${version.versionId}" ${String(version.versionId) === String(chosen) ? "selected" : ""}>${esc(version.listName)} · version ${version.versionId} · as of ${esc(version.contentAsOf)}</option>`
-    ).join("");
     return `
-        ${head("Delivery", "Trigger Export", "Review one certified list version, then send it. The date window limits delta subscribers only.")}
+        ${head("Delivery", "Trigger Export", "Review the export, then send it. The date window limits delta subscribers only.")}
         ${state.exportMessage ? `<div class="banner">${state.exportMessage}</div>` : ""}
         ${csvNote}
         <section class="export-card">
-            <label class="field-label" for="versionId">Certified list version</label>
-            <select id="versionId">${options || '<option value="">No certified versions</option>'}</select>
-            <p class="muted">Demo catalog until the golden source is connected. A version that is not certified cannot be sent.</p>
-            <div class="date-range">
+            <div class="date-range" style="margin-top:0">
                 <label class="field-label" for="fromDate">Delta window from<input id="fromDate" type="date"></label>
                 <label class="field-label" for="toDate">Delta window to<input id="toDate" type="date"></label>
             </div>
-            <div class="note"><strong>Full</strong> subscribers receive the whole version. The dates do not apply to them. <strong>Delta</strong> subscribers receive only records that changed inside the window. Leave both dates empty to include every change. Business line and region apply when the list record carries them.</div>
-            <button id="reviewBtn" class="btn-primary" type="button" ${active.length && options ? "" : "disabled"}>Review export</button>
+            <div class="note"><strong>Full</strong> subscribers receive the whole version. The dates do not apply to them. <strong>Delta</strong> subscribers receive only records that changed inside the window.</div>
+            <button id="reviewBtn" class="btn-primary" type="button" ${active.length ? "" : "disabled"}>Review export</button>
             ${previewHtml()}
             <div class="section-label">Active subscribers (${active.length})</div>
             <div class="chips">
@@ -241,14 +234,11 @@ function previewHtml() {
         <td>${esc(row.name)}</td>
         <td>${esc(row.scope)}</td>
         <td>${esc(row.formatType)} · ${esc(row.exportMode)}</td>
-        <td>${row.included ? num(row.records) : "—"}</td>
-        <td>${row.included ? num(row.quarantined) : "—"}</td>
-        <td>${esc(row.outcome)}</td>
     </tr>`).join("");
     return `<div class="detail">
-        <p><strong>${esc(preview.listName)}</strong> version ${esc(preview.versionId)}, content as of ${esc(preview.contentAsOf)}. ${preview.fromDate ? `Delta window ${esc(preview.fromDate)} to ${esc(preview.toDate)}.` : "No date window."}</p>
+        <p>${preview.fromDate ? `Delta window ${esc(preview.fromDate)} to ${esc(preview.toDate)}.` : "No date window."}</p>
         <table class="detail-table">
-            <thead><tr><th>Subscriber</th><th>Scope</th><th>File</th><th>Records</th><th>Held</th><th>What happens</th></tr></thead>
+            <thead><tr><th>Subscriber</th><th>Scope</th><th>File</th></tr></thead>
             <tbody>${rows}</tbody>
         </table>
         <div class="modal-actions">
@@ -323,7 +313,6 @@ function subscriberActions(detail, subscriber) {
     }
     if (subscriber.archiveFileName) {
         buttons.push(`<button class="btn-ghost" type="button" data-proof="${detail.id}:${subscriber.id}">Check proof</button>`);
-        buttons.push(`<a class="file-link" href="/api/jobs/${detail.id}/subscribers/${subscriber.id}/archive">Archive</a>`);
     }
     return buttons.join(" ");
 }
@@ -338,7 +327,7 @@ function subscribersHtml() {
         <td>${esc(subscriber.businessLine || "—")}</td>
         <td>${esc(subscriber.region || "—")}</td>
         <td>${esc(subscriber.cftEndpoint || "—")}</td>
-        <td>${esc(subscriber.lastFileName || "—")}</td>
+        <td>${subscriber.lastFileName ? `<a class="file-link" href="/api/subscribers/${subscriber.id}/last-file" download="${esc(subscriber.lastFileName)}">${esc(subscriber.lastFileName)}</a>` : "—"}</td>
         <td><span class="pill ${subscriber.active ? "pill-on" : "pill-off"}">${subscriber.endpointStatus === "PENDING" ? "Endpoint pending" : subscriber.active ? "Active" : "Inactive"}</span></td>
         <td class="actions">
             <button class="btn-edit" type="button" data-edit="${subscriber.id}">Edit</button>
@@ -386,7 +375,7 @@ function templatesHtml() {
     const waiting = state.templates.some(template => template.status === "PENDING");
     const unused = state.catalogue.filter(column => !draft.fields.some(field => field.sourceColumn === column));
     return `
-        ${head("Formats", "Format Templates", "Map list columns to a CSV header. Fircosoft and XML layouts stay fixed. A saved version waits for approval.")}
+        ${head("Formats", "Format Templates", "Map list columns to CSV, Generic XML, or Standard XML fields. Fircosoft layout stays fixed. A saved version waits for approval.")}
         <section class="export-card template-card">
             <h2>Create new template</h2>
             <p class="muted">Saving sends this version for approval. Exports keep using the last approved template until an approver accepts the new one.</p>
@@ -395,7 +384,9 @@ function templatesHtml() {
                 <div class="add-form" style="padding:12px 0;border:0">
                     <input name="name" value="${esc(draft.name)}" required>
                     <select name="formatType" id="template-format">
-                        <option value="CSV" selected>CSV Export</option>
+                        <option value="CSV" ${draft.formatType === "CSV" ? "selected" : ""}>CSV Export</option>
+                        <option value="GENERIC_XML" ${draft.formatType === "GENERIC_XML" ? "selected" : ""}>Generic XML</option>
+                        <option value="STANDARD_XML" ${draft.formatType === "STANDARD_XML" ? "selected" : ""}>Standard XML</option>
                     </select>
                 </div>
                 <div class="field-label">Current fields</div>
@@ -507,8 +498,8 @@ function tablesHtml(template) {
         </div>`).join("");
 }
 
-function draftFromActive() {
-    const active = state.templates.find(template => template.formatType === "CSV" && template.active);
+function draftFromActive(formatType = "CSV") {
+    const active = state.templates.find(template => template.formatType === formatType && template.active);
     if (active) {
         return {
             name: active.name,
@@ -516,13 +507,18 @@ function draftFromActive() {
             fields: active.fields.map(field => ({ sourceColumn: field.sourceColumn, headerName: field.headerName }))
         };
     }
+    const defaultNames = {
+        CSV: "CSV Export",
+        GENERIC_XML: "Generic XML Export",
+        STANDARD_XML: "Standard XML Export"
+    };
     return {
-        name: "CSV Export",
-        formatType: "CSV",
+        name: defaultNames[formatType] || (formatType + " Export"),
+        formatType,
         fields: [
-            { sourceColumn: "id", headerName: "id" },
-            { sourceColumn: "action", headerName: "action" },
-            { sourceColumn: "record_date", headerName: "record_date" }
+            { sourceColumn: "id", headerName: formatType === "STANDARD_XML" ? "Id" : "id" },
+            { sourceColumn: "action", headerName: formatType === "STANDARD_XML" ? "Action" : "action" },
+            { sourceColumn: "record_date", headerName: formatType === "STANDARD_XML" ? "RecordDate" : "record_date" }
         ]
     };
 }
@@ -801,6 +797,11 @@ async function onSubmit(event) {
 
 let searchTimer;
 function onInput(event) {
+    if (event.target.id === "template-format") {
+        state.templateDraft = draftFromActive(event.target.value);
+        render();
+        return;
+    }
     if (event.target.id === "versionId" || event.target.id === "fromDate" || event.target.id === "toDate") {
         state.preview = null;
         state.previewRequest = null;
@@ -843,7 +844,10 @@ function dateWindow() {
 }
 
 async function reviewExport() {
-    const versionId = Number(document.getElementById("versionId").value);
+    const versionEl = document.getElementById("versionId");
+    const versionId = versionEl
+        ? Number(versionEl.value)
+        : ((state.versions && state.versions[0] && state.versions[0].versionId) || 42);
     if (!versionId) {
         toast("Choose a certified list version", "error");
         return;

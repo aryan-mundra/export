@@ -65,7 +65,6 @@ public class MockContentSelector implements RecordSelector {
     }
 
     private Map<String, Object> buildRecord(Long versionId, int index, String scope) {
-        ThreadLocalRandom random = ThreadLocalRandom.current();
         Map<String, Object> record = new LinkedHashMap<>();
         long id = (versionId == null ? 1 : versionId) * 1_000_000L + index;
         record.put("id", id);
@@ -77,33 +76,12 @@ public class MockContentSelector implements RecordSelector {
         record.put("changedOn", LocalDate.now().minusDays(index % 90).toString());
         record.put("risk_rating", new String[] {"LOW", "MEDIUM", "HIGH"}[index % 3]);
         record.put("status", STATUSES[index % STATUSES.length]);
-        record.put("sanctions", random.nextBoolean() || "SANCTIONS".equalsIgnoreCase(scope));
-        record.put("worldcheck", random.nextBoolean() || "WORLDCHECK".equalsIgnoreCase(scope));
-        record.put("pfa", random.nextBoolean() || "PFA".equalsIgnoreCase(scope));
+        record.put("sanctions", true);
+        record.put("worldcheck", true);
+        record.put("pfa", true);
         record.put("action", ACTIONS[index % ACTIONS.length]);
         record.put("businessLine", new String[] {"CIB", "Retail", "Compliance", "Financial Security"}[index % 4]);
         record.put("region", new String[] {"EMEA", "APAC", "Europe", "Americas", "Global"}[index % 5]);
-
-        if (index % 17 == 0) {
-            record.put("country", " ");
-        }
-        if (index % 29 == 0) {
-            record.put("name", "");
-        }
-        if (index % 31 == 0) {
-            record.put("dateOfBirth", null);
-            record.put("record_date", null);
-        }
-        if (index == 20) {
-            record.put("name", "");
-        }
-        if (index == 15) {
-            record.put("country", " ");
-        }
-        if (index == 14 || index == 34) {
-            record.put("dateOfBirth", null);
-            record.put("record_date", null);
-        }
         return record;
     }
 

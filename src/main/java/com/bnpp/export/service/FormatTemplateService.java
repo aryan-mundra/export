@@ -123,22 +123,38 @@ public class FormatTemplateService {
 
     @Transactional
     public void seedDefaultCsv() {
-        if (templateRepository.count() > 0) {
+        seedFormatIfMissing("CSV", "CSV Export", List.of(
+                new FormatFieldRequest("id", "id"),
+                new FormatFieldRequest("action", "action"),
+                new FormatFieldRequest("record_date", "record_date")));
+        seedFormatIfMissing("GENERIC_XML", "Generic XML Export", List.of(
+                new FormatFieldRequest("id", "id"),
+                new FormatFieldRequest("name", "name"),
+                new FormatFieldRequest("country", "country"),
+                new FormatFieldRequest("record_date", "record_date"),
+                new FormatFieldRequest("action", "action")));
+        seedFormatIfMissing("STANDARD_XML", "Standard XML Export", List.of(
+                new FormatFieldRequest("id", "Id"),
+                new FormatFieldRequest("name", "Name"),
+                new FormatFieldRequest("country", "Country"),
+                new FormatFieldRequest("record_date", "RecordDate"),
+                new FormatFieldRequest("action", "Action")));
+    }
+
+    private void seedFormatIfMissing(String formatType, String name, List<FormatFieldRequest> defaultFields) {
+        if (templateRepository.findFirstByFormatTypeOrderByVersionNumberDesc(formatType).isPresent()) {
             return;
         }
         FormatTemplate template = new FormatTemplate();
-        template.setName("CSV Export");
-        template.setFormatType("CSV");
+        template.setName(name);
+        template.setFormatType(formatType);
         template.setVersionNumber(1);
         template.setActive(true);
         template.setStatus("APPROVED");
         template.setCreatedBy("system");
         template.setCreatedByName("System");
         template = templateRepository.save(template);
-        saveFields(template.getId(), List.of(
-                new FormatFieldRequest("id", "id"),
-                new FormatFieldRequest("action", "action"),
-                new FormatFieldRequest("record_date", "record_date")));
+        saveFields(template.getId(), defaultFields);
     }
 
     private void saveFields(Long templateId, List<FormatFieldRequest> fields) {
@@ -179,13 +195,17 @@ public class FormatTemplateService {
     }
 
     private String normalizeFormat(String formatType) {
-        String normalized = formatType == null ? "" : formatType.trim().toUpperCase(Locale.ROOT).replace(' ', '_');
+        String normalized = formatType == null ? "" : formatType.trim().toUpperCase(Locale.ROOT).replace(' ', '_').replace('-', '_');
         if ("CSV_EXPORT".equals(normalized)) {
             normalized = "CSV";
+        } else if ("GENERIC_XML_EXPORT".equals(normalized)) {
+            normalized = "GENERIC_XML";
+        } else if ("STANDARD_XML_EXPORT".equals(normalized)) {
+            normalized = "STANDARD_XML";
         }
-        if (!"CSV".equals(normalized)) {
+        if (!Set.of("CSV", "GENERIC_XML", "STANDARD_XML").contains(normalized)) {
             throw new ResponseStatusException(BAD_REQUEST,
-                    "Only a CSV template changes the file. Fircosoft and XML layouts stay fixed until a real layout is agreed.");
+                    "Only CSV, Generic XML, and Standard XML templates change the file. Fircosoft layout stays fixed.");
         }
         return normalized;
     }

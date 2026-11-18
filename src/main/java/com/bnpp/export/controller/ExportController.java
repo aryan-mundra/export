@@ -149,6 +149,11 @@ public class ExportController {
         return orchestrator.sample(id);
     }
 
+    @GetMapping("/subscribers/{id}/last-file")
+    public ResponseEntity<Resource> downloadLastSubscriberFile(@PathVariable Long id) {
+        return orchestrator.downloadLastSubscriberFile(id);
+    }
+
     @DeleteMapping("/subscribers/{id}")
     public ResponseEntity<Void> deleteSubscriber(@PathVariable Long id) {
         if (!subscriberRepository.existsById(id)) {
