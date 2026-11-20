@@ -134,6 +134,7 @@ class ExportModuleIntegrationTest {
                 .andExpect(jsonPath("$.fields[3].joinField").value("bnp_id"))
                 .andReturn();
         Number templateId = com.jayway.jsonpath.JsonPath.read(created.getResponse().getContentAsString(), "$.id");
+        Number csvFamilyId = com.jayway.jsonpath.JsonPath.read(created.getResponse().getContentAsString(), "$.familyId");
 
         mockMvc.perform(post("/api/format-templates/" + templateId + "/approve").session(maker))
                 .andExpect(status().isForbidden());
@@ -181,8 +182,9 @@ class ExportModuleIntegrationTest {
         MvcResult channel = mockMvc.perform(post("/api/subscribers")
                         .session(maker)
                         .contentType("application/json")
-                        .content("{\"name\":\"New Channel\",\"formatType\":\"CSV\",\"scope\":\"ALL\",\"exportMode\":\"FULL\",\"cftEndpoint\":\"http://cft.local/inbox/new-channel\"}"))
+                        .content("{\"name\":\"New Channel\",\"formatType\":\"CSV\",\"scope\":\"ALL\",\"exportMode\":\"FULL\",\"cftEndpoint\":\"http://cft.local/inbox/new-channel\",\"templateId\":" + csvFamilyId + "}"))
                 .andExpect(status().isOk())
+                .andExpect(jsonPath("$.templateName").value("CSV Export"))
                 .andExpect(jsonPath("$.active").value(false))
                 .andExpect(jsonPath("$.endpointStatus").value("PENDING"))
                 .andReturn();
@@ -392,10 +394,37 @@ class ExportModuleIntegrationTest {
                 .andExpect(jsonPath("$.fields[3].sourceTable").value("Gs_Identifier"))
                 .andReturn();
         Number templateId = com.jayway.jsonpath.JsonPath.read(created.getResponse().getContentAsString(), "$.id");
+        Number familyId = com.jayway.jsonpath.JsonPath.read(created.getResponse().getContentAsString(), "$.familyId");
+        var shineProfile = subscriberRepository.findByNameIgnoreCase("SHINE").orElseThrow();
+        String chooseNew = "{\"name\":\"SHINE\",\"formatType\":\"XML\",\"scope\":\"" + shineProfile.getScope()
+                + "\",\"exportMode\":\"" + shineProfile.getExportMode() + "\",\"businessLine\":\"" + shineProfile.getBusinessLine()
+                + "\",\"region\":\"" + shineProfile.getRegion() + "\",\"cftEndpoint\":\"" + shineProfile.getCftEndpoint()
+                + "\",\"templateId\":" + familyId + "}";
+        // A template cannot be chosen before an approver has approved a version of it...
+        mockMvc.perform(put("/api/subscribers/" + shineProfile.getId()).with(user("maker").roles("MAKER"))
+                        .contentType("application/json").content(chooseNew))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value(org.hamcrest.Matchers.containsString("has no approved version yet")));
         mockMvc.perform(post("/api/format-templates/" + templateId + "/approve").with(user("approver").roles("APPROVER")))
                 .andExpect(status().isOk());
+        // ...and an XML template cannot go to a CSV subscriber.
+        Long actimizeId = subscriberRepository.findByNameIgnoreCase("Actimize").orElseThrow().getId();
+        mockMvc.perform(put("/api/subscribers/" + actimizeId).with(user("maker").roles("MAKER"))
+                        .contentType("application/json")
+                        .content("{\"name\":\"Actimize\",\"formatType\":\"CSV\",\"scope\":\"PFA\",\"exportMode\":\"FULL\",\"templateId\":" + familyId + "}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value(org.hamcrest.Matchers.containsString("is a XML template")));
+        // SHINE now uses the new template; every other XML subscriber keeps "XML Export".
+        mockMvc.perform(put("/api/subscribers/" + shineProfile.getId()).with(user("maker").roles("MAKER"))
+                        .contentType("application/json").content(chooseNew))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.templateName").value("XML with golden source"));
 
         ExportJob job = await(orchestrator.triggerExport(43L, "test").getId());
+        var sun = orchestrator.getJob(job.getId()).subscribers().stream()
+                .filter(row -> "SUN".equals(row.subscriberName())).findFirst().orElseThrow();
+        assertTrue(java.nio.file.Files.readString(java.nio.file.Path.of(sun.filePath())).contains("<BnpId>"),
+                "SUN keeps its own template");
         var shine = orchestrator.getJob(job.getId()).subscribers().stream()
                 .filter(row -> "SHINE".equals(row.subscriberName()))
                 .findFirst()

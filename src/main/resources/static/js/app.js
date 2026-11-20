@@ -73,6 +73,7 @@ async function refresh() {
         state.versions = await api("/api/versions");
     } else if (state.page === "subscribers") {
         state.subscribers = await api("/api/subscribers?q=" + encodeURIComponent(state.search.subscribers));
+        state.templates = await api("/api/format-templates");
     } else if (state.page === "history") {
         state.jobs = await api("/api/jobs?q=" + encodeURIComponent(state.search.history));
         if (state.openJobId) {
@@ -220,14 +221,9 @@ function activityRow(job) {
 
 function exportHtml() {
     const active = state.subscribers.filter(subscriber => subscriber.active);
-    const csv = state.templates.find(template => template.formatType === "CSV" && template.active && template.status === "APPROVED");
-    const csvNote = csv
-        ? `<div class="note">CSV exports use <strong>${esc(csv.name)}</strong> version ${csv.versionNumber}: ${esc(csv.fields.map(field => field.headerName).join(", "))}.</div>`
-        : "";
     return `
-        ${head("Delivery", "Trigger Export", "Review the export, then send it. The date window limits delta subscribers only.")}
+        ${head("Delivery", "Trigger Export", "Review the export, then send it. Each subscriber gets its own template; the date window limits delta subscribers only.")}
         ${state.exportMessage ? `<div class="banner">${state.exportMessage}</div>` : ""}
-        ${csvNote}
         <section class="export-card">
             <div class="date-range" style="margin-top:0">
                 <label class="field-label" for="fromDate">Delta window from<input id="fromDate" type="date"></label>
@@ -250,11 +246,12 @@ function previewHtml() {
         <td>${esc(row.name)}</td>
         <td>${esc(row.scope)}</td>
         <td>${esc(row.formatType)} · ${esc(row.exportMode)}</td>
+        <td>${row.templateName ? `${esc(row.templateName)} <span class="muted">v${row.templateVersion}</span>` : '<span class="error-text">No approved template</span>'}</td>
     </tr>`).join("");
     return `<div class="detail">
         <p>${preview.fromDate ? `Delta window ${esc(preview.fromDate)} to ${esc(preview.toDate)}.` : "No date window."}</p>
         <table class="detail-table">
-            <thead><tr><th>Subscriber</th><th>Scope</th><th>File</th></tr></thead>
+            <thead><tr><th>Subscriber</th><th>Scope</th><th>File</th><th>Template</th></tr></thead>
             <tbody>${rows}</tbody>
         </table>
         <div class="modal-actions">
@@ -340,6 +337,7 @@ function subscribersHtml() {
         <td>${esc(subscriber.businessLine || "—")}</td>
         <td>${esc(subscriber.region || "—")}</td>
         <td>${esc(subscriber.cftEndpoint || "—")}</td>
+        <td>${subscriber.templateName ? esc(subscriber.templateName) : '<span class="error-text">None</span>'}</td>
         <td>${subscriber.lastFileName ? `<a class="file-link" href="/api/subscribers/${subscriber.id}/last-file" download="${esc(subscriber.lastFileName)}">${esc(subscriber.lastFileName)}</a>` : "—"}</td>
         <td><span class="pill ${subscriber.active ? "pill-on" : "pill-off"}">${subscriber.endpointStatus === "PENDING" ? "Endpoint pending" : subscriber.active ? "Active" : "Inactive"}</span></td>
         <td class="actions">
@@ -354,6 +352,7 @@ function subscribersHtml() {
             <form class="add-form" id="add-form">
                 <input name="name" placeholder="Subscriber name" required>
                 ${select("formatType", ["CSV", "XML"], "CSV")}
+                <select name="templateId" required aria-label="Template">${templateOptions("CSV", null)}</select>
                 ${select("scope", ["ALL", "SANCTIONS", "WORLDCHECK", "PFA"], "ALL")}
                 ${select("exportMode", ["DELTA", "FULL"], "DELTA")}
                 <input name="businessLine" placeholder="Business line">
@@ -362,7 +361,7 @@ function subscribersHtml() {
                 <button class="btn-primary" type="submit">+ Add</button>
             </form>
             <table>
-                <thead><tr><th>ID</th><th>Name</th><th>Format</th><th>Mode</th><th>Scope</th><th>Business line</th><th>Region</th><th>Delivery</th><th>Last file</th><th>Active</th><th></th></tr></thead>
+                <thead><tr><th>ID</th><th>Name</th><th>Format</th><th>Mode</th><th>Scope</th><th>Business line</th><th>Region</th><th>Delivery</th><th>Template</th><th>Last file</th><th>Active</th><th></th></tr></thead>
                 <tbody>${rows}</tbody>
             </table>
             ${state.subscribers.length ? "" : '<div class="empty">No subscribers found.</div>'}
@@ -453,60 +452,67 @@ function exportColumnsHtml(draft) {
 
 function templatesHtml() {
     const draft = state.templateDraft || draftFromActive();
+    const families = templateFamilies(draft.formatType);
+    const current = families.find(family => String(family.id) === String(draft.familyId));
     const saved = state.templates.map(template => `<tr>
         <td>${esc(template.name)}</td>
         <td class="fmt-${esc(template.formatType)}">${esc(template.formatType)}</td>
         <td>${template.versionNumber}</td>
         <td>${templateStatus(template)}</td>
+        <td>${template.active ? esc((template.usedBy || []).join(", ") || "—") : ""}</td>
         <td>${esc(template.fields.map(field => field.headerName).join(", "))}</td>
     </tr>`).join("");
-    const waiting = state.templates.some(template => template.status === "PENDING");
+    const waiting = current && current.latest.status === "PENDING"
+        ? `<div class="banner">Version ${current.latest.versionNumber} of ${esc(current.name)} is waiting for approval. ${current.inUse ? `Its subscribers keep version ${current.inUse.versionNumber} until it is approved.` : "Subscribers can choose it once it is approved."}</div>`
+        : "";
     return `
-        ${head("Formats", "Format Templates", "The file holds exactly the gs_ columns you pick, one row per entry of the list version you export. A saved version waits for approval.")}
+        ${head("Formats", "Format Templates", "The file holds exactly the gs_ columns you pick, one row per entry of the list version you export. Each subscriber chooses its template on the Subscribers page.")}
         <section class="export-card template-card">
-            <h2>Create new template</h2>
-            <p class="muted">Saving sends this version for approval. Exports keep using the last approved template until an approver accepts the new one.</p>
-            ${waiting ? '<div class="banner">Pending for approval. You can use this template after an approver accepts it.</div>' : ""}
+            <h2>${current ? "Edit " + esc(current.name) : "New template"}</h2>
+            <p class="muted">${current
+                ? `Saving creates version ${current.latest.versionNumber + 1} for approval. Its subscribers keep the version in use until an approver accepts it.`
+                : "Saving sends version 1 for approval. Once approved, any subscriber of this format can choose it."}</p>
+            ${waiting}
             <form id="template-form">
                 <div class="add-form" style="padding:12px 0;border:0">
-                    <input name="name" value="${esc(draft.name)}" required>
-                    <select name="formatType" id="template-format">
-                        <option value="CSV" ${draft.formatType === "CSV" ? "selected" : ""}>CSV Export</option>
-                        <option value="XML" ${draft.formatType === "XML" ? "selected" : ""}>XML Export</option>
+                    <select name="formatType" id="template-format" aria-label="Format">
+                        <option value="CSV" ${draft.formatType === "CSV" ? "selected" : ""}>CSV</option>
+                        <option value="XML" ${draft.formatType === "XML" ? "selected" : ""}>XML</option>
                     </select>
+                    <select id="template-pick" aria-label="Template">
+                        <option value="" ${current ? "" : "selected"}>＋ New template</option>
+                        ${families.map(family => `<option value="${family.id}" ${current && current.id === family.id ? "selected" : ""}>${esc(family.name)}</option>`).join("")}
+                    </select>
+                    <input name="name" value="${esc(draft.name)}" placeholder="Template name" required ${current ? "readonly" : ""} aria-label="Template name">
                 </div>
                 ${tablePickerHtml(draft)}
                 <div class="field-label">Export columns · ${draft.fields.length} · in file order</div>
                 <p class="muted hint">Each column keeps its own name in the file unless you type a new one.</p>
                 <div class="field-list">${exportColumnsHtml(draft)}</div>
-                <div style="margin-top:14px"><button class="btn-primary" type="submit" ${draft.fields.length ? "" : "disabled"}>Save</button></div>
+                <div style="margin-top:14px"><button class="btn-primary" type="submit" ${draft.fields.length ? "" : "disabled"}>${current ? "Save new version" : "Save template"}</button></div>
             </form>
         </section>
         <section class="table-card" style="margin-top:16px">
             <table>
-                <thead><tr><th>Name</th><th>Format</th><th>Version</th><th>Status</th><th>Headers</th></tr></thead>
+                <thead><tr><th>Name</th><th>Format</th><th>Version</th><th>Status</th><th>Used by</th><th>Headers</th></tr></thead>
                 <tbody>${saved}</tbody>
             </table>
             ${state.templates.length ? "" : '<div class="empty">No format templates yet.</div>'}
         </section>`;
 }
 
-function draftFromActive(formatType = "CSV") {
-    const active = state.templates.find(template => template.formatType === formatType && template.active);
-    if (active) {
-        const fields = active.fields.map(field => ({
-            sourceTable: field.sourceTable && field.sourceTable !== "List record" ? field.sourceTable : null,
+/** A draft to edit: the newest version of an existing template, or an empty new template. */
+function draftFromActive(formatType = "CSV", familyId = null) {
+    const family = familyId ? templateFamilies(formatType).find(item => String(item.id) === String(familyId)) : null;
+    if (family) {
+        const fields = family.latest.fields.map(field => ({
+            sourceTable: field.sourceTable,
             sourceColumn: field.sourceColumn,
             headerName: field.headerName
         }));
-        return { name: active.name, formatType: active.formatType, fields };
+        return { familyId: family.id, name: family.name, formatType, fields };
     }
-    const xml = formatType === "XML";
-    return {
-        name: xml ? "XML Export" : "CSV Export",
-        formatType,
-        fields: []
-    };
+    return { familyId: null, name: "", formatType, fields: [] };
 }
 
 function templateStatus(template) {
@@ -518,50 +524,28 @@ function templateStatus(template) {
 
 function approvalsHtml() {
     const pending = state.templates.filter(template => template.status === "PENDING");
-    const approved = state.templates.filter(template => template.status === "APPROVED");
-    const cards = pending.map(template => `
-        <article class="approval-card">
+    const cards = pending.map(template => {
+        const tables = new Map();
+        template.fields.forEach(field => {
+            if (!tables.has(field.sourceTable)) tables.set(field.sourceTable, []);
+            tables.get(field.sourceTable).push(field.sourceColumn);
+        });
+        return `<article class="approval-card">
             <div class="approval-head">
                 <h2>${esc(template.name)} · version ${template.versionNumber}</h2>
-                <span class="pill pill-wait">Pending for approval</span>
+                <button class="btn-primary" type="button" data-approve="${template.id}">Approve</button>
             </div>
-            <p>Created by <strong>${esc(template.createdByName || template.createdBy)}</strong> (${esc(template.createdBy)}) on ${when(template.createdAt)}.</p>
-            <p class="muted">Format ${esc(template.formatType)}. This version is not used for exports until you approve it. Used by ${esc((template.usedBy || []).join(", ") || "no active subscriber")}.</p>
-            <p>Headers now: ${esc(headerDiff(template))}</p>
-            ${tablesHtml(template)}
-            <div style="margin-top:16px"><button class="btn-primary" type="button" data-approve="${template.id}">Approve</button></div>
-        </article>`).join("");
-    const done = approved.map(template => `<tr>
-        <td>${esc(template.name)}</td>
-        <td>${esc(template.formatType)}</td>
-        <td>${template.versionNumber}</td>
-        <td>${esc(template.createdByName || template.createdBy)}</td>
-        <td>${template.active ? "In use" : "Replaced"}</td>
-        <td>${esc(template.fields.map(field => field.headerName).join(", "))}</td>
-    </tr>`).join("");
+            <p>Created by <strong>${esc(template.createdByName || template.createdBy)}</strong></p>
+            <ul class="approval-tables">${[...tables.entries()].map(([table, columns]) =>
+                `<li><strong>${esc(table)}</strong>: ${esc(columns.join(", "))}</li>`).join("")}</ul>
+        </article>`;
+    }).join("");
     return `
-        ${head("Review", "Approvals", "See who a template change affects, and release a new delivery endpoint.")}
+        ${head("Review", "Approvals", "Templates waiting for your approval.")}
         ${endpointApprovals()}
-        <section class="stats">
-            ${stat("Waiting", pending.length, "orange")}
-            ${stat("Approved", approved.length, "green")}
-        </section>
-        ${pending.length ? `<div class="approval-list">${cards}</div>` : '<section class="panel"><div class="empty">No templates are waiting for approval.</div></section>'}
-        <section class="table-card" style="margin-top:16px">
-            <table>
-                <thead><tr><th>Name</th><th>Format</th><th>Version</th><th>Created by</th><th>Use</th><th>Columns</th></tr></thead>
-                <tbody>${done}</tbody>
-            </table>
-            ${approved.length ? "" : '<div class="empty">No approved templates yet.</div>'}
-        </section>`;
+        ${pending.length ? `<div class="approval-list">${cards}</div>` : '<section class="panel"><div class="empty">No templates are waiting for approval.</div></section>'}`;
 }
 
-function headerDiff(template) {
-    const current = state.templates.find(item => item.formatType === template.formatType && item.active);
-    const next = template.fields.map(field => field.headerName).join(", ");
-    const previous = current ? current.fields.map(field => field.headerName).join(", ") : "none in use";
-    return previous + " → " + next;
-}
 
 function endpointApprovals() {
     const waiting = (state.subscribers || []).filter(subscriber => subscriber.endpointStatus === "PENDING");
@@ -577,26 +561,6 @@ function endpointApprovals() {
     </table></section>`;
 }
 
-function tablesHtml(template) {
-    const groups = new Map();
-    template.fields.forEach(field => {
-        const table = field.sourceTable || "List record";
-        if (!groups.has(table)) groups.set(table, []);
-        groups.get(table).push(field);
-    });
-    return [...groups.entries()].map(([table, fields]) => `
-        <div class="source-table">
-            <h3>Table: ${esc(table)}${table !== "List record" ? ` <span class="muted link-note">· matched on BNP_ID</span>` : ""}</h3>
-            <table>
-                <thead><tr><th>Column</th><th>Data</th><th>Export header</th></tr></thead>
-                <tbody>${fields.map(field => `<tr>
-                    <td>${esc(field.sourceColumn)}</td>
-                    <td>${esc(field.description || field.sourceColumn)}</td>
-                    <td>${esc(field.headerName)}</td>
-                </tr>`).join("")}</tbody>
-            </table>
-        </div>`).join("");
-}
 
 function quarantineHtml() {
     const rows = state.quarantine.map(record => `<tr>
@@ -616,6 +580,27 @@ function quarantineHtml() {
             </table>
             ${state.quarantine.length ? "" : '<div class="empty">No quarantined records.</div>'}
         </section>`;
+}
+
+/** One entry per template of a format: its name, the version in use (if approved) and the newest version. */
+function templateFamilies(formatType) {
+    const families = new Map();
+    state.templates.filter(template => template.formatType === formatType).forEach(template => {
+        const family = families.get(template.familyId) || { id: template.familyId, name: template.name, inUse: null, latest: template };
+        if (template.active) family.inUse = template;
+        if (template.versionNumber > family.latest.versionNumber) family.latest = template;
+        families.set(template.familyId, family);
+    });
+    return [...families.values()].sort((a, b) => a.name.localeCompare(b.name));
+}
+
+/** Template choices for a subscriber: only templates with an approved version can be picked. */
+function templateOptions(formatType, selected) {
+    const families = templateFamilies(formatType);
+    if (!families.length) return `<option value="">No ${esc(formatType)} template yet</option>`;
+    return `<option value="" ${selected ? "" : "selected"}>Choose a template…</option>` + families.map(family =>
+        `<option value="${family.id}" ${String(family.id) === String(selected) ? "selected" : ""} ${family.inUse ? "" : "disabled"}>${esc(family.name)}${family.inUse ? "" : " (waiting for approval)"}</option>`
+    ).join("");
 }
 
 function select(name, values, selected) {
@@ -811,7 +796,9 @@ async function onClick(event) {
 }
 
 async function onSubmit(event) {
-    if (event.target.id === "login-form") {
+    // getAttribute, not .id: a form with a field named "id" (the edit form) shadows form.id.
+    const formId = event.target.getAttribute("id");
+    if (formId === "login-form") {
         event.preventDefault();
         const form = new FormData(event.target);
         const error = document.getElementById("login-error");
@@ -828,7 +815,7 @@ async function onSubmit(event) {
         }
         return;
     }
-    if (event.target.id === "add-form") {
+    if (formId === "add-form") {
         event.preventDefault();
         const form = new FormData(event.target);
         try {
@@ -842,6 +829,7 @@ async function onSubmit(event) {
                     businessLine: form.get("businessLine"),
                     region: form.get("region"),
                     cftEndpoint: form.get("cftEndpoint"),
+                    templateId: Number(form.get("templateId")) || null,
                     active: true
                 }
             });
@@ -853,7 +841,7 @@ async function onSubmit(event) {
             toast(error.message, "error");
         }
     }
-    if (event.target.id === "edit-form") {
+    if (formId === "edit-form") {
         event.preventDefault();
         const form = new FormData(event.target);
         try {
@@ -867,6 +855,7 @@ async function onSubmit(event) {
                     businessLine: form.get("businessLine"),
                     region: form.get("region"),
                     cftEndpoint: form.get("cftEndpoint"),
+                    templateId: Number(form.get("templateId")) || null,
                     active: form.get("active") === "on"
                 }
             });
@@ -878,9 +867,16 @@ async function onSubmit(event) {
             toast(error.message, "error");
         }
     }
-    if (event.target.id === "template-form") {
+    if (formId === "template-form") {
         event.preventDefault();
         readDraftFromForm();
+        const draft = state.templateDraft;
+        const clash = !draft.familyId && templateFamilies(draft.formatType)
+            .find(family => family.name.toLowerCase() === (draft.name || "").trim().toLowerCase());
+        if (clash) {
+            toast(`A ${draft.formatType} template named "${clash.name}" already exists. Pick it under Template to save a new version of it.`, "error");
+            return;
+        }
         try {
             const saved = await api("/api/format-templates", {
                 method: "POST",
@@ -895,8 +891,9 @@ async function onSubmit(event) {
                 }
             });
             toast(saved.name + " version " + saved.versionNumber + " is pending for approval", "success");
-            state.templateDraft = null;
             await refresh();
+            // Stay on the template just saved, so its next version can be edited straight away.
+            state.templateDraft = draftFromActive(saved.formatType, saved.familyId);
             renderTemplatesKeepingFilter();
         } catch (error) {
             toast(error.message, "error");
@@ -906,8 +903,18 @@ async function onSubmit(event) {
 
 let searchTimer;
 function onInput(event) {
+    if (event.target.name === "formatType" && event.target.closest("#add-form, #edit-form")) {
+        const pick = event.target.form.querySelector('select[name="templateId"]');
+        if (pick) pick.innerHTML = templateOptions(event.target.value, null);
+        return;
+    }
     if (event.target.id === "template-format") {
         state.templateDraft = draftFromActive(event.target.value);
+        renderTemplatesKeepingFilter();
+        return;
+    }
+    if (event.target.id === "template-pick") {
+        state.templateDraft = draftFromActive(state.templateDraft ? state.templateDraft.formatType : "CSV", event.target.value || null);
         renderTemplatesKeepingFilter();
         return;
     }
@@ -1069,6 +1076,7 @@ function openEdit(subscriber) {
                 <input type="hidden" name="id" value="${subscriber.id}">
                 <label>Name<input name="name" value="${esc(subscriber.name)}" required></label>
                 <label>Format<select name="formatType">${options(["CSV", "XML"], subscriber.formatType)}</select></label>
+                <label>Template<select name="templateId" required>${templateOptions(subscriber.formatType, subscriber.templateFamilyId)}</select></label>
                 <label>Scope<select name="scope">${options(["ALL", "SANCTIONS", "WORLDCHECK", "PFA"], subscriber.scope)}</select></label>
                 <label>Mode<select name="exportMode">${options(["FULL", "DELTA"], subscriber.exportMode)}</select></label>
                 <label>Business line<input name="businessLine" value="${esc(subscriber.businessLine || "")}"></label>
@@ -1087,7 +1095,7 @@ function readDraftFromForm() {
     const form = document.getElementById("template-form");
     if (!form || !state.templateDraft) return;
     const data = new FormData(form);
-    state.templateDraft.name = data.get("name");
+    if (!state.templateDraft.familyId) state.templateDraft.name = data.get("name");
     state.templateDraft.formatType = data.get("formatType");
     state.templateDraft.fields.forEach((field, index) => {
         const header = form.querySelector(`[data-draft-header="${index}"]`);

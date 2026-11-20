@@ -10,6 +10,8 @@ public record SubscriberRequest(
         String businessLine,
         String region,
         String cftEndpoint,
-        Boolean active
+        Boolean active,
+        /** The template (family id) to build this subscriber's files with. Required when creating. */
+        Long templateId
 ) {
 }

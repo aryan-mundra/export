@@ -20,14 +20,22 @@ public class FormatTemplate {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
+    /**
+     * All versions of one named template share a family id: the id of its first version.
+     * Subscribers choose a template by this id and always get its approved version in use.
+     */
+    private Long familyId;
+
     @Column(nullable = false)
     private String name;
 
     @Column(nullable = false)
     private String formatType;
 
+    /** Version within the template (family), starting at 1. */
     private int versionNumber;
 
+    /** The approved version in use for its template. At most one per family. */
     private boolean active;
 
     @Column(nullable = false)

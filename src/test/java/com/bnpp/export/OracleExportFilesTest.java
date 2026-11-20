@@ -94,8 +94,13 @@ class OracleExportFilesTest {
 
     @Test
     void csvAndXmlFilesHoldExactlyTheDatabaseValues() throws Exception {
-        approveTemplate("CSV", true);
-        approveTemplate("XML", false);
+        // Every subscriber gets the template of its format that this test builds.
+        Long csvTemplate = approveTemplate("CSV", true);
+        Long xmlTemplate = approveTemplate("XML", false);
+        for (SubscriberProfile subscriber : subscriberRepository.findAll()) {
+            subscriber.setTemplateFamilyId("CSV".equals(subscriber.getFormatType()) ? csvTemplate : xmlTemplate);
+            subscriberRepository.save(subscriber);
+        }
 
         // The review step counts in SQL; the export streams the records. Both must agree.
         var review = orchestrator.preview(VERSION, null, null);
@@ -256,7 +261,8 @@ class OracleExportFilesTest {
 
     // ---- set-up ----
 
-    private void approveTemplate(String format, boolean csv) throws Exception {
+    /** Saves and approves a template; returns its id (family id) for subscribers to choose. */
+    private Long approveTemplate(String format, boolean csv) throws Exception {
         StringBuilder fields = new StringBuilder();
         for (Column column : COLUMNS) {
             if (!fields.isEmpty()) {
@@ -279,6 +285,8 @@ class OracleExportFilesTest {
         Number id = com.jayway.jsonpath.JsonPath.read(saved.getResponse().getContentAsString(), "$.id");
         mockMvc.perform(post("/api/format-templates/" + id + "/approve").with(user("approver").roles("APPROVER")))
                 .andExpect(status().isOk());
+        Number familyId = com.jayway.jsonpath.JsonPath.read(saved.getResponse().getContentAsString(), "$.familyId");
+        return familyId.longValue();
     }
 
     private ExportJob await(Long id) throws InterruptedException {

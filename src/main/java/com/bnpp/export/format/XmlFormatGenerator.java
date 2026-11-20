@@ -64,11 +64,9 @@ public class XmlFormatGenerator implements ExportFormat {
 
     @Override
     public RecordWriter open(Path target, Long versionId, String subscriberName, Long templateId) throws IOException {
-        List<FormatField> fields = templateId == null
-                ? formatTemplateService.activeFields(FORMAT)
-                : formatTemplateService.fields(templateId);
+        List<FormatField> fields = formatTemplateService.fields(templateId);
         if (fields.isEmpty()) {
-            throw new IllegalStateException("No approved XML template. Create one on the Format Templates page and have it approved.");
+            throw new IllegalStateException("No approved XML template for this subscriber. Choose one on the Subscribers page.");
         }
         LocalDateTime generated = LocalDateTime.now();
         Path body = target.resolveSibling(target.getFileName() + ".body");

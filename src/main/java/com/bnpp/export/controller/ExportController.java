@@ -61,6 +61,7 @@ public class ExportController {
     private final ExportJobSubscriberStatusRepository statusRepository;
     private final MockProperties mockProperties;
     private final AuditService auditService;
+    private final FormatTemplateService formatTemplateService;
 
     public ExportController(ExportOrchestrator orchestrator,
                             SubscriberRepository subscriberRepository,
@@ -68,7 +69,8 @@ public class ExportController {
                             DeliveryRepository deliveryRepository,
                             ExportJobSubscriberStatusRepository statusRepository,
                             MockProperties mockProperties,
-                            AuditService auditService) {
+                            AuditService auditService,
+                            FormatTemplateService formatTemplateService) {
         this.orchestrator = orchestrator;
         this.subscriberRepository = subscriberRepository;
         this.quarantineRepository = quarantineRepository;
@@ -76,6 +78,7 @@ public class ExportController {
         this.statusRepository = statusRepository;
         this.mockProperties = mockProperties;
         this.auditService = auditService;
+        this.formatTemplateService = formatTemplateService;
     }
 
     @GetMapping("/dashboard")
@@ -109,6 +112,8 @@ public class ExportController {
         }
         SubscriberProfile profile = new SubscriberProfile();
         apply(profile, request, name);
+        profile.setTemplateFamilyId(request.templateId());
+        formatTemplateService.checkChoice(profile.getTemplateFamilyId(), profile.getFormatType());
         profile.setActive(request.active() == null || request.active());
         gateNewEndpoint(profile, null);
         SubscriberProfile saved = subscriberRepository.save(profile);
@@ -119,6 +124,7 @@ public class ExportController {
     private String summary(SubscriberProfile profile) {
         return profile.getName() + ": " + profile.getFormatType() + " " + profile.getScope() + " " + profile.getExportMode()
                 + ", endpoint " + (profile.getCftEndpoint() == null ? "none" : profile.getCftEndpoint() + " (" + profile.getEndpointStatus() + ")")
+                + ", template " + java.util.Objects.toString(formatTemplateService.templateName(profile.getTemplateFamilyId()), "none")
                 + (profile.isActive() ? ", active" : ", inactive");
     }
 
@@ -133,8 +139,16 @@ public class ExportController {
                     throw new ResponseStatusException(CONFLICT, "A subscriber named " + name + " already exists");
                 });
         String previousEndpoint = profile.getCftEndpoint();
+        String previousFormat = profile.getFormatType();
         String before = summary(profile);
         apply(profile, request, name);
+        if (request.templateId() != null) {
+            profile.setTemplateFamilyId(request.templateId());
+        }
+        // A new template, or a new format, must be checked; an unchanged choice is left as it is.
+        if (request.templateId() != null || !profile.getFormatType().equals(previousFormat)) {
+            formatTemplateService.checkChoice(profile.getTemplateFamilyId(), profile.getFormatType());
+        }
         if (request.active() != null) {
             profile.setActive(request.active());
         }
@@ -304,6 +318,7 @@ public class ExportController {
     }
 
     private SubscriberProfile decorate(SubscriberProfile subscriber) {
+        subscriber.setTemplateName(formatTemplateService.templateName(subscriber.getTemplateFamilyId()));
         deliveryRepository.findFirstBySubscriberIdOrderByCreatedAtDesc(subscriber.getId()).ifPresent(delivery -> {
             subscriber.setLastDeliveryStatus(delivery.getStatus());
             subscriber.setLastDeliveredAt(delivery.getDeliveredAt());

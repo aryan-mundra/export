@@ -21,4 +21,6 @@ public interface SubscriberRepository extends JpaRepository<SubscriberProfile, L
     boolean existsByCftEndpointIgnoreCaseAndEndpointStatus(String cftEndpoint, String endpointStatus);
 
     List<SubscriberProfile> findByFormatTypeIgnoreCaseAndActiveTrueOrderByNameAsc(String formatType);
+
+    List<SubscriberProfile> findByTemplateFamilyIdOrderByNameAsc(Long templateFamilyId);
 }

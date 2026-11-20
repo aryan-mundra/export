@@ -39,6 +39,13 @@ public class SubscriberProfile {
 
     private String cftEndpoint;
 
+    /** The template (family id) this subscriber's files are built with. */
+    private Long templateFamilyId;
+
+    /** Name of the chosen template, filled in for display. */
+    @jakarta.persistence.Transient
+    private String templateName;
+
     private String endpointStatus = "APPROVED";
 
     private boolean active = true;

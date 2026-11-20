@@ -769,6 +769,8 @@ tbody tr:last-child td { border-bottom: 0; }
 .approval-head { display: flex; justify-content: space-between; gap: 12px; align-items: center; }
 .approval-head h2 { margin: 0; font-family: var(--display); font-size: 20px; letter-spacing: -.02em; }
 .approval-card p { margin: 8px 0; }
+.approval-tables { margin: 10px 0 0; padding-left: 18px; display: grid; gap: 6px; }
+.approval-tables strong { font-family: ui-monospace, "Cascadia Code", Consolas, monospace; font-size: 13px; }
 .source-table { margin-top: 16px; }
 .source-table h3 { margin: 0 0 8px; font-size: 14px; }
 

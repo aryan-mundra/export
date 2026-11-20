@@ -8,11 +8,15 @@ import java.util.Optional;
 
 public interface FormatTemplateRepository extends JpaRepository<FormatTemplate, Long> {
 
-    List<FormatTemplate> findAllByOrderByFormatTypeAscVersionNumberDesc();
+    List<FormatTemplate> findAllByOrderByFormatTypeAscNameAscVersionNumberDesc();
 
-    Optional<FormatTemplate> findFirstByFormatTypeAndActiveTrueOrderByVersionNumberDesc(String formatType);
+    /** The approved version in use of a template. */
+    Optional<FormatTemplate> findFirstByFamilyIdAndActiveTrueOrderByVersionNumberDesc(Long familyId);
 
-    List<FormatTemplate> findByFormatTypeAndActiveTrue(String formatType);
+    List<FormatTemplate> findByFamilyIdAndActiveTrue(Long familyId);
 
-    Optional<FormatTemplate> findFirstByFormatTypeOrderByVersionNumberDesc(String formatType);
+    Optional<FormatTemplate> findFirstByFamilyIdOrderByVersionNumberDesc(Long familyId);
+
+    /** The newest version of the template with this name and format, if any. */
+    Optional<FormatTemplate> findFirstByFormatTypeAndNameIgnoreCaseOrderByVersionNumberDesc(String formatType, String name);
 }

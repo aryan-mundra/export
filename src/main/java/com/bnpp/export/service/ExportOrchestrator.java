@@ -122,7 +122,7 @@ public class ExportOrchestrator {
 
     public ExportPreview preview(Long versionId, LocalDate fromDate, LocalDate toDate) {
         CertifiedVersion version = requireVersion(versionId);
-        List<String> columns = decisionColumns(null);
+        List<String> columns = decisionColumns();
         List<ExportPreview.SubscriberPreview> rows = new ArrayList<>();
         for (SubscriberProfile subscriber : subscriberRepository.findByActiveTrueOrderByIdAsc()) {
             rows.add(previewSubscriber(version, subscriber, fromDate, toDate, columns));
@@ -148,11 +148,6 @@ public class ExportOrchestrator {
         job.setToDate(toDate);
         job.setListCode(version.getListCode());
         job.setListName(version.getListName());
-        FormatTemplate csvTemplate = formatTemplateService.activeTemplate("CSV").orElse(null);
-        if (csvTemplate != null) {
-            job.setFormatTemplateId(csvTemplate.getId());
-            job.setFormatTemplateVersion(csvTemplate.getVersionNumber());
-        }
         job.setTriggeredBy(StringUtils.defaultIfBlank(triggeredBy, CurrentUser.displayName()));
         job.setStatus("PENDING");
         job.setTotalSubscribers(subscribers.size());
@@ -319,13 +314,15 @@ public class ExportOrchestrator {
         if (format == null) {
             throw new ResponseStatusException(BAD_REQUEST, "Unsupported format " + subscriber.getFormatType());
         }
-        List<String> columns = decisionColumns(null);
-        List<FormatField> fields = formatTemplateService.activeFields(format.formatType());
+        List<String> columns = decisionColumns();
+        FormatTemplate template = formatTemplateService.inUse(subscriber.getTemplateFamilyId())
+                .orElseThrow(() -> new ResponseStatusException(BAD_REQUEST, noTemplate(subscriber)));
+        List<FormatField> fields = formatTemplateService.fields(template.getId());
         StorageService.PendingFile pending = storageService.reserve(
                 subscriber.getName() + "_sample", version.getVersionId(), format.fileExtension());
         long written;
         try {
-            try (ExportFormat.RecordWriter writer = format.open(pending.temp(), version.getVersionId(), subscriber.getName(), null)) {
+            try (ExportFormat.RecordWriter writer = format.open(pending.temp(), version.getVersionId(), subscriber.getName(), template.getId())) {
                 try {
                     // Stops reading as soon as the sample is full, instead of reading the whole version.
                     recordBatchProvider.stream(version.getVersionId(), subscriber.getScope(), subscriber.getExportMode(),
@@ -474,7 +471,9 @@ public class ExportOrchestrator {
         }
         RecordSelector.Counts counts = countFor(version, subscriber, fromDate, toDate, columns);
         String outcome;
-        if (counts.rejected() > 0) {
+        if (formatTemplateService.inUse(subscriber.getTemplateFamilyId()).isEmpty()) {
+            outcome = "Will fail: " + noTemplate(subscriber);
+        } else if (counts.rejected() > 0) {
             outcome = "Held until omissions are accepted";
         } else if (counts.valid() == 0 && datesApplied) {
             outcome = "Empty delta window. Nothing will be sent";
@@ -492,6 +491,7 @@ public class ExportOrchestrator {
                                                         int records,
                                                         int quarantined,
                                                         String outcome) {
+        FormatTemplate template = formatTemplateService.inUse(subscriber.getTemplateFamilyId()).orElse(null);
         return new ExportPreview.SubscriberPreview(
                 subscriber.getId(),
                 subscriber.getName(),
@@ -500,6 +500,8 @@ public class ExportOrchestrator {
                 subscriber.getScope(),
                 subscriber.getBusinessLine(),
                 subscriber.getRegion(),
+                template == null ? null : template.getName(),
+                template == null ? null : template.getVersionNumber(),
                 included,
                 datesApplied,
                 records,
@@ -544,7 +546,7 @@ public class ExportOrchestrator {
             }
 
             requireVersion(job.getVersionId());
-            rememberTemplate(status, job);
+            rememberTemplate(status, subscriber);
             ExportFormat format = formats.get(subscriber.getFormatType().toUpperCase(Locale.ROOT));
             if (format == null) {
                 throw new IllegalArgumentException("Unsupported format " + subscriber.getFormatType());
@@ -636,23 +638,18 @@ public class ExportOrchestrator {
                 file.getFileName() + " released by " + CurrentUser.displayName());
     }
 
-    private void rememberTemplate(ExportJobSubscriberStatus status, ExportJob job) {
-        if ("CSV".equalsIgnoreCase(status.getFormatType()) && job.getFormatTemplateId() != null) {
-            status.setFormatTemplateId(job.getFormatTemplateId());
-            status.setFormatTemplateVersion(job.getFormatTemplateVersion());
-            return;
-        }
-        formatTemplateService.activeTemplate(status.getFormatType()).ifPresent(template -> {
-            status.setFormatTemplateId(template.getId());
-            status.setFormatTemplateVersion(template.getVersionNumber());
-        });
+    /** Records which template version this subscriber's file is built with: the one in use for its template. */
+    private void rememberTemplate(ExportJobSubscriberStatus status, SubscriberProfile subscriber) {
+        FormatTemplate template = formatTemplateService.inUse(subscriber.getTemplateFamilyId())
+                .orElseThrow(() -> new IllegalStateException(noTemplate(subscriber)));
+        status.setFormatTemplateId(template.getId());
+        status.setFormatTemplateVersion(template.getVersionNumber());
     }
 
-    private Long templateIdFor(ExportJob job, ExportJobSubscriberStatus status) {
-        if ("CSV".equalsIgnoreCase(status.getFormatType())) {
-            return job.getFormatTemplateId();
-        }
-        return status.getFormatTemplateId();
+    private static String noTemplate(SubscriberProfile subscriber) {
+        return subscriber.getTemplateFamilyId() == null
+                ? subscriber.getName() + " has no template. Choose one on the Subscribers page."
+                : "The template of " + subscriber.getName() + " has no approved version yet.";
     }
 
     /**
@@ -664,11 +661,9 @@ public class ExportOrchestrator {
                                 SubscriberProfile subscriber,
                                 ExportJobSubscriberStatus status,
                                 ExportFormat format) {
-        List<String> columns = decisionColumns(job.getFormatTemplateId());
-        Long templateId = templateIdFor(job, status);
-        List<FormatField> fields = templateId == null
-                ? formatTemplateService.activeFields(format.formatType())
-                : formatTemplateService.fields(templateId);
+        List<String> columns = decisionColumns();
+        Long templateId = status.getFormatTemplateId();
+        List<FormatField> fields = formatTemplateService.fields(templateId);
         StorageService.PendingFile pending = storageService.reserve(subscriber.getName(), job.getVersionId(), format.fileExtension());
         Streamed run = new Streamed();
         List<QuarantineRecord> held = new ArrayList<>();
@@ -788,27 +783,19 @@ public class ExportOrchestrator {
         return (int) Math.min(Integer.MAX_VALUE, value);
     }
 
-    private List<String> decisionColumns(Long templateId) {
-        List<FormatField> fields = templateId == null
-                ? formatTemplateService.activeFields("CSV")
-                : formatTemplateService.fields(templateId);
-        // Golden-source columns are joined after the quality check, so only list record columns decide a hold.
-        return qualityChecker.columnsForRun(fields.stream()
-                .filter(field -> !field.isGoldenSource())
-                .map(FormatField::getSourceColumn)
-                .toList());
+    /** The list entry fields that must not be blank; an entry with a blank one is quarantined. */
+    private List<String> decisionColumns() {
+        return qualityChecker.columnsForRun(List.of());
     }
 
     private String reviewToken(CertifiedVersion version,
                                LocalDate fromDate,
                                LocalDate toDate,
                                List<ExportPreview.SubscriberPreview> rows) {
-        FormatTemplate template = formatTemplateService.activeTemplate("CSV").orElse(null);
         StringBuilder raw = new StringBuilder();
         raw.append(version.getVersionId()).append('|')
                 .append(fromDate).append('|')
-                .append(toDate).append('|')
-                .append(template == null ? "none" : template.getId() + ":" + template.getVersionNumber());
+                .append(toDate);
         for (ExportPreview.SubscriberPreview row : rows) {
             raw.append('|').append(row.subscriberId())
                     .append(':').append(row.included())
@@ -816,7 +803,9 @@ public class ExportOrchestrator {
                     .append(':').append(row.quarantined())
                     .append(':').append(row.formatType())
                     .append(':').append(row.exportMode())
-                    .append(':').append(row.scope());
+                    .append(':').append(row.scope())
+                    .append(':').append(row.templateName())
+                    .append(':').append(row.templateVersion());
         }
         try {
             byte[] digest = java.security.MessageDigest.getInstance("SHA-256")

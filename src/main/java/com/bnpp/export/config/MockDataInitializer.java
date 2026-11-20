@@ -12,6 +12,7 @@ import java.sql.Timestamp;
 import java.time.LocalDateTime;
 
 @Component
+@org.springframework.core.annotation.Order(50)
 @ConditionalOnProperty(name = "export.demo-data", havingValue = "true")
 public class MockDataInitializer implements ApplicationListener<ApplicationReadyEvent> {
 

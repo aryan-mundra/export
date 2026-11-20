@@ -22,6 +22,9 @@ public record ExportPreview(
             String scope,
             String businessLine,
             String region,
+            /** Template the file will be built with (its version in use), or null when the subscriber has none. */
+            String templateName,
+            Integer templateVersion,
             boolean included,
             boolean datesApplied,
             int records,

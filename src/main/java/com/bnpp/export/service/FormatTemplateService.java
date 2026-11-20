@@ -6,6 +6,7 @@ import com.bnpp.export.dto.FormatTemplateResponse;
 import com.bnpp.export.format.XmlFormatGenerator;
 import com.bnpp.export.model.FormatField;
 import com.bnpp.export.model.FormatTemplate;
+import com.bnpp.export.model.SubscriberProfile;
 import com.bnpp.export.repository.FormatFieldRepository;
 import com.bnpp.export.repository.FormatTemplateRepository;
 import com.bnpp.export.repository.SubscriberRepository;
@@ -98,7 +99,7 @@ public class FormatTemplateService {
     }
 
     public List<FormatTemplateResponse> list() {
-        return templateRepository.findAllByOrderByFormatTypeAscVersionNumberDesc().stream()
+        return templateRepository.findAllByOrderByFormatTypeAscNameAscVersionNumberDesc().stream()
                 .map(this::toResponse)
                 .toList();
     }
@@ -110,46 +111,81 @@ public class FormatTemplateService {
         return fieldRepository.findByTemplateIdOrderByPositionAsc(templateId);
     }
 
-    public List<FormatField> activeFields(String formatType) {
-        return activeTemplate(formatType)
-                .map(template -> fieldRepository.findByTemplateIdOrderByPositionAsc(template.getId()))
-                .orElse(List.of());
+    /** The approved version in use of a template (family), if it has one. */
+    public java.util.Optional<FormatTemplate> inUse(Long familyId) {
+        if (familyId == null) {
+            return java.util.Optional.empty();
+        }
+        return templateRepository.findFirstByFamilyIdAndActiveTrueOrderByVersionNumberDesc(familyId);
     }
 
-    public java.util.Optional<FormatTemplate> activeTemplate(String formatType) {
-        return templateRepository.findFirstByFormatTypeAndActiveTrueOrderByVersionNumberDesc(formatType.toUpperCase(Locale.ROOT));
-    }
-
+    /**
+     * Saves a new version for approval. A name that already exists for this format adds a version to
+     * that template; a new name starts a new template at version 1. Nothing changes for subscribers
+     * until an approver approves the version.
+     */
     @Transactional
     public FormatTemplateResponse save(FormatTemplateRequest request) {
         String formatType = normalizeFormat(request.formatType());
+        String name = request.name().trim();
         List<FormatFieldRequest> fields = validateFields(request.fields(), true, formatType);
-        int nextVersion = templateRepository.findFirstByFormatTypeOrderByVersionNumberDesc(formatType)
-                .map(existing -> existing.getVersionNumber() + 1)
-                .orElse(1);
+        FormatTemplate latest = templateRepository
+                .findFirstByFormatTypeAndNameIgnoreCaseOrderByVersionNumberDesc(formatType, name).orElse(null);
         FormatTemplate template = new FormatTemplate();
-        template.setName(request.name().trim());
+        template.setName(latest == null ? name : latest.getName());
         template.setFormatType(formatType);
-        template.setVersionNumber(nextVersion);
+        template.setFamilyId(latest == null ? null : latest.getFamilyId());
+        template.setVersionNumber(latest == null ? 1 : latest.getVersionNumber() + 1);
         template.setActive(false);
         template.setStatus("PENDING");
         template.setCreatedBy(CurrentUser.username());
         template.setCreatedByName(CurrentUser.displayName());
         template = templateRepository.save(template);
+        if (template.getFamilyId() == null) {
+            template.setFamilyId(template.getId());
+            template = templateRepository.save(template);
+        }
         saveFields(template.getId(), fields);
         auditService.template(template.getId(), "TEMPLATE_SUBMITTED",
-                formatType + " v" + nextVersion + " \"" + template.getName() + "\": " + describe(fields));
+                formatType + " \"" + template.getName() + "\" v" + template.getVersionNumber() + ": " + describe(fields));
         return toResponse(template);
     }
 
     private String describe(List<FormatFieldRequest> fields) {
         return String.join(", ", fields.stream()
-                .map(field -> (field.sourceTable() == null ? SOURCE_TABLE : field.sourceTable()) + "." + field.sourceColumn()
-                        + (field.sourceColumn().equals(field.headerName()) ? "" : " as " + field.headerName())
-                        + (field.joinColumn() == null ? "" : " (linked on " + field.joinColumn() + " = record " + field.joinField() + ")"))
+                .map(field -> field.sourceTable() + "." + field.sourceColumn()
+                        + (field.sourceColumn().equals(field.headerName()) ? "" : " as " + field.headerName()))
                 .toList());
     }
 
+    /**
+     * Checks a template chosen for a subscriber: it must exist, be of the subscriber's format and have
+     * an approved version. Returns the template's name for messages and the audit log.
+     */
+    public String checkChoice(Long familyId, String formatType) {
+        if (familyId == null) {
+            throw new ResponseStatusException(BAD_REQUEST, "Choose a template for this subscriber");
+        }
+        FormatTemplate latest = templateRepository.findFirstByFamilyIdOrderByVersionNumberDesc(familyId)
+                .orElseThrow(() -> new ResponseStatusException(BAD_REQUEST, "Unknown template"));
+        if (!latest.getFormatType().equalsIgnoreCase(formatType)) {
+            throw new ResponseStatusException(BAD_REQUEST, "\"" + latest.getName() + "\" is a " + latest.getFormatType()
+                    + " template; this subscriber receives " + formatType + " files");
+        }
+        if (inUse(familyId).isEmpty()) {
+            throw new ResponseStatusException(BAD_REQUEST, "\"" + latest.getName()
+                    + "\" has no approved version yet. It can be chosen once an approver approves it.");
+        }
+        return latest.getName();
+    }
+
+    /** The name of a template, for display; null when there is none. */
+    public String templateName(Long familyId) {
+        return familyId == null ? null : templateRepository.findFirstByFamilyIdOrderByVersionNumberDesc(familyId)
+                .map(FormatTemplate::getName).orElse(null);
+    }
+
+    /** Puts a version in use for its own template only; other templates are not affected. */
     @Transactional
     public FormatTemplateResponse approve(Long id) {
         if (!CurrentUser.approver()) {
@@ -160,7 +196,7 @@ public class FormatTemplateService {
         if (!"PENDING".equals(template.getStatus())) {
             throw new ResponseStatusException(CONFLICT, "This template is not waiting for approval");
         }
-        templateRepository.findByFormatTypeAndActiveTrue(template.getFormatType()).forEach(existing -> {
+        templateRepository.findByFamilyIdAndActiveTrue(template.getFamilyId()).forEach(existing -> {
             existing.setActive(false);
             templateRepository.save(existing);
         });
@@ -171,15 +207,16 @@ public class FormatTemplateService {
         template.setApprovedAt(LocalDateTime.now());
         templateRepository.save(template);
         auditService.template(template.getId(), "TEMPLATE_APPROVED",
-                template.getFormatType() + " v" + template.getVersionNumber() + " is now in use");
+                template.getFormatType() + " \"" + template.getName() + "\" v" + template.getVersionNumber() + " is now in use");
         return toResponse(template);
     }
 
-    @Transactional
     /**
-     * Demo databases only: starts CSV and XML off with an approved template built from GS_PARTY, so
-     * exports work out of the box. Real databases get no templates; users build them from their gs_ tables.
+     * Demo databases only: starts CSV and XML off with an approved template built from GS_PARTY, and
+     * gives every demo subscriber without a template the one for its format, so exports work out of
+     * the box. Real databases get no templates; users build them from their gs_ tables.
      */
+    @Transactional
     public void seedDemoTemplates() {
         SourceCatalogService.SourceTable party = sourceCatalog.table("GS_PARTY").orElse(null);
         if (party == null || party.keyColumn() == null) {
@@ -191,20 +228,29 @@ public class FormatTemplateService {
             return;
         }
         String table = party.name();
-        seedFormatIfMissing("CSV", "CSV Export", List.of(
+        Long csv = seedIfMissing("CSV", "CSV Export", List.of(
                 new FormatFieldRequest(table, key, "bnp_id", key, SourceCatalogService.RECORD_KEY),
                 new FormatFieldRequest(table, column.apply("FULL_NAME"), "name", key, SourceCatalogService.RECORD_KEY),
                 new FormatFieldRequest(table, column.apply("NATIONALITY"), "nationality", key, SourceCatalogService.RECORD_KEY)));
-        seedFormatIfMissing(XmlFormatGenerator.FORMAT, "XML Export", List.of(
+        Long xml = seedIfMissing(XmlFormatGenerator.FORMAT, "XML Export", List.of(
                 new FormatFieldRequest(table, key, "BnpId", key, SourceCatalogService.RECORD_KEY),
                 new FormatFieldRequest(table, column.apply("FULL_NAME"), "Name", key, SourceCatalogService.RECORD_KEY),
                 new FormatFieldRequest(table, column.apply("NATIONALITY"), "Nationality", key, SourceCatalogService.RECORD_KEY),
                 new FormatFieldRequest(table, column.apply("PARTY_TYPE"), "PartyType", key, SourceCatalogService.RECORD_KEY)));
+        for (SubscriberProfile subscriber : subscriberRepository.findAll()) {
+            if (subscriber.getTemplateFamilyId() == null) {
+                subscriber.setTemplateFamilyId("CSV".equals(subscriber.getFormatType()) ? csv : xml);
+                subscriberRepository.save(subscriber);
+            }
+        }
     }
 
-    private void seedFormatIfMissing(String formatType, String name, List<FormatFieldRequest> defaultFields) {
-        if (templateRepository.findFirstByFormatTypeOrderByVersionNumberDesc(formatType).isPresent()) {
-            return;
+    /** Returns the template (family id) with this name, creating an approved version 1 if it is missing. */
+    private Long seedIfMissing(String formatType, String name, List<FormatFieldRequest> defaultFields) {
+        FormatTemplate existing = templateRepository
+                .findFirstByFormatTypeAndNameIgnoreCaseOrderByVersionNumberDesc(formatType, name).orElse(null);
+        if (existing != null) {
+            return existing.getFamilyId();
         }
         FormatTemplate template = new FormatTemplate();
         template.setName(name);
@@ -215,7 +261,10 @@ public class FormatTemplateService {
         template.setCreatedBy("system");
         template.setCreatedByName("System");
         template = templateRepository.save(template);
+        template.setFamilyId(template.getId());
+        templateRepository.save(template);
         saveFields(template.getId(), defaultFields);
+        return template.getFamilyId();
     }
 
     private void saveFields(Long templateId, List<FormatFieldRequest> fields) {
@@ -341,8 +390,11 @@ public class FormatTemplateService {
         return new Link(table.keyColumn(), SourceCatalogService.RECORD_KEY);
     }
 
-    private List<String> usedBy(String formatType) {
-        return subscriberRepository.findByFormatTypeIgnoreCaseAndActiveTrueOrderByNameAsc(formatType).stream()
+    private List<String> usedBy(Long familyId) {
+        if (familyId == null) {
+            return List.of();
+        }
+        return subscriberRepository.findByTemplateFamilyIdOrderByNameAsc(familyId).stream()
                 .map(subscriber -> subscriber.getName())
                 .toList();
     }
@@ -375,6 +427,7 @@ public class FormatTemplateService {
                 .toList();
         return new FormatTemplateResponse(
                 template.getId(),
+                template.getFamilyId(),
                 template.getName(),
                 template.getFormatType(),
                 template.getVersionNumber(),
@@ -387,6 +440,6 @@ public class FormatTemplateService {
                 template.getApprovedAt(),
                 template.getCreatedAt(),
                 fields,
-                usedBy(template.getFormatType()));
+                usedBy(template.getFamilyId()));
     }
 }

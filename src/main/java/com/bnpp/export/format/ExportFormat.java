@@ -18,7 +18,7 @@ public interface ExportFormat {
     /**
      * Opens a writer that streams records into {@code target}.
      *
-     * @param templateId the template whose columns to write, or null for the format's template in use
+     * @param templateId the template version whose columns to write
      */
     RecordWriter open(Path target, Long versionId, String subscriberName, Long templateId) throws IOException;
 

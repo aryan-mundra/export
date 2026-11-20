@@ -20,8 +20,8 @@
 
 | Table | One row per | Written when |
 |---|---|---|
-| `ver_export_subscriber` | Subscriber (format, scope, mode, delivery endpoint) | A subscriber is added, changed, or its endpoint approved |
-| `ver_export_template` | Version of a CSV or XML template | A template is submitted or approved |
+| `ver_export_subscriber` | Subscriber (format, scope, mode, delivery endpoint, chosen template) | A subscriber is added, changed, or its endpoint approved |
+| `ver_export_template` | Version of a named CSV or XML template (versions of one template share `family_id`; one approved version is in use per template) | A template is submitted or approved |
 | `ver_export_template_field` | Column in a template version (gs_ table, column, name in the file, order; matched on BNP_ID) | A template is submitted |
 | `ver_export_job` | Export run of a certified version (date window, counters, final status) | An export is triggered, and as it progresses |
 | `ver_export_job_subscriber` | Subscriber within a run (status, hold reason, retries, acceptance) | Each subscriber is processed, accepted, released, or retried |
