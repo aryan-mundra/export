@@ -33,7 +33,6 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.GET, "/api/auth/config").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/format-templates/*/approve").hasRole("APPROVER")
                         .requestMatchers(HttpMethod.POST, "/api/subscribers/*/approve-endpoint").hasRole("APPROVER")
-                        .requestMatchers(HttpMethod.POST, "/api/jobs/*/subscribers/*/approve-send").hasRole("APPROVER")
                         .anyRequest().authenticated())
                 .csrf(csrf -> csrf.disable())
                 .cors(cors -> cors.configurationSource(corsConfigurationSource()))

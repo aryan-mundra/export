@@ -33,7 +33,6 @@ public interface ExportJobRepository extends JpaRepository<ExportJob, Long> {
                    j.failedSubscribers = :failed,
                    j.heldSubscribers = :held,
                    j.skippedSubscribers = :skipped,
-                   j.awaitingApprovals = :awaiting,
                    j.totalRecordsProcessed = :processed,
                    j.totalRecordsQuarantined = :quarantined
              where j.id = :id
@@ -43,7 +42,6 @@ public interface ExportJobRepository extends JpaRepository<ExportJob, Long> {
                        @Param("failed") int failed,
                        @Param("held") int held,
                        @Param("skipped") int skipped,
-                       @Param("awaiting") int awaiting,
                        @Param("processed") long processed,
                        @Param("quarantined") long quarantined);
 

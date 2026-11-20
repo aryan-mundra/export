@@ -160,7 +160,6 @@ public class ExportOrchestrator {
         job.setFailedSubscribers(0);
         job.setHeldSubscribers(0);
         job.setSkippedSubscribers(0);
-        job.setAwaitingApprovals(0);
         job.setTotalRecordsProcessed(0);
         job.setTotalRecordsQuarantined(0);
         job = exportJobRepository.save(job);
@@ -245,12 +244,7 @@ public class ExportOrchestrator {
         qualityChecker.acceptOmissions(status.getId(), acceptedBy);
         status.setAcceptedBy(acceptedBy);
         status.setAcceptedAt(LocalDateTime.now());
-        if (subscriber.isSecretList() && StringUtils.isNotBlank(status.getFilePath())) {
-            status.setStatus("AWAITING_APPROVAL");
-            statusRepository.save(status);
-            audit(jobId, subscriber.getId(), "OMISSIONS_ACCEPTED",
-                    acceptedBy + " accepted the omissions. The send still needs an approver.");
-        } else if (StringUtils.isBlank(status.getFilePath())) {
+        if (StringUtils.isBlank(status.getFilePath())) {
             status.setStatus("COMPLETED");
             status.setCompletedAt(LocalDateTime.now());
             status.setErrorMessage("Omissions accepted. No file was sent.");
@@ -259,21 +253,6 @@ public class ExportOrchestrator {
         } else {
             release(job, subscriber, status);
         }
-        settle(job.getId());
-        return detail(requireJob(jobId));
-    }
-
-    public JobDetailResponse approveSend(Long jobId, Long statusId) {
-        if (!CurrentUser.approver()) {
-            throw new ResponseStatusException(FORBIDDEN, "Only an approver can release a secret-list send");
-        }
-        ExportJob job = requireJob(jobId);
-        ExportJobSubscriberStatus status = requireStatus(jobId, statusId);
-        if (!"AWAITING_APPROVAL".equals(status.getStatus())) {
-            throw new ResponseStatusException(CONFLICT, "This send is not waiting for an approver");
-        }
-        SubscriberProfile subscriber = requireSubscriber(status.getSubscriberId());
-        release(job, subscriber, status);
         settle(job.getId());
         return detail(requireJob(jobId));
     }
@@ -400,7 +379,7 @@ public class ExportOrchestrator {
                 exportJobRepository.countByStatus("COMPLETED"),
                 exportJobRepository.countByStatus("FAILED"),
                 exportJobRepository.countByStatusIn(List.of("PENDING", "IN_PROGRESS")),
-                statusRepository.countByStatusIn(List.of("FAILED", "HELD", "AWAITING_APPROVAL")),
+                statusRepository.countByStatusIn(List.of("FAILED", "HELD")),
                 quarantineRepository.countByPatchAppliedFalse(),
                 recent);
     }
@@ -495,12 +474,8 @@ public class ExportOrchestrator {
         }
         RecordSelector.Counts counts = countFor(version, subscriber, fromDate, toDate, columns);
         String outcome;
-        if (counts.rejected() > 0 && subscriber.isSecretList()) {
-            outcome = "Held for omissions, then an approver must release the send";
-        } else if (counts.rejected() > 0) {
+        if (counts.rejected() > 0) {
             outcome = "Held until omissions are accepted";
-        } else if (subscriber.isSecretList()) {
-            outcome = "Approver must release this send";
         } else if (counts.valid() == 0 && datesApplied) {
             outcome = "Empty delta window. Nothing will be sent";
         } else if ("DELTA".equalsIgnoreCase(subscriber.getExportMode())) {
@@ -527,7 +502,6 @@ public class ExportOrchestrator {
                 subscriber.getRegion(),
                 included,
                 datesApplied,
-                subscriber.isSecretList(),
                 records,
                 quarantined,
                 outcome);
@@ -600,14 +574,6 @@ public class ExportOrchestrator {
             if (streamed.rejected > 0) {
                 hold(job, status, streamed.rejected + " record(s) held. The file is not sent until the omissions are accepted.");
                 statusRepository.save(status);
-                return;
-            }
-            if (subscriber.isSecretList()) {
-                status.setStatus("AWAITING_APPROVAL");
-                status.setHoldReason("Secret list. An approver must release the send.");
-                status.setCompletedAt(LocalDateTime.now());
-                statusRepository.save(status);
-                audit(job.getId(), subscriber.getId(), "SEND_WAITING", status.getHoldReason());
                 return;
             }
             DeliveryRecord delivery = deliverWithRetry(
@@ -927,7 +893,6 @@ public class ExportOrchestrator {
                 countStatus(rows, "FAILED"),
                 countStatus(rows, "HELD"),
                 countStatus(rows, "SKIPPED"),
-                countStatus(rows, "AWAITING_APPROVAL"),
                 rows.stream().mapToLong(ExportJobSubscriberStatus::getRecordsProcessed).sum(),
                 rows.stream().mapToLong(ExportJobSubscriberStatus::getRecordsQuarantined).sum());
     }
@@ -946,7 +911,7 @@ public class ExportOrchestrator {
         }
         if (job.getFailedSubscribers() > 0) {
             finish(jobId, "FAILED", job.getFailedSubscribers() + " of " + job.getTotalSubscribers() + " subscribers failed");
-        } else if (job.getHeldSubscribers() > 0 || job.getAwaitingApprovals() > 0) {
+        } else if (job.getHeldSubscribers() > 0) {
             finish(jobId, "HELD", holdMessage(job));
         } else {
             finish(jobId, "COMPLETED", null);
@@ -957,9 +922,6 @@ public class ExportOrchestrator {
         List<String> parts = new ArrayList<>();
         if (job.getHeldSubscribers() > 0) {
             parts.add(job.getHeldSubscribers() + " file(s) held until omissions are accepted");
-        }
-        if (job.getAwaitingApprovals() > 0) {
-            parts.add(job.getAwaitingApprovals() + " secret-list send(s) waiting for an approver");
         }
         return String.join(". ", parts);
     }
@@ -1025,7 +987,6 @@ public class ExportOrchestrator {
                 job.getFailedSubscribers(),
                 job.getHeldSubscribers(),
                 job.getSkippedSubscribers(),
-                job.getAwaitingApprovals(),
                 job.getCreatedAt());
     }
 
@@ -1070,7 +1031,6 @@ public class ExportOrchestrator {
                 job.getFailedSubscribers(),
                 job.getHeldSubscribers(),
                 job.getSkippedSubscribers(),
-                job.getAwaitingApprovals(),
                 job.getTotalRecordsProcessed(),
                 job.getTotalRecordsQuarantined(),
                 job.getStartedAt(),

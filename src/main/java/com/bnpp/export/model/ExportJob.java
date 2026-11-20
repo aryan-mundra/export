@@ -51,8 +51,6 @@ public class ExportJob {
 
     private int skippedSubscribers;
 
-    private int awaitingApprovals;
-
     private long totalRecordsProcessed;
 
     private long totalRecordsQuarantined;

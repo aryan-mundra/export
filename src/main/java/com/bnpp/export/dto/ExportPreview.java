@@ -24,7 +24,6 @@ public record ExportPreview(
             String region,
             boolean included,
             boolean datesApplied,
-            boolean secretList,
             int records,
             int quarantined,
             String outcome

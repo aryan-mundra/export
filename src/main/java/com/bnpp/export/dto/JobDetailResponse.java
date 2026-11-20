@@ -17,7 +17,6 @@ public record JobDetailResponse(
         int failedSubscribers,
         int heldSubscribers,
         int skippedSubscribers,
-        int awaitingApprovals,
         long totalRecordsProcessed,
         long totalRecordsQuarantined,
         LocalDateTime startedAt,

@@ -46,6 +46,35 @@ mvn test "-Dtest=OracleExportFilesTest"
 It covers commas, quotes, apostrophes, `&` and `<`, non-ASCII letters, leading and trailing spaces, line breaks,
 missing `GS_*` rows (empty cell in CSV, element left out in XML) and records with several `GS_*` rows (`AL…; ID…`).
 
+## Without Docker: SQL Developer
+
+SQL Developer is a client: it connects to an Oracle database and runs scripts, but it is not a database. Use it with
+any Oracle database you can reach, instead of steps 1 and 2 below:
+
+- **A test schema on your company's Oracle** (best: closest to production). Ask the DBA for an empty schema with
+  `CREATE SESSION`, `CREATE TABLE` and a tablespace quota. Never use a production schema: the mock script drops and
+  recreates its tables.
+- **Oracle Database 23ai Free installed on Windows** (no Docker; download it from oracle.com). It creates the
+  pluggable database `FREEPDB1` on port 1521; create a user in it for the module.
+
+Then:
+
+1. In SQL Developer, create a connection to that schema (host, port, service name, user, password) and open it.
+2. Set *Tools > Preferences > Environment > Encoding* to **UTF-8** before opening the script, or the accented and
+   Greek test names are stored garbled.
+3. Open `db/oracle/regliss-mock.sql` and run it as a script with **F5** (*Run Script*), not F9. On Oracle 19c the
+   first run reports "table or view does not exist" for each `DROP TABLE IF EXISTS`: remove `IF EXISTS` from those
+   lines, and ignore those errors on the first run.
+4. Check it loaded: `SELECT COUNT(*) FROM VER_VERSION_MEMBER;` returns 400.
+5. Start the module as in step 3 below, pointing it at the same schema:
+
+```powershell
+$env:REGLISS_DB_URL = "jdbc:oracle:thin:@//HOST:1521/SERVICE_NAME"; $env:REGLISS_DB_USER = "YOUR_USER"; $env:REGLISS_DB_PASSWORD = "YOUR_PASSWORD"
+```
+
+Use the same host, port, service name and user as the SQL Developer connection. After an export, look at the
+`VER_EXPORT_*` tables in SQL Developer, using the queries in step 4.
+
 ## 1. Start Oracle in Docker
 
 Needs [Docker Desktop](https://www.docker.com/products/docker-desktop/). This uses Oracle Database 23ai Free

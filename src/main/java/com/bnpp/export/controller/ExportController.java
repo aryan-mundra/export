@@ -110,7 +110,6 @@ public class ExportController {
         SubscriberProfile profile = new SubscriberProfile();
         apply(profile, request, name);
         profile.setActive(request.active() == null || request.active());
-        profile.setSecretList(Boolean.TRUE.equals(request.secretList()));
         gateNewEndpoint(profile, null);
         SubscriberProfile saved = subscriberRepository.save(profile);
         auditService.subscriber(saved.getId(), "SUBSCRIBER_CREATED", summary(saved));
@@ -120,7 +119,6 @@ public class ExportController {
     private String summary(SubscriberProfile profile) {
         return profile.getName() + ": " + profile.getFormatType() + " " + profile.getScope() + " " + profile.getExportMode()
                 + ", endpoint " + (profile.getCftEndpoint() == null ? "none" : profile.getCftEndpoint() + " (" + profile.getEndpointStatus() + ")")
-                + (profile.isSecretList() ? ", secret list" : "")
                 + (profile.isActive() ? ", active" : ", inactive");
     }
 
@@ -137,9 +135,6 @@ public class ExportController {
         String previousEndpoint = profile.getCftEndpoint();
         String before = summary(profile);
         apply(profile, request, name);
-        if (request.secretList() != null) {
-            profile.setSecretList(request.secretList());
-        }
         if (request.active() != null) {
             profile.setActive(request.active());
         }
@@ -218,11 +213,6 @@ public class ExportController {
     @PostMapping("/jobs/{jobId}/subscribers/{statusId}/accept")
     public JobDetailResponse accept(@PathVariable Long jobId, @PathVariable Long statusId) {
         return orchestrator.acceptOmissions(jobId, statusId);
-    }
-
-    @PostMapping("/jobs/{jobId}/subscribers/{statusId}/approve-send")
-    public JobDetailResponse approveSend(@PathVariable Long jobId, @PathVariable Long statusId) {
-        return orchestrator.approveSend(jobId, statusId);
     }
 
     @PostMapping("/jobs/{jobId}/subscribers/{statusId}/retry")

@@ -39,8 +39,6 @@ public class SubscriberProfile {
 
     private String cftEndpoint;
 
-    private boolean secretList;
-
     private String endpointStatus = "APPROVED";
 
     private boolean active = true;

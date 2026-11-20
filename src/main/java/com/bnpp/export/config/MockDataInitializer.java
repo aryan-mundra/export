@@ -46,11 +46,11 @@ public class MockDataInitializer implements ApplicationListener<ApplicationReady
             String endpoint = "http://cft.local/inbox/" + row[0].toLowerCase().replace(' ', '-');
             jdbcTemplate.update("""
                             INSERT INTO ver_export_subscriber
-                            (name, format_type, scope, export_mode, business_line, region, cft_endpoint, secret_list,
+                            (name, format_type, scope, export_mode, business_line, region, cft_endpoint,
                              endpoint_status, active, max_batch_size, export_timeout_minutes, created_at, updated_at)
-                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                             """,
-                    row[0], row[1], row[2], row[3], row[4], row[5], endpoint, false, "APPROVED", true,
+                    row[0], row[1], row[2], row[3], row[4], row[5], endpoint, "APPROVED", true,
                     10_000, 60, timestamp, timestamp);
         }
         log.info("Inserted {} mock subscribers", SEED.length);

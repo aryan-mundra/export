@@ -321,9 +321,6 @@ function subscriberActions(detail, subscriber) {
     if (subscriber.status === "HELD") {
         buttons.push(`<button class="btn-edit" type="button" data-accept="${detail.id}:${subscriber.id}">Accept omissions</button>`);
     }
-    if (subscriber.status === "AWAITING_APPROVAL" && state.user && state.user.role === "APPROVER") {
-        buttons.push(`<button class="btn-primary" type="button" data-release="${detail.id}:${subscriber.id}">Release send</button>`);
-    }
     if (subscriber.status === "FAILED") {
         buttons.push(`<button class="btn-edit" type="button" data-retry="${detail.id}:${subscriber.id}">Retry</button>`);
     }
@@ -362,7 +359,6 @@ function subscribersHtml() {
                 <input name="businessLine" placeholder="Business line">
                 <input name="region" placeholder="Region">
                 <input name="cftEndpoint" placeholder="Delivery endpoint">
-                <label class="check"><input type="checkbox" name="secretList"> Secret list</label>
                 <button class="btn-primary" type="submit">+ Add</button>
             </form>
             <table>
@@ -640,8 +636,7 @@ function label(status) {
         QUARANTINED: "Quarantined",
         SUCCESS: "Success",
         HELD: "Held",
-        SKIPPED: "Other list",
-        AWAITING_APPROVAL: "Needs approver"
+        SKIPPED: "Other list"
     })[status] || status || "";
 }
 
@@ -679,11 +674,6 @@ async function onClick(event) {
     const accept = event.target.closest("[data-accept]");
     if (accept) {
         await postJobAction(accept.dataset.accept, "accept", "Omissions accepted");
-        return;
-    }
-    const release = event.target.closest("[data-release]");
-    if (release) {
-        await postJobAction(release.dataset.release, "approve-send", "Send released");
         return;
     }
     const retry = event.target.closest("[data-retry]");
@@ -852,7 +842,6 @@ async function onSubmit(event) {
                     businessLine: form.get("businessLine"),
                     region: form.get("region"),
                     cftEndpoint: form.get("cftEndpoint"),
-                    secretList: form.get("secretList") === "on",
                     active: true
                 }
             });
@@ -878,7 +867,6 @@ async function onSubmit(event) {
                     businessLine: form.get("businessLine"),
                     region: form.get("region"),
                     cftEndpoint: form.get("cftEndpoint"),
-                    secretList: form.get("secretList") === "on",
                     active: form.get("active") === "on"
                 }
             });
@@ -1086,7 +1074,6 @@ function openEdit(subscriber) {
                 <label>Business line<input name="businessLine" value="${esc(subscriber.businessLine || "")}"></label>
                 <label>Region<input name="region" value="${esc(subscriber.region || "")}"></label>
                 <label>Delivery endpoint<input name="cftEndpoint" value="${esc(subscriber.cftEndpoint || "")}"></label>
-                <label class="check"><input type="checkbox" name="secretList" ${subscriber.secretList ? "checked" : ""}> Secret list</label>
                 <label class="check"><input type="checkbox" name="active" ${subscriber.active ? "checked" : ""}> Active</label>
                 <div class="modal-actions">
                     <button class="btn-ghost" id="edit-cancel" type="button">Cancel</button>

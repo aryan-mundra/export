@@ -20,7 +20,7 @@
 
 | Table | One row per | Written when |
 |---|---|---|
-| `ver_export_subscriber` | Subscriber (format, scope, mode, delivery endpoint, secret-list flag) | A subscriber is added, changed, or its endpoint approved |
+| `ver_export_subscriber` | Subscriber (format, scope, mode, delivery endpoint) | A subscriber is added, changed, or its endpoint approved |
 | `ver_export_template` | Version of a CSV or XML template | A template is submitted or approved |
 | `ver_export_template_field` | Column in a template version (gs_ table, column, name in the file, order; matched on BNP_ID) | A template is submitted |
 | `ver_export_job` | Export run of a certified version (date window, counters, final status) | An export is triggered, and as it progresses |
@@ -40,6 +40,6 @@ the database (see `db/oracle/regliss-mock.sql` and `docs/oracle-testing.md`).
 
 | Entity type | Actions |
 |---|---|
-| `EXPORT_JOB` | `EXPORT_QUEUED`, `EXPORT_STARTED`, `SUBSCRIBER_STARTED`, `SUBSCRIBER_SKIPPED`, `SUBSCRIBER_HELD`, `SEND_WAITING`, `OMISSIONS_ACCEPTED`, `DELIVERY_SUCCESS`, `SUBSCRIBER_FAILED`, `EXPORT_COMPLETED`, `EXPORT_HELD`, `EXPORT_FAILED` |
+| `EXPORT_JOB` | `EXPORT_QUEUED`, `EXPORT_STARTED`, `SUBSCRIBER_STARTED`, `SUBSCRIBER_SKIPPED`, `SUBSCRIBER_HELD`, `OMISSIONS_ACCEPTED`, `DELIVERY_SUCCESS`, `SUBSCRIBER_FAILED`, `EXPORT_COMPLETED`, `EXPORT_HELD`, `EXPORT_FAILED` |
 | `SUBSCRIBER` | `SUBSCRIBER_CREATED`, `SUBSCRIBER_UPDATED` (before and after), `ENDPOINT_APPROVED`, `SUBSCRIBER_DELETED` |
 | `TEMPLATE` | `TEMPLATE_SUBMITTED` (columns and names), `TEMPLATE_APPROVED` |

@@ -10,7 +10,6 @@ public record SubscriberRequest(
         String businessLine,
         String region,
         String cftEndpoint,
-        Boolean active,
-        Boolean secretList
+        Boolean active
 ) {
 }

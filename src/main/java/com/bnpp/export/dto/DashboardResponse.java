@@ -28,7 +28,6 @@ public record DashboardResponse(
             int failedSubscribers,
             int heldSubscribers,
             int skippedSubscribers,
-            int awaitingApprovals,
             LocalDateTime createdAt
     ) {
     }
