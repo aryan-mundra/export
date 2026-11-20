@@ -1,0 +1,22 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "export-module",
+      "runtimeExecutable": "C:\\Users\\Mundra\\.m2\\wrapper\\dists\\apache-maven-3.9.9-bin\\33b4b2b4\\apache-maven-3.9.9\\bin\\mvn.cmd",
+      "runtimeArgs": ["-q", "-o", "-Djava.version=17", "spring-boot:run"],
+      "port": 8082
+    },
+    {
+      "name": "export-module-oracle-profile-on-h2",
+      "runtimeExecutable": "C:\\Users\\Mundra\\.m2\\wrapper\\dists\\apache-maven-3.9.9-bin\\33b4b2b4\\apache-maven-3.9.9\\bin\\mvn.cmd",
+      "runtimeArgs": ["-q", "-o", "-Djava.version=17", "-Dspring-boot.run.profiles=oracle", "spring-boot:run"],
+      "env": {
+        "REGLISS_DB_URL": "jdbc:h2:file:C:/Users/Mundra/AppData/Local/Temp/claude/f3e817c6f960d5b6/dbd15160-08be-4afd-95ac-29b169eb9836/scratchpad/oracletest;MODE=Oracle",
+        "REGLISS_DB_USER": "regliss",
+        "REGLISS_DB_PASSWORD": "regliss"
+      },
+      "port": 8082
+    }
+  ]
+}
