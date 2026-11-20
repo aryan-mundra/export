@@ -5,7 +5,6 @@ import com.bnpp.export.dto.DashboardResponse;
 import com.bnpp.export.dto.DeliveryProofResponse;
 import com.bnpp.export.dto.ExportPreview;
 import com.bnpp.export.dto.JobDetailResponse;
-import com.bnpp.export.format.CsvFormatGenerator;
 import com.bnpp.export.format.ExportFormat;
 import com.bnpp.export.format.RecordBatchProvider;
 import com.bnpp.export.model.CertifiedVersion;
@@ -40,6 +39,8 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
+import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.time.LocalDate;
@@ -73,6 +74,9 @@ public class ExportOrchestrator {
     private final CftDeliveryService cftDeliveryService;
     private final FormatTemplateService formatTemplateService;
     private final Map<String, ExportFormat> formats;
+    private final GoldenSourceEnricher goldenSourceEnricher;
+    private final ExportManifestService manifestService;
+    private final AuditService auditService;
     private final ExportOrchestrator self;
 
     public ExportOrchestrator(SubscriberRepository subscriberRepository,
@@ -88,7 +92,13 @@ public class ExportOrchestrator {
                               CftDeliveryService cftDeliveryService,
                               FormatTemplateService formatTemplateService,
                               List<ExportFormat> formatList,
+                              GoldenSourceEnricher goldenSourceEnricher,
+                              ExportManifestService manifestService,
+                              AuditService auditService,
                               @Lazy ExportOrchestrator self) {
+        this.goldenSourceEnricher = goldenSourceEnricher;
+        this.manifestService = manifestService;
+        this.auditService = auditService;
         this.subscriberRepository = subscriberRepository;
         this.exportJobRepository = exportJobRepository;
         this.statusRepository = statusRepository;
@@ -180,10 +190,48 @@ public class ExportOrchestrator {
                 processSubscriber(job, subscriber, null);
             }
             settle(job.getId());
-        } catch (RuntimeException ex) {
+        } catch (RuntimeException | Error ex) {
             log.error("Export job {} failed", jobId, ex);
-            exportJobRepository.findById(jobId).ifPresent(found -> finish(jobId, "FAILED", ex.getMessage()));
+            exportJobRepository.findById(jobId).ifPresent(found -> finish(jobId, "FAILED", reason(ex)));
         }
+    }
+
+    /** A readable reason, also for errors that carry no message. */
+    private static String reason(Throwable ex) {
+        String message = ex.getMessage();
+        return ex instanceof Error
+                ? "Internal error (" + ex.getClass().getSimpleName() + (message == null ? "" : ": " + message) + ")"
+                : StringUtils.defaultIfBlank(message, ex.getClass().getSimpleName());
+    }
+
+    /**
+     * Runs at start-up. An export cannot survive a restart, so any job or subscriber still marked
+     * PENDING or IN_PROGRESS was interrupted: mark it FAILED with the reason, so it can be retried
+     * instead of showing "In progress" forever. Unfinished files are removed.
+     *
+     * Assumes one application instance per database. With several instances, give jobs an owner
+     * and heartbeat before enabling this on all of them.
+     */
+    public int recoverInterruptedExports() {
+        String reason = "Interrupted: the application stopped while this export was running. Retry the failed subscribers.";
+        int recovered = 0;
+        for (ExportJob job : exportJobRepository.findByStatusIn(List.of("PENDING", "IN_PROGRESS"))) {
+            for (ExportJobSubscriberStatus status : statusRepository.findByExportJobIdOrderByIdAsc(job.getId())) {
+                if ("PENDING".equals(status.getStatus()) || "IN_PROGRESS".equals(status.getStatus())) {
+                    status.setStatus("FAILED");
+                    status.setErrorMessage(reason);
+                    status.setCompletedAt(LocalDateTime.now());
+                    statusRepository.save(status);
+                    audit(job.getId(), status.getSubscriberId(), "SUBSCRIBER_FAILED", reason);
+                }
+            }
+            recount(job.getId());
+            finish(job.getId(), "FAILED", reason);
+            recovered++;
+        }
+        manifestService.failUnfinished();
+        storageService.deleteUnfinishedFiles();
+        return recovered;
     }
 
     public JobDetailResponse acceptOmissions(Long jobId, Long statusId) {
@@ -288,18 +336,52 @@ public class ExportOrchestrator {
                 .filter(item -> onList(subscriber, item.getListCode()))
                 .findFirst()
                 .orElseThrow(() -> new ResponseStatusException(BAD_REQUEST, "No certified version matches this subscriber"));
-        Collected collected = collect(version, subscriber, null, null, null, decisionColumns(null));
-        List<Map<String, Object>> rows = collected.valid.stream().limit(10).toList();
-        if (rows.isEmpty()) {
-            throw new ResponseStatusException(BAD_REQUEST, "No records are available for a sample");
-        }
         ExportFormat format = formats.get(subscriber.getFormatType().toUpperCase(Locale.ROOT));
         if (format == null) {
             throw new ResponseStatusException(BAD_REQUEST, "Unsupported format " + subscriber.getFormatType());
         }
-        byte[] content = format.generate(version.getVersionId(), subscriber.getName(), rows);
-        ExportFile file = storageService.store(
-                subscriber.getName() + "_sample", version.getVersionId(), format.formatType(), format.fileExtension(), content);
+        List<String> columns = decisionColumns(null);
+        List<FormatField> fields = formatTemplateService.activeFields(format.formatType());
+        StorageService.PendingFile pending = storageService.reserve(
+                subscriber.getName() + "_sample", version.getVersionId(), format.fileExtension());
+        long written;
+        try {
+            try (ExportFormat.RecordWriter writer = format.open(pending.temp(), version.getVersionId(), subscriber.getName(), null)) {
+                try {
+                    // Stops reading as soon as the sample is full, instead of reading the whole version.
+                    recordBatchProvider.stream(version.getVersionId(), subscriber.getScope(), subscriber.getExportMode(),
+                            null, null, 50, batch -> {
+                                List<Map<String, Object>> accepted = batch.stream()
+                                        .filter(record -> profileMatch(subscriber, record))
+                                        .filter(record -> qualityChecker.validateRecord(record, columns) == null)
+                                        .toList();
+                                for (Map<String, Object> record : goldenSourceEnricher.enrich(accepted, fields)) {
+                                    if (writer.count() >= SAMPLE_RECORDS) {
+                                        throw new StopStreaming();
+                                    }
+                                    write(writer, record);
+                                }
+                                if (writer.count() >= SAMPLE_RECORDS) {
+                                    throw new StopStreaming();
+                                }
+                            });
+                } catch (StopStreaming ignored) {
+                    // the sample is full
+                }
+                written = writer.count();
+                if (written > 0) {
+                    writer.finish();
+                }
+            }
+        } catch (IOException ex) {
+            storageService.discard(pending);
+            throw new UncheckedIOException("Unable to write the sample file", ex);
+        }
+        if (written == 0) {
+            storageService.discard(pending);
+            throw new ResponseStatusException(BAD_REQUEST, "No records are available for a sample");
+        }
+        ExportFile file = storageService.commit(pending, format.formatType());
         Resource resource = storageService.load(file.getFilePath());
         MediaType mediaType = file.getFileName().endsWith(".csv") ? MediaType.parseMediaType("text/csv") : MediaType.APPLICATION_XML;
         return ResponseEntity.ok()
@@ -411,22 +493,22 @@ public class ExportOrchestrator {
             return previewRow(subscriber, false, false, 0, 0,
                     "Not on the " + version.getListName() + " list");
         }
-        Collected collected = collect(version, subscriber, fromDate, toDate, null, columns);
+        RecordSelector.Counts counts = countFor(version, subscriber, fromDate, toDate, columns);
         String outcome;
-        if (collected.rejected.size() > 0 && subscriber.isSecretList()) {
+        if (counts.rejected() > 0 && subscriber.isSecretList()) {
             outcome = "Held for omissions, then an approver must release the send";
-        } else if (collected.rejected.size() > 0) {
+        } else if (counts.rejected() > 0) {
             outcome = "Held until omissions are accepted";
         } else if (subscriber.isSecretList()) {
             outcome = "Approver must release this send";
-        } else if (collected.valid.isEmpty() && datesApplied) {
+        } else if (counts.valid() == 0 && datesApplied) {
             outcome = "Empty delta window. Nothing will be sent";
         } else if ("DELTA".equalsIgnoreCase(subscriber.getExportMode())) {
             outcome = datesApplied ? "Delta file for the date window" : "Delta file. Every change is included";
         } else {
             outcome = "Full file. The date window does not apply";
         }
-        return previewRow(subscriber, true, datesApplied, collected.valid.size(), collected.rejected.size(), outcome);
+        return previewRow(subscriber, true, datesApplied, toInt(counts.valid()), toInt(counts.rejected()), outcome);
     }
 
     private ExportPreview.SubscriberPreview previewRow(SubscriberProfile subscriber,
@@ -487,43 +569,36 @@ public class ExportOrchestrator {
                 return;
             }
 
-            CertifiedVersion version = requireVersion(job.getVersionId());
-            Collected collected = collect(version, subscriber, job.getFromDate(), job.getToDate(), status, decisionColumns(job.getFormatTemplateId()));
-            List<QuarantineRecord> quarantined = new ArrayList<>();
-            for (Rejected rejected : collected.rejected) {
-                quarantined.add(quarantine(job, status, subscriber, rejected.record(), rejected.reason()));
-            }
-            qualityChecker.saveQuarantineRecords(quarantined);
-            status.setRecordsProcessed(collected.valid.size());
-            status.setRecordsQuarantined(quarantined.size());
+            requireVersion(job.getVersionId());
             rememberTemplate(status, job);
+            ExportFormat format = formats.get(subscriber.getFormatType().toUpperCase(Locale.ROOT));
+            if (format == null) {
+                throw new IllegalArgumentException("Unsupported format " + subscriber.getFormatType());
+            }
+            Streamed streamed = streamFile(job, subscriber, status, format);
+            status.setRecordsProcessed(toInt(streamed.valid));
+            status.setRecordsQuarantined(toInt(streamed.rejected));
 
-            if (collected.valid.isEmpty()) {
-                if (quarantined.isEmpty()) {
+            if (streamed.file == null) {
+                if (streamed.rejected == 0) {
                     status.setStatus("COMPLETED");
                     status.setCompletedAt(LocalDateTime.now());
                     if ("DELTA".equalsIgnoreCase(subscriber.getExportMode()) && job.getFromDate() != null) {
                         status.setHoldReason("Empty delta window. Nothing was sent.");
                     }
                 } else {
-                    hold(job, status, quarantined.size() + " record(s) held. No file was built.");
+                    hold(job, status, streamed.rejected + " record(s) held. No file was built.");
                 }
                 statusRepository.save(status);
                 return;
             }
 
-            ExportFormat format = formats.get(subscriber.getFormatType().toUpperCase(Locale.ROOT));
-            if (format == null) {
-                throw new IllegalArgumentException("Unsupported format " + subscriber.getFormatType());
-            }
-            byte[] content = render(job, subscriber, format, collected.valid);
-            ExportFile file = storageService.store(
-                    subscriber.getName(), job.getVersionId(), format.formatType(), format.fileExtension(), content);
+            ExportFile file = streamed.file;
             status.setFilePath(file.getFilePath());
             status.setFileSizeBytes(file.getFileSize());
 
-            if (!quarantined.isEmpty()) {
-                hold(job, status, quarantined.size() + " record(s) held. The file is not sent until the omissions are accepted.");
+            if (streamed.rejected > 0) {
+                hold(job, status, streamed.rejected + " record(s) held. The file is not sent until the omissions are accepted.");
                 statusRepository.save(status);
                 return;
             }
@@ -536,7 +611,7 @@ public class ExportOrchestrator {
                 return;
             }
             DeliveryRecord delivery = deliverWithRetry(
-                    subscriber, file, job, status, collected.valid.size(),
+                    subscriber, file, job, status, toInt(streamed.valid),
                     status.getFormatTemplateId(), status.getFormatTemplateVersion(), null);
             if (!"SUCCESS".equals(delivery.getStatus())) {
                 throw new IllegalStateException(StringUtils.defaultIfBlank(delivery.getErrorMessage(), "Delivery failed"));
@@ -545,15 +620,17 @@ public class ExportOrchestrator {
             status.setStatus("COMPLETED");
             status.setCompletedAt(LocalDateTime.now());
             statusRepository.save(status);
+            manifestService.markSent(file.getFilePath(), delivery.getArchivePath());
             audit(job.getId(), subscriber.getId(), "DELIVERY_SUCCESS",
-                    file.getFileName() + " (" + collected.valid.size() + " records, tracking " + delivery.getCftTrackingId() + ")");
-        } catch (RuntimeException ex) {
+                    file.getFileName() + " (" + streamed.valid + " records, tracking " + delivery.getCftTrackingId() + ")");
+        } catch (RuntimeException | Error ex) {
+            // Errors too (out of memory, a broken deployment): a subscriber must never stay "In progress".
             log.warn("Subscriber {} failed on job {}", subscriber.getName(), job.getId(), ex);
             status.setStatus("FAILED");
-            status.setErrorMessage(trim(ex.getMessage()));
+            status.setErrorMessage(trim(reason(ex)));
             status.setCompletedAt(LocalDateTime.now());
             statusRepository.save(status);
-            audit(job.getId(), subscriber.getId(), "SUBSCRIBER_FAILED", ex.getMessage());
+            audit(job.getId(), subscriber.getId(), "SUBSCRIBER_FAILED", reason(ex));
         } finally {
             recount(job.getId());
         }
@@ -588,6 +665,7 @@ public class ExportOrchestrator {
         status.setCompletedAt(LocalDateTime.now());
         status.setErrorMessage(null);
         statusRepository.save(status);
+        manifestService.markSent(status.getFilePath(), delivery.getArchivePath());
         audit(job.getId(), subscriber.getId(), "DELIVERY_SUCCESS",
                 file.getFileName() + " released by " + CurrentUser.displayName());
     }
@@ -604,53 +682,155 @@ public class ExportOrchestrator {
         });
     }
 
-    private byte[] render(ExportJob job, SubscriberProfile subscriber, ExportFormat format, List<Map<String, Object>> rows) {
-        if (format instanceof CsvFormatGenerator csv) {
-            return csv.generate(job.getVersionId(), subscriber.getName(), rows, job.getFormatTemplateId());
+    private Long templateIdFor(ExportJob job, ExportJobSubscriberStatus status) {
+        if ("CSV".equalsIgnoreCase(status.getFormatType())) {
+            return job.getFormatTemplateId();
         }
-        return format.generate(job.getVersionId(), subscriber.getName(), rows);
+        return status.getFormatTemplateId();
     }
 
-    private Collected collect(CertifiedVersion version,
-                              SubscriberProfile subscriber,
-                              LocalDate fromDate,
-                              LocalDate toDate,
-                              ExportJobSubscriberStatus progress,
-                              List<String> columns) {
-        Collected collected = new Collected();
-        recordBatchProvider.stream(
-                version.getVersionId(),
-                subscriber.getScope(),
-                subscriber.getExportMode(),
-                fromDate,
-                toDate,
-                200,
-                batch -> {
-                    for (Map<String, Object> record : batch) {
-                        if (!profileMatch(subscriber, record)) {
-                            continue;
+    /**
+     * Streams one subscriber's file: each batch of records is filtered, quality-checked, joined to
+     * its gs_ values and written to the file and the manifest straight away. Quarantined records are
+     * saved in batches. Nothing accumulates, so memory use does not grow with the size of the file.
+     */
+    private Streamed streamFile(ExportJob job,
+                                SubscriberProfile subscriber,
+                                ExportJobSubscriberStatus status,
+                                ExportFormat format) {
+        List<String> columns = decisionColumns(job.getFormatTemplateId());
+        Long templateId = templateIdFor(job, status);
+        List<FormatField> fields = templateId == null
+                ? formatTemplateService.activeFields(format.formatType())
+                : formatTemplateService.fields(templateId);
+        StorageService.PendingFile pending = storageService.reserve(subscriber.getName(), job.getVersionId(), format.fileExtension());
+        Streamed run = new Streamed();
+        List<QuarantineRecord> held = new ArrayList<>();
+        ExportFormat.RecordWriter writer = null;
+        boolean committed = false;
+        try {
+            ExportFormat.RecordWriter out = format.open(pending.temp(), job.getVersionId(), subscriber.getName(), templateId);
+            writer = out;
+            recordBatchProvider.stream(
+                    job.getVersionId(),
+                    subscriber.getScope(),
+                    subscriber.getExportMode(),
+                    job.getFromDate(),
+                    job.getToDate(),
+                    STREAM_BATCH,
+                    batch -> {
+                        List<Map<String, Object>> accepted = new ArrayList<>(batch.size());
+                        for (Map<String, Object> record : batch) {
+                            if (!profileMatch(subscriber, record)) {
+                                continue;
+                            }
+                            String reason = qualityChecker.validateRecord(record, columns);
+                            if (reason == null) {
+                                accepted.add(record);
+                            } else {
+                                held.add(quarantine(job, status, subscriber, record, reason));
+                                run.rejected++;
+                            }
                         }
-                        String reason = qualityChecker.validateRecord(record, columns);
-                        if (reason == null) {
-                            collected.valid.add(record);
-                        } else {
-                            collected.rejected.add(new Rejected(record, reason));
+                        if (!accepted.isEmpty()) {
+                            if (run.manifest == null) {
+                                run.manifest = manifestService.begin(job, status, subscriber, format.formatType(),
+                                        pending.fileName(), pending.target().toString());
+                            }
+                            for (Map<String, Object> record : goldenSourceEnricher.enrich(accepted, fields)) {
+                                write(out, record);
+                                run.manifest.add(record);
+                                run.valid++;
+                            }
                         }
-                    }
-                    if (progress != null) {
-                        progress.setRecordsProcessed(collected.valid.size());
-                        progress.setRecordsQuarantined(collected.rejected.size());
-                        statusRepository.save(progress);
-                    }
-                });
-        return collected;
+                        if (held.size() >= STREAM_BATCH) {
+                            qualityChecker.saveQuarantineRecords(held);
+                            held.clear();
+                        }
+                        status.setRecordsProcessed(toInt(run.valid));
+                        status.setRecordsQuarantined(toInt(run.rejected));
+                        statusRepository.save(status);
+                    });
+            qualityChecker.saveQuarantineRecords(held);
+            if (run.valid > 0) {
+                out.finish();
+            }
+            writer = null;
+            out.close();
+            if (run.valid == 0) {
+                return run;
+            }
+            ExportFile file = storageService.commit(pending, format.formatType());
+            run.manifest.finish(file);
+            run.file = file;
+            committed = true;
+            return run;
+        } catch (IOException ex) {
+            throw new UncheckedIOException("Unable to write the export file: " + ex.getMessage(), ex);
+        } finally {
+            if (writer != null) {
+                try {
+                    writer.close();
+                } catch (IOException ignored) {
+                    // already failing; the unfinished file is discarded below
+                }
+            }
+            if (!committed) {
+                storageService.discard(pending);
+                if (run.manifest != null) {
+                    run.manifest.fail();
+                }
+            }
+        }
+    }
+
+    private static void write(ExportFormat.RecordWriter writer, Map<String, Object> record) {
+        try {
+            writer.write(record);
+        } catch (IOException ex) {
+            throw new UncheckedIOException("Unable to write the export file: " + ex.getMessage(), ex);
+        }
+    }
+
+    /**
+     * What a subscriber would receive, for the review step: counted in the database when the reader
+     * can do that, otherwise by streaming the records and counting them (still without keeping them).
+     */
+    private RecordSelector.Counts countFor(CertifiedVersion version,
+                                           SubscriberProfile subscriber,
+                                           LocalDate fromDate,
+                                           LocalDate toDate,
+                                           List<String> columns) {
+        RecordSelector.CountRequest request = new RecordSelector.CountRequest(
+                version.getVersionId(), subscriber.getScope(), subscriber.getExportMode(), fromDate, toDate,
+                subscriber.getBusinessLine(), subscriber.getRegion(), columns);
+        return recordBatchProvider.count(request).orElseGet(() -> {
+            long[] counts = new long[2];
+            recordBatchProvider.stream(version.getVersionId(), subscriber.getScope(), subscriber.getExportMode(),
+                    fromDate, toDate, STREAM_BATCH, batch -> {
+                        for (Map<String, Object> record : batch) {
+                            if (profileMatch(subscriber, record)) {
+                                counts[qualityChecker.validateRecord(record, columns) == null ? 0 : 1]++;
+                            }
+                        }
+                    });
+            return new RecordSelector.Counts(counts[0], counts[1]);
+        });
+    }
+
+    private static int toInt(long value) {
+        return (int) Math.min(Integer.MAX_VALUE, value);
     }
 
     private List<String> decisionColumns(Long templateId) {
         List<FormatField> fields = templateId == null
                 ? formatTemplateService.activeFields("CSV")
                 : formatTemplateService.fields(templateId);
-        return qualityChecker.columnsForRun(fields.stream().map(FormatField::getSourceColumn).toList());
+        // Golden-source columns are joined after the quality check, so only list record columns decide a hold.
+        return qualityChecker.columnsForRun(fields.stream()
+                .filter(field -> !field.isGoldenSource())
+                .map(FormatField::getSourceColumn)
+                .toList());
     }
 
     private String reviewToken(CertifiedVersion version,
@@ -801,12 +981,7 @@ public class ExportOrchestrator {
     }
 
     private void audit(Long jobId, Long subscriberId, String action, String details) {
-        ExportAuditLog entry = new ExportAuditLog();
-        entry.setExportJobId(jobId);
-        entry.setSubscriberId(subscriberId);
-        entry.setAction(action);
-        entry.setDetails(trim(details));
-        auditLogRepository.save(entry);
+        auditService.job(jobId, subscriberId, action, details);
     }
 
     private CertifiedVersion requireVersion(Long versionId) {
@@ -879,7 +1054,7 @@ public class ExportOrchestrator {
                         .toList();
         List<JobDetailResponse.AuditEntry> audits =
                 auditLogRepository.findByExportJobIdOrderByTimestampAsc(job.getId()).stream()
-                        .map(entry -> new JobDetailResponse.AuditEntry(entry.getAction(), entry.getDetails(), entry.getTimestamp()))
+                        .map(entry -> new JobDetailResponse.AuditEntry(entry.getAction(), entry.getDetails(), entry.getActor(), entry.getTimestamp()))
                         .toList();
         return new JobDetailResponse(
                 job.getId(),
@@ -913,11 +1088,21 @@ public class ExportOrchestrator {
         return value.length() > 3900 ? value.substring(0, 3900) : value;
     }
 
-    private static final class Collected {
-        private final List<Map<String, Object>> valid = new ArrayList<>();
-        private final List<Rejected> rejected = new ArrayList<>();
+    /** Batch size for reading, quarantining and progress updates while a file streams. */
+    private static final int STREAM_BATCH = 500;
+
+    private static final int SAMPLE_RECORDS = 10;
+
+    private static final class Streamed {
+        private long valid;
+        private long rejected;
+        private ExportManifestService.Manifest manifest;
+        private ExportFile file;
     }
 
-    private record Rejected(Map<String, Object> record, String reason) {
+    private static final class StopStreaming extends RuntimeException {
+        StopStreaming() {
+            super(null, null, false, false);
+        }
     }
 }

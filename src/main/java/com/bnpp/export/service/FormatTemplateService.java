@@ -3,6 +3,7 @@ package com.bnpp.export.service;
 import com.bnpp.export.dto.FormatFieldRequest;
 import com.bnpp.export.dto.FormatTemplateRequest;
 import com.bnpp.export.dto.FormatTemplateResponse;
+import com.bnpp.export.format.XmlFormatGenerator;
 import com.bnpp.export.model.FormatField;
 import com.bnpp.export.model.FormatTemplate;
 import com.bnpp.export.repository.FormatFieldRepository;
@@ -32,8 +33,12 @@ public class FormatTemplateService {
 
     public static final String SOURCE_TABLE = "List record";
 
+    /** The only file formats the module builds. */
+    public static final List<String> FORMATS = List.of("CSV", XmlFormatGenerator.FORMAT);
+
     public static final List<String> SOURCE_COLUMNS = List.of(
             "id", "action", "record_date", "name", "country", "risk_rating");
+
 
     private static final Map<String, String> COLUMN_DETAILS = Map.of(
             "id", "Record identifier",
@@ -46,13 +51,50 @@ public class FormatTemplateService {
     private final FormatTemplateRepository templateRepository;
     private final FormatFieldRepository fieldRepository;
     private final SubscriberRepository subscriberRepository;
+    private final SourceCatalogService sourceCatalog;
+    private final AuditService auditService;
 
     public FormatTemplateService(FormatTemplateRepository templateRepository,
                                  FormatFieldRepository fieldRepository,
-                                 SubscriberRepository subscriberRepository) {
+                                 SubscriberRepository subscriberRepository,
+                                 SourceCatalogService sourceCatalog,
+                                 AuditService auditService) {
         this.templateRepository = templateRepository;
         this.fieldRepository = fieldRepository;
         this.subscriberRepository = subscriberRepository;
+        this.sourceCatalog = sourceCatalog;
+        this.auditService = auditService;
+    }
+
+    /** The built-in list record columns first, then every gs_ table in the source database. */
+    public List<SourceTableResponse> sources() {
+        List<SourceTableResponse> sources = new ArrayList<>();
+        sources.add(new SourceTableResponse(
+                null, SOURCE_TABLE, true, "id", true,
+                SOURCE_COLUMNS.stream()
+                        .map(column -> new SourceColumnResponse(column, null, COLUMN_DETAILS.get(column), false))
+                        .toList()));
+        for (SourceCatalogService.SourceTable table : sourceCatalog.tables()) {
+            boolean linkable = table.keyColumn() != null;
+            sources.add(new SourceTableResponse(
+                    table.name(), table.name(), false, table.keyColumn(), linkable,
+                    table.columns().stream()
+                            .map(column -> new SourceColumnResponse(column.name(), column.type(), null, column.linkable()))
+                            .toList()));
+        }
+        return sources;
+    }
+
+    /**
+     * @param keyColumn the default link column (RECORD_ID/ID, matched to the record id), or null when the user must choose
+     * @param joinable  whether the table has any column it can be linked on
+     */
+    public record SourceTableResponse(String table, String label, boolean builtIn, String keyColumn,
+                                      boolean joinable, List<SourceColumnResponse> columns) {
+    }
+
+    /** @param linkable gs_ table: the column can link rows to a record. List record: the field can be linked to. */
+    public record SourceColumnResponse(String name, String type, String description, boolean linkable) {
     }
 
     public List<FormatTemplateResponse> list() {
@@ -81,7 +123,7 @@ public class FormatTemplateService {
     @Transactional
     public FormatTemplateResponse save(FormatTemplateRequest request) {
         String formatType = normalizeFormat(request.formatType());
-        List<FormatFieldRequest> fields = validateFields(request.fields());
+        List<FormatFieldRequest> fields = validateFields(request.fields(), true, formatType);
         int nextVersion = templateRepository.findFirstByFormatTypeOrderByVersionNumberDesc(formatType)
                 .map(existing -> existing.getVersionNumber() + 1)
                 .orElse(1);
@@ -95,7 +137,17 @@ public class FormatTemplateService {
         template.setCreatedByName(CurrentUser.displayName());
         template = templateRepository.save(template);
         saveFields(template.getId(), fields);
+        auditService.template(template.getId(), "TEMPLATE_SUBMITTED",
+                formatType + " v" + nextVersion + " \"" + template.getName() + "\": " + describe(fields));
         return toResponse(template);
+    }
+
+    private String describe(List<FormatFieldRequest> fields) {
+        return String.join(", ", fields.stream()
+                .map(field -> (field.sourceTable() == null ? SOURCE_TABLE : field.sourceTable()) + "." + field.sourceColumn()
+                        + (field.sourceColumn().equals(field.headerName()) ? "" : " as " + field.headerName())
+                        + (field.joinColumn() == null ? "" : " (linked on " + field.joinColumn() + " = record " + field.joinField() + ")"))
+                .toList());
     }
 
     @Transactional
@@ -118,27 +170,36 @@ public class FormatTemplateService {
         template.setApprovedByName(CurrentUser.displayName());
         template.setApprovedAt(LocalDateTime.now());
         templateRepository.save(template);
+        auditService.template(template.getId(), "TEMPLATE_APPROVED",
+                template.getFormatType() + " v" + template.getVersionNumber() + " is now in use");
         return toResponse(template);
     }
 
     @Transactional
-    public void seedDefaultCsv() {
+    /**
+     * Demo databases only: starts CSV and XML off with an approved template built from GS_PARTY, so
+     * exports work out of the box. Real databases get no templates; users build them from their gs_ tables.
+     */
+    public void seedDemoTemplates() {
+        SourceCatalogService.SourceTable party = sourceCatalog.table("GS_PARTY").orElse(null);
+        if (party == null || party.keyColumn() == null) {
+            return;
+        }
+        String key = party.keyColumn();
+        java.util.function.Function<String, String> column = name -> party.column(name).map(SourceCatalogService.SourceColumn::name).orElse(null);
+        if (column.apply("FULL_NAME") == null || column.apply("NATIONALITY") == null || column.apply("PARTY_TYPE") == null) {
+            return;
+        }
+        String table = party.name();
         seedFormatIfMissing("CSV", "CSV Export", List.of(
-                new FormatFieldRequest("id", "id"),
-                new FormatFieldRequest("action", "action"),
-                new FormatFieldRequest("record_date", "record_date")));
-        seedFormatIfMissing("GENERIC_XML", "Generic XML Export", List.of(
-                new FormatFieldRequest("id", "id"),
-                new FormatFieldRequest("name", "name"),
-                new FormatFieldRequest("country", "country"),
-                new FormatFieldRequest("record_date", "record_date"),
-                new FormatFieldRequest("action", "action")));
-        seedFormatIfMissing("STANDARD_XML", "Standard XML Export", List.of(
-                new FormatFieldRequest("id", "Id"),
-                new FormatFieldRequest("name", "Name"),
-                new FormatFieldRequest("country", "Country"),
-                new FormatFieldRequest("record_date", "RecordDate"),
-                new FormatFieldRequest("action", "Action")));
+                new FormatFieldRequest(table, key, "bnp_id", key, SourceCatalogService.RECORD_KEY),
+                new FormatFieldRequest(table, column.apply("FULL_NAME"), "name", key, SourceCatalogService.RECORD_KEY),
+                new FormatFieldRequest(table, column.apply("NATIONALITY"), "nationality", key, SourceCatalogService.RECORD_KEY)));
+        seedFormatIfMissing(XmlFormatGenerator.FORMAT, "XML Export", List.of(
+                new FormatFieldRequest(table, key, "BnpId", key, SourceCatalogService.RECORD_KEY),
+                new FormatFieldRequest(table, column.apply("FULL_NAME"), "Name", key, SourceCatalogService.RECORD_KEY),
+                new FormatFieldRequest(table, column.apply("NATIONALITY"), "Nationality", key, SourceCatalogService.RECORD_KEY),
+                new FormatFieldRequest(table, column.apply("PARTY_TYPE"), "PartyType", key, SourceCatalogService.RECORD_KEY)));
     }
 
     private void seedFormatIfMissing(String formatType, String name, List<FormatFieldRequest> defaultFields) {
@@ -163,7 +224,10 @@ public class FormatTemplateService {
         for (FormatFieldRequest field : fields) {
             FormatField row = new FormatField();
             row.setTemplateId(templateId);
+            row.setSourceTable(StringUtils.trimToNull(field.sourceTable()));
             row.setSourceColumn(field.sourceColumn().trim());
+            row.setJoinColumn(field.joinColumn());
+            row.setJoinField(field.joinField());
             row.setHeaderName(field.headerName().trim());
             row.setPosition(position++);
             rows.add(row);
@@ -171,21 +235,110 @@ public class FormatTemplateService {
         fieldRepository.saveAll(rows);
     }
 
-    private List<FormatFieldRequest> validateFields(List<FormatFieldRequest> fields) {
+    /**
+     * Checks the source of each column but not the export names, which may be blank or repeated
+     * while the user is still typing. Used for the live preview.
+     */
+    public List<FormatField> previewFields(List<FormatFieldRequest> fields) {
+        List<FormatField> rows = new ArrayList<>();
+        int position = 1;
+        for (FormatFieldRequest field : validateFields(fields, false, null)) {
+            FormatField row = new FormatField();
+            row.setSourceTable(field.sourceTable());
+            row.setSourceColumn(field.sourceColumn());
+            row.setHeaderName(field.headerName());
+            row.setJoinColumn(field.joinColumn());
+            row.setJoinField(field.joinField());
+            row.setPosition(position++);
+            rows.add(row);
+        }
+        return rows;
+    }
+
+    private List<FormatFieldRequest> validateFields(List<FormatFieldRequest> fields, boolean strictHeaders, String formatType) {
+        if (fields == null) {
+            return List.of();
+        }
         Set<String> seen = new LinkedHashSet<>();
+        Set<String> headers = new LinkedHashSet<>();
+        Map<String, String> linkByTable = new java.util.HashMap<>();
+        List<SourceCatalogService.SourceTable> tables = null;
+        List<FormatFieldRequest> checked = new ArrayList<>();
         for (FormatFieldRequest field : fields) {
+            String table = StringUtils.trimToNull(field.sourceTable());
             String source = field.sourceColumn() == null ? "" : field.sourceColumn().trim();
-            if (!SOURCE_COLUMNS.contains(source)) {
-                throw new ResponseStatusException(BAD_REQUEST, "Unknown source column " + source);
+            String joinColumn = null;
+            String joinField = null;
+            if (table == null || SOURCE_TABLE.equalsIgnoreCase(table)) {
+                // A file holds only the gs_ columns picked on the template. List entries decide which
+                // rows there are; their own fields are not offered as columns.
+                throw new ResponseStatusException(BAD_REQUEST,
+                        "Pick columns from gs_ tables. \"" + source + "\" is not a gs_ column.");
+            } else {
+                if (tables == null) {
+                    tables = sourceCatalog.tables();
+                }
+                String wanted = table;
+                SourceCatalogService.SourceTable found = tables.stream()
+                        .filter(candidate -> candidate.name().equalsIgnoreCase(wanted))
+                        .findFirst()
+                        .orElseThrow(() -> new ResponseStatusException(BAD_REQUEST,
+                                "Unknown source table " + wanted + ". Only gs_ tables can be used."));
+                String wantedColumn = source;
+                SourceCatalogService.SourceColumn column = found.column(wantedColumn)
+                        .orElseThrow(() -> new ResponseStatusException(BAD_REQUEST,
+                                "Unknown column " + wantedColumn + " on " + found.name()));
+                table = found.name();
+                source = column.name();
+                Link link = resolveLink(found, field.joinColumn(), field.joinField());
+                joinColumn = link.column();
+                joinField = link.field();
+                String previous = linkByTable.putIfAbsent(table.toLowerCase(Locale.ROOT), joinColumn + "=" + joinField);
+                if (previous != null && !previous.equals(joinColumn + "=" + joinField)) {
+                    throw new ResponseStatusException(BAD_REQUEST,
+                            "Columns from " + table + " must all use the same link to the record");
+                }
             }
-            if (StringUtils.isBlank(field.headerName())) {
+            String header = field.headerName() == null ? "" : field.headerName().trim();
+            if (!strictHeaders) {
+                checked.add(new FormatFieldRequest(table, source, header, joinColumn, joinField));
+                continue;
+            }
+            if (header.isEmpty()) {
                 throw new ResponseStatusException(BAD_REQUEST, "Header name is required");
             }
-            if (!seen.add(source)) {
-                throw new ResponseStatusException(BAD_REQUEST, "Column " + source + " is already on the template");
+            if (XmlFormatGenerator.FORMAT.equals(formatType)) {
+                String problem = XmlFormatGenerator.elementNameProblem(header);
+                if (problem != null) {
+                    throw new ResponseStatusException(BAD_REQUEST, problem);
+                }
             }
+            String label = table == null ? source : table + "." + source;
+            if (!seen.add(label.toLowerCase(Locale.ROOT))) {
+                throw new ResponseStatusException(BAD_REQUEST, "Column " + label + " is already on the template");
+            }
+            if (!headers.add(header.toLowerCase(Locale.ROOT))) {
+                throw new ResponseStatusException(BAD_REQUEST, "Header " + header + " is used twice. Give each export column its own name.");
+            }
+            checked.add(new FormatFieldRequest(table, source, header, joinColumn, joinField));
         }
-        return fields;
+        return checked;
+    }
+
+    /** How a gs_ table's rows are matched to a list record: table column = record field. */
+    public record Link(String column, String field) {
+    }
+
+    /**
+     * Every gs_ table is matched to a list entry on BNP_ID, the key all gs_ tables share. A table
+     * without a BNP_ID column cannot be used. (Link values sent by a client are ignored.)
+     */
+    public Link resolveLink(SourceCatalogService.SourceTable table, String joinColumn, String joinField) {
+        if (table.keyColumn() == null) {
+            throw new ResponseStatusException(BAD_REQUEST,
+                    table.name() + " has no " + SourceCatalogService.KEY + " column, so its rows cannot be matched to list entries");
+        }
+        return new Link(table.keyColumn(), SourceCatalogService.RECORD_KEY);
     }
 
     private List<String> usedBy(String formatType) {
@@ -196,16 +349,11 @@ public class FormatTemplateService {
 
     private String normalizeFormat(String formatType) {
         String normalized = formatType == null ? "" : formatType.trim().toUpperCase(Locale.ROOT).replace(' ', '_').replace('-', '_');
-        if ("CSV_EXPORT".equals(normalized)) {
-            normalized = "CSV";
-        } else if ("GENERIC_XML_EXPORT".equals(normalized)) {
-            normalized = "GENERIC_XML";
-        } else if ("STANDARD_XML_EXPORT".equals(normalized)) {
-            normalized = "STANDARD_XML";
+        if (normalized.endsWith("_EXPORT")) {
+            normalized = normalized.substring(0, normalized.length() - "_EXPORT".length());
         }
-        if (!Set.of("CSV", "GENERIC_XML", "STANDARD_XML").contains(normalized)) {
-            throw new ResponseStatusException(BAD_REQUEST,
-                    "Only CSV, Generic XML, and Standard XML templates change the file. Fircosoft layout stays fixed.");
+        if (!FORMATS.contains(normalized)) {
+            throw new ResponseStatusException(BAD_REQUEST, "Format must be CSV or XML");
         }
         return normalized;
     }
@@ -214,11 +362,16 @@ public class FormatTemplateService {
         List<FormatTemplateResponse.FieldResponse> fields = fieldRepository.findByTemplateIdOrderByPositionAsc(template.getId()).stream()
                 .map(field -> new FormatTemplateResponse.FieldResponse(
                         field.getId(),
-                        SOURCE_TABLE,
+                        field.isGoldenSource() ? field.getSourceTable() : SOURCE_TABLE,
                         field.getSourceColumn(),
                         field.getHeaderName(),
-                        COLUMN_DETAILS.getOrDefault(field.getSourceColumn(), field.getSourceColumn()),
-                        field.getPosition()))
+                        field.isGoldenSource()
+                                ? "Matched where " + StringUtils.defaultString(field.getJoinColumn(), SourceCatalogService.KEY)
+                                        + " = list entry " + StringUtils.defaultString(field.getJoinField(), SourceCatalogService.RECORD_KEY)
+                                : COLUMN_DETAILS.getOrDefault(field.getSourceColumn(), field.getSourceColumn()),
+                        field.getPosition(),
+                        field.getJoinColumn(),
+                        field.getJoinField()))
                 .toList();
         return new FormatTemplateResponse(
                 template.getId(),

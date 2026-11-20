@@ -13,7 +13,7 @@ import java.time.LocalDateTime;
 
 @Data
 @Entity
-@Table(name = "export_job_subscriber_status")
+@Table(name = "ver_export_job_subscriber")
 public class ExportJobSubscriberStatus {
 
     @Id

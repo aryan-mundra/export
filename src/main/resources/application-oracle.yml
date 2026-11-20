@@ -1,0 +1,30 @@
+# Oracle: list records (ver_version_member), certified versions (ver_version) and gs_ tables are
+# read from Oracle, and the module's own ver_export_ tables are written to the same schema.
+#
+# Set the connection with environment variables:
+#   REGLISS_DB_URL       default jdbc:oracle:thin:@//localhost:1521/FREEPDB1
+#   REGLISS_DB_USER      default regliss
+#   REGLISS_DB_PASSWORD  required
+#
+# Load the mock data first with db/oracle/regliss-mock.sql. See docs/oracle-testing.md.
+spring:
+  datasource:
+    url: ${REGLISS_DB_URL:jdbc:oracle:thin:@//localhost:1521/FREEPDB1}
+    username: ${REGLISS_DB_USER:regliss}
+    password: ${REGLISS_DB_PASSWORD:}
+    hikari:
+      pool-name: regliss-oracle
+      maximum-pool-size: 10
+      connection-timeout: 10000
+  jpa:
+    hibernate:
+      # Creates any missing ver_export_ table and keeps data between restarts. Never drops tables.
+      ddl-auto: update
+
+export:
+  mock:
+    enabled: false
+  delivery:
+    # Keep sends simulated while testing; set to false to POST files to real CFT endpoints.
+    mock: true
+  demo-data: true

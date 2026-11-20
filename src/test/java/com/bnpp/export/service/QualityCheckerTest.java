@@ -26,7 +26,7 @@ class QualityCheckerTest {
     void rejectsABlankName() {
         Map<String, Object> record = validRecord();
         record.put("name", " ");
-        assertEquals("Name is blank", checker.validateRecord(record, "FIRCOSOFT"));
+        assertEquals("Name is blank", checker.validateRecord(record, "XML"));
     }
 
     @Test
@@ -44,7 +44,7 @@ class QualityCheckerTest {
     void aMissingFlagIsNotAHold() {
         Map<String, Object> record = validRecord();
         record.put("sanctions", null);
-        assertNull(checker.validateRecord(record, "FIRCOSOFT"));
+        assertNull(checker.validateRecord(record, "XML"));
         assertNull(checker.validateRecord(record, "CSV"));
     }
 
@@ -53,7 +53,7 @@ class QualityCheckerTest {
         Map<String, Object> record = validRecord();
         record.put("name", " ");
         assertEquals("Name is blank", checker.validateRecord(record, "CSV"));
-        assertEquals("Name is blank", checker.validateRecord(record, "FIRCOSOFT"));
+        assertEquals("Name is blank", checker.validateRecord(record, "XML"));
         assertEquals(List.of("id", "name", "country", "record_date", "action"),
                 checker.columnsForRun(List.of("id", "action", "record_date")));
     }

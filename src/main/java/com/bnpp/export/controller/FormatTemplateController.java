@@ -1,6 +1,8 @@
 package com.bnpp.export.controller;
 
+import com.bnpp.export.dto.FormatFieldRequest;
 import com.bnpp.export.dto.FormatTemplateRequest;
+import com.bnpp.export.service.TemplatePreviewService;
 import com.bnpp.export.dto.FormatTemplateResponse;
 import com.bnpp.export.service.FormatTemplateService;
 import jakarta.validation.Valid;
@@ -19,9 +21,12 @@ import java.util.Map;
 public class FormatTemplateController {
 
     private final FormatTemplateService formatTemplateService;
+    private final TemplatePreviewService templatePreviewService;
 
-    public FormatTemplateController(FormatTemplateService formatTemplateService) {
+    public FormatTemplateController(FormatTemplateService formatTemplateService,
+                                    TemplatePreviewService templatePreviewService) {
         this.formatTemplateService = formatTemplateService;
+        this.templatePreviewService = templatePreviewService;
     }
 
     @GetMapping
@@ -32,6 +37,19 @@ public class FormatTemplateController {
     @GetMapping("/columns")
     public Map<String, List<String>> columns() {
         return Map.of("columns", FormatTemplateService.SOURCE_COLUMNS);
+    }
+
+    @GetMapping("/sources")
+    public List<FormatTemplateService.SourceTableResponse> sources() {
+        return formatTemplateService.sources();
+    }
+
+    @PostMapping("/preview")
+    public TemplatePreviewService.Preview preview(@RequestBody PreviewRequest request) {
+        return templatePreviewService.preview(request.fields());
+    }
+
+    public record PreviewRequest(List<FormatFieldRequest> fields) {
     }
 
     @PostMapping

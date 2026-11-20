@@ -7,11 +7,15 @@ import org.apache.commons.csv.CSVPrinter;
 import org.springframework.stereotype.Component;
 
 import java.io.IOException;
-import java.io.StringWriter;
-import java.nio.charset.StandardCharsets;
+import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
 
+/**
+ * Plain RFC 4180 CSV: one header row, then one row per record, UTF-8. No comment lines, because most
+ * CSV readers would take them for data. The version and subscriber are in the file name.
+ * Rows are written as they arrive, so the file is never held in memory.
+ */
 @Component
 public class CsvFormatGenerator implements ExportFormat {
 
@@ -32,53 +36,43 @@ public class CsvFormatGenerator implements ExportFormat {
     }
 
     @Override
-    public byte[] generate(Long versionId, String subscriberName, List<Map<String, Object>> records) {
-        return generate(versionId, subscriberName, records, null);
-    }
-
-    public byte[] generate(Long versionId, String subscriberName, List<Map<String, Object>> records, Long templateId) {
+    public RecordWriter open(Path target, Long versionId, String subscriberName, Long templateId) throws IOException {
         List<FormatField> fields = templateId == null
                 ? formatTemplateService.activeFields("CSV")
                 : formatTemplateService.fields(templateId);
         if (fields.isEmpty()) {
-            fields = List.of(field("id", "id", 1), field("action", "action", 2), field("record_date", "record_date", 3));
+            throw new IllegalStateException("No approved CSV template. Create one on the Format Templates page and have it approved.");
         }
-        String[] headers = fields.stream().map(FormatField::getHeaderName).toArray(String[]::new);
-        StringWriter writer = new StringWriter();
-        CSVFormat format = CSVFormat.DEFAULT.builder()
-                .setHeader(headers)
-                .setCommentMarker('#')
-                .build();
-        try (CSVPrinter printer = new CSVPrinter(writer, format)) {
-            printer.printComment("versionId=" + versionId + " subscriber=" + subscriberName);
-            for (Map<String, Object> record : records) {
-                Object[] values = new Object[fields.size()];
-                for (int index = 0; index < fields.size(); index++) {
-                    values[index] = value(record, fields.get(index).getSourceColumn());
+        List<FormatField> columns = fields;
+        String[] headers = columns.stream().map(FormatField::getHeaderName).toArray(String[]::new);
+        CSVPrinter printer = new CSVPrinter(RecordValues.utf8Writer(target), CSVFormat.DEFAULT.builder().setHeader(headers).build());
+        return new RecordWriter() {
+            private long count;
+
+            @Override
+            public void write(Map<String, Object> record) throws IOException {
+                Object[] values = new Object[columns.size()];
+                for (int index = 0; index < columns.size(); index++) {
+                    values[index] = RecordValues.value(record, columns.get(index));
                 }
                 printer.printRecord(values);
+                count++;
             }
-        } catch (IOException ex) {
-            throw new IllegalStateException("Unable to build CSV export", ex);
-        }
-        return writer.toString().getBytes(StandardCharsets.UTF_8);
-    }
 
-    private Object value(Map<String, Object> record, String column) {
-        if (record.containsKey(column) && record.get(column) != null) {
-            return record.get(column);
-        }
-        if ("record_date".equals(column)) {
-            return record.get("dateOfBirth");
-        }
-        return record.get(column);
-    }
+            @Override
+            public long count() {
+                return count;
+            }
 
-    private FormatField field(String source, String header, int position) {
-        FormatField field = new FormatField();
-        field.setSourceColumn(source);
-        field.setHeaderName(header);
-        field.setPosition(position);
-        return field;
+            @Override
+            public void finish() throws IOException {
+                printer.flush();
+            }
+
+            @Override
+            public void close() throws IOException {
+                printer.close();
+            }
+        };
     }
 }

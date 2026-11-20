@@ -52,6 +52,7 @@ public record JobDetailResponse(
     public record AuditEntry(
             String action,
             String details,
+            String actor,
             LocalDateTime timestamp
     ) {
     }

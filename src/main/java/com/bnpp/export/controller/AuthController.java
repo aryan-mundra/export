@@ -42,9 +42,12 @@ public class AuthController {
         this.mockProperties = mockProperties;
     }
 
+    @org.springframework.beans.factory.annotation.Value("${export.demo-data:false}")
+    private boolean demoData;
+
     @GetMapping("/config")
     public Map<String, Object> config() {
-        if (!mockProperties.isEnabled()) {
+        if (!demoData) {
             return Map.of("demo", false, "accounts", List.of());
         }
         return Map.of(

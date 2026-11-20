@@ -10,7 +10,7 @@ import lombok.Data;
 
 @Data
 @Entity
-@Table(name = "app_user")
+@Table(name = "ver_export_user")
 public class AppUser {
 
     @Id

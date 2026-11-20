@@ -23,6 +23,8 @@ public interface ExportJobRepository extends JpaRepository<ExportJob, Long> {
 
     long countByStatusIn(Collection<String> statuses);
 
+    List<ExportJob> findByStatusIn(Collection<String> statuses);
+
     @Transactional
     @Modifying(clearAutomatically = true, flushAutomatically = true)
     @Query("""

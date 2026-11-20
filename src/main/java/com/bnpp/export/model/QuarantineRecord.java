@@ -13,7 +13,7 @@ import java.time.LocalDateTime;
 
 @Data
 @Entity
-@Table(name = "export_quarantine")
+@Table(name = "ver_export_quarantine")
 public class QuarantineRecord {
 
     @Id

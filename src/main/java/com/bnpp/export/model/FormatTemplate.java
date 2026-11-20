@@ -13,7 +13,7 @@ import java.time.LocalDateTime;
 
 @Data
 @Entity
-@Table(name = "export_format_template")
+@Table(name = "ver_export_template")
 public class FormatTemplate {
 
     @Id

@@ -52,6 +52,18 @@ class ExportModuleIntegrationTest {
     @Autowired
     private DeliveryRepository deliveryRepository;
 
+    @Autowired
+    private com.bnpp.export.repository.ExportJobSubscriberStatusRepository statusRepository;
+
+    @Autowired
+    private com.bnpp.export.repository.ExportedFileRepository exportedFileRepository;
+
+    @Autowired
+    private com.bnpp.export.repository.ExportedFileRecordRepository exportedFileRecordRepository;
+
+    @Autowired
+    private com.bnpp.export.repository.ExportAuditLogRepository auditLogRepository;
+
     @Test
     void servesTheModuleAndSeedsSubscribers() throws Exception {
         mockMvc.perform(get("/"))
@@ -79,7 +91,7 @@ class ExportModuleIntegrationTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$", hasSize(6)))
                 .andExpect(jsonPath("$[0].name").value("SUN"))
-                .andExpect(jsonPath("$[0].formatType").value("FIRCOSOFT"))
+                .andExpect(jsonPath("$[0].formatType").value("XML"))
                 .andExpect(jsonPath("$[0].businessLine").value("CIB"))
                 .andExpect(jsonPath("$[0].region").value("EMEA"));
 
@@ -88,17 +100,27 @@ class ExportModuleIntegrationTest {
                 .andExpect(jsonPath("$[0].formatType").value("CSV"))
                 .andExpect(jsonPath("$[0].versionNumber").value(1))
                 .andExpect(jsonPath("$[0].status").value("APPROVED"))
-                .andExpect(jsonPath("$[0].fields", hasSize(3)));
+                .andExpect(jsonPath("$[0].fields", hasSize(3)))
+                // Demo templates are built from gs_ columns only
+                .andExpect(jsonPath("$[0].fields[*].sourceTable", org.hamcrest.Matchers.everyItem(org.hamcrest.Matchers.is("GS_PARTY"))));
+
+        // A file holds only gs_ columns: the list entry's own fields cannot be picked.
+        mockMvc.perform(post("/api/format-templates")
+                        .session(maker)
+                        .contentType("application/json")
+                        .content("{\"name\":\"X\",\"formatType\":\"CSV\",\"fields\":[{\"sourceColumn\":\"action\",\"headerName\":\"action\"}]}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value("Pick columns from gs_ tables. \"action\" is not a gs_ column."));
 
         MvcResult created = mockMvc.perform(post("/api/format-templates")
                         .session(maker)
                         .contentType("application/json")
                         .content("""
                                 {"name":"CSV Export","formatType":"CSV","fields":[
-                                  {"sourceColumn":"id","headerName":"id"},
-                                  {"sourceColumn":"action","headerName":"action"},
-                                  {"sourceColumn":"record_date","headerName":"record_date"},
-                                  {"sourceColumn":"name","headerName":"name"}
+                                  {"sourceTable":"GS_PARTY","sourceColumn":"BNP_ID","headerName":"id"},
+                                  {"sourceTable":"GS_PARTY","sourceColumn":"FULL_NAME","headerName":"name"},
+                                  {"sourceTable":"GS_PARTY","sourceColumn":"NATIONALITY","headerName":"nationality"},
+                                  {"sourceTable":"GS_PARTY","sourceColumn":"PARTY_TYPE","headerName":"party_type"}
                                 ]}
                                 """))
                 .andExpect(status().isOk())
@@ -107,7 +129,9 @@ class ExportModuleIntegrationTest {
                 .andExpect(jsonPath("$.active").value(false))
                 .andExpect(jsonPath("$.createdByName").value("List operator"))
                 .andExpect(jsonPath("$.fields", hasSize(4)))
-                .andExpect(jsonPath("$.fields[3].sourceTable").value("List record"))
+                .andExpect(jsonPath("$.fields[3].sourceTable").value("GS_PARTY"))
+                .andExpect(jsonPath("$.fields[3].joinColumn").value("BNP_ID"))
+                .andExpect(jsonPath("$.fields[3].joinField").value("bnp_id"))
                 .andReturn();
         Number templateId = com.jayway.jsonpath.JsonPath.read(created.getResponse().getContentAsString(), "$.id");
 
@@ -138,6 +162,20 @@ class ExportModuleIntegrationTest {
                         .session(maker)
                         .contentType("application/json")
                         .content("{\"name\":\"Fircosoft\",\"formatType\":\"FIRCOSOFT\",\"fields\":[{\"sourceColumn\":\"id\",\"headerName\":\"id\"}]}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value("Format must be CSV or XML"));
+
+        mockMvc.perform(post("/api/format-templates")
+                        .session(maker)
+                        .contentType("application/json")
+                        .content("{\"name\":\"X\",\"formatType\":\"XML\",\"fields\":[{\"sourceTable\":\"GS_PARTY\",\"sourceColumn\":\"FULL_NAME\",\"headerName\":\"party name\"}]}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value(org.hamcrest.Matchers.containsString("cannot be an XML element name")));
+
+        mockMvc.perform(post("/api/subscribers")
+                        .session(maker)
+                        .contentType("application/json")
+                        .content("{\"name\":\"Old Format\",\"formatType\":\"GENERIC_XML\",\"scope\":\"ALL\",\"exportMode\":\"FULL\"}"))
                 .andExpect(status().isBadRequest());
 
         MvcResult channel = mockMvc.perform(post("/api/subscribers")
@@ -168,20 +206,38 @@ class ExportModuleIntegrationTest {
                 .andExpect(jsonPath("$.mode").value("h2"));
     }
 
+    /**
+     * Every active subscriber gets a file, whatever list the version belongs to: the subscriber's
+     * scope filters the records inside it. The demo data has no blank fields, so nothing is held.
+     * Quarantine, accepting omissions and the delivery proof on a held file are covered by
+     * OracleExportFilesTest, whose data has blank fields.
+     */
     @Test
-    void exportWritesFilesAndQuarantinesInvalidRows() throws Exception {
+    void exportWritesAFileForEverySubscriber() throws Exception {
         ExportJob job = orchestrator.triggerExport(42L, "test");
         ExportJob finished = await(job.getId());
 
-        assertEquals("HELD", finished.getStatus());
+        assertEquals("COMPLETED", finished.getStatus());
         assertEquals(6, finished.getTotalSubscribers());
-        assertEquals(2, finished.getSkippedSubscribers());
-        assertTrue(finished.getHeldSubscribers() > 0);
+        assertEquals(6, finished.getCompletedSubscribers());
+        assertEquals(0, finished.getSkippedSubscribers());
+        assertEquals(0, finished.getHeldSubscribers());
+        assertEquals(0, finished.getFailedSubscribers());
+        assertEquals(0, finished.getTotalRecordsQuarantined());
         assertTrue(finished.getTotalRecordsProcessed() > 0);
-        assertTrue(finished.getTotalRecordsQuarantined() > 0);
-        int sentBeforeAccept = deliveryRepository.findByVersionIdOrderByCreatedAtDesc(42L).size();
-        assertTrue(sentBeforeAccept >= 1);
-        assertTrue(quarantineRepository.count() > 0);
+
+        var rows = orchestrator.getJob(job.getId()).subscribers();
+        for (var row : rows) {
+            assertEquals("COMPLETED", row.status(), row.subscriberName());
+            if (row.recordsProcessed() > 0) {
+                assertTrue(row.fileName() != null && row.archiveFileName() != null, row.subscriberName() + " file was not sent");
+            }
+        }
+        var sent = rows.stream().filter(row -> row.archiveFileName() != null).findFirst().orElseThrow();
+        mockMvc.perform(post("/api/jobs/" + job.getId() + "/subscribers/" + sent.id() + "/proof")
+                        .with(user("maker").roles("MAKER")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.result").value("MATCH"));
 
         long jobsBefore = exportJobRepository.count();
         long quarantineBefore = quarantineRepository.count();
@@ -193,7 +249,8 @@ class ExportModuleIntegrationTest {
                 .andExpect(jsonPath("$.listName").value("Sanctions"))
                 .andExpect(jsonPath("$.subscribers", hasSize(6)))
                 .andExpect(jsonPath("$.subscribers[2].name").value("Vigilance"))
-                .andExpect(jsonPath("$.subscribers[2].included").value(false));
+                .andExpect(jsonPath("$.subscribers[2].scope").value("WORLDCHECK"))
+                .andExpect(jsonPath("$.subscribers[2].included").value(true));
         assertEquals(jobsBefore, exportJobRepository.count());
         assertEquals(quarantineBefore, quarantineRepository.count());
 
@@ -209,19 +266,6 @@ class ExportModuleIntegrationTest {
                         .content("{\"versionId\":42,\"triggeredBy\":\"not-the-signed-in-user\"}"))
                 .andExpect(status().isConflict());
 
-        var held = orchestrator.getJob(job.getId()).subscribers().stream()
-                .filter(row -> "HELD".equals(row.status()) && row.fileName() != null)
-                .findFirst()
-                .orElseThrow();
-        mockMvc.perform(post("/api/jobs/" + job.getId() + "/subscribers/" + held.id() + "/accept")
-                        .with(user("maker").roles("MAKER")))
-                .andExpect(status().isOk());
-        assertEquals(sentBeforeAccept + 1, deliveryRepository.findByVersionIdOrderByCreatedAtDesc(42L).size());
-        mockMvc.perform(post("/api/jobs/" + job.getId() + "/subscribers/" + held.id() + "/proof")
-                        .with(user("maker").roles("MAKER")))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.result").value("MATCH"));
-
         mockMvc.perform(get("/api/jobs/" + job.getId()).with(user("maker").roles("MAKER")))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.subscribers", hasSize(6)))
@@ -229,7 +273,7 @@ class ExportModuleIntegrationTest {
 
         mockMvc.perform(get("/api/versions/42/report").with(user("maker").roles("MAKER")))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.status").value("HELD"));
+                .andExpect(jsonPath("$.status").value("COMPLETED"));
 
         mockMvc.perform(post("/api/subscribers")
                         .with(user("maker").roles("MAKER"))
@@ -268,7 +312,8 @@ class ExportModuleIntegrationTest {
         ExportJob job = orchestrator.triggerExport(77L, "test", tomorrow, tomorrow);
         ExportJob finished = await(job.getId());
 
-        assertEquals("HELD", finished.getStatus());
+        // No record changed tomorrow, so the delta subscriber gets an empty window; full ones are unaffected.
+        assertEquals("COMPLETED", finished.getStatus());
         assertEquals(tomorrow, finished.getFromDate());
         assertEquals(tomorrow, finished.getToDate());
         mockMvc.perform(get("/api/jobs/" + job.getId()).with(user("maker").roles("MAKER")))
@@ -276,7 +321,141 @@ class ExportModuleIntegrationTest {
                 .andExpect(jsonPath("$.subscribers[0].subscriberName").value("SUN"))
                 .andExpect(jsonPath("$.subscribers[0].recordsProcessed").value(greaterThan(0)))
                 .andExpect(jsonPath("$.subscribers[1].subscriberName").value("SHINE"))
-                .andExpect(jsonPath("$.subscribers[1].recordsProcessed").value(0));
+                .andExpect(jsonPath("$.subscribers[1].recordsProcessed").value(0))
+                .andExpect(jsonPath("$.subscribers[1].holdReason").value("Empty delta window. Nothing was sent."));
+    }
+
+    @Test
+    void templatesPickColumnsFromGoldenSourceTables() throws Exception {
+        mockMvc.perform(get("/api/format-templates/sources").with(user("maker").roles("MAKER")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].builtIn").value(true))
+                .andExpect(jsonPath("$[0].label").value("List record"))
+                .andExpect(jsonPath("$[*].table", org.hamcrest.Matchers.hasItems(
+                        "GS_PARTY", "gs_address", "Gs_Identifier", "GS_SANCTION_PROGRAM", "GS_LOAD_LOG")))
+                .andExpect(jsonPath("$[*].table", org.hamcrest.Matchers.not(org.hamcrest.Matchers.hasItem("REF_COUNTRY"))))
+                // Every usable gs_ table has BNP_ID; GS_LOAD_LOG has none and is locked
+                .andExpect(jsonPath("$[?(@.table == 'GS_LOAD_LOG')].keyColumn").value(org.hamcrest.Matchers.contains((Object) null)))
+                .andExpect(jsonPath("$[?(@.table == 'GS_LOAD_LOG')].joinable").value(false))
+                .andExpect(jsonPath("$[?(@.table == 'GS_COUNTRY_RISK')].keyColumn").value("BNP_ID"))
+                .andExpect(jsonPath("$[?(@.table == 'gs_address')].keyColumn").value("bnp_id"))
+                .andExpect(jsonPath("$[?(@.table == 'GS_PARTY')].keyColumn").value("BNP_ID"));
+
+        String badTable = "{\"name\":\"X\",\"formatType\":\"XML\",\"fields\":[{\"sourceTable\":\"REF_COUNTRY\",\"sourceColumn\":\"NAME\",\"headerName\":\"n\"}]}";
+        mockMvc.perform(post("/api/format-templates").with(user("maker").roles("MAKER"))
+                        .contentType("application/json").content(badTable))
+                .andExpect(status().isBadRequest());
+        // A gs_ table without BNP_ID cannot be used
+        String noKey = "{\"name\":\"X\",\"formatType\":\"XML\",\"fields\":[{\"sourceTable\":\"GS_LOAD_LOG\",\"sourceColumn\":\"ROW_COUNT\",\"headerName\":\"n\"}]}";
+        mockMvc.perform(post("/api/format-templates").with(user("maker").roles("MAKER"))
+                        .contentType("application/json").content(noKey))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value("GS_LOAD_LOG has no BNP_ID column, so its rows cannot be matched to list entries"));
+        String duplicateHeader = """
+                {"name":"X","formatType":"XML","fields":[
+                  {"sourceTable":"GS_PARTY","sourceColumn":"BNP_ID","headerName":"same"},
+                  {"sourceTable":"GS_PARTY","sourceColumn":"FULL_NAME","headerName":"Same"}]}
+                """;
+        mockMvc.perform(post("/api/format-templates").with(user("maker").roles("MAKER"))
+                        .contentType("application/json").content(duplicateHeader))
+                .andExpect(status().isBadRequest());
+
+        mockMvc.perform(post("/api/format-templates/preview").with(user("maker").roles("MAKER"))
+                        .contentType("application/json")
+                        .content("""
+                                {"fields":[
+                                  {"sourceTable":"GS_PARTY","sourceColumn":"BNP_ID","headerName":""},
+                                  {"sourceTable":"gs_party","sourceColumn":"full_name","headerName":""}
+                                ]}
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.versionId").value(42))
+                .andExpect(jsonPath("$.recordIds", hasSize(3)))
+                .andExpect(jsonPath("$.rows[0][0]").value("BNP42000001"))
+                .andExpect(jsonPath("$.rows[0][1]").value("Party 42000001"));
+
+        MvcResult created = mockMvc.perform(post("/api/format-templates").with(user("maker").roles("MAKER"))
+                        .contentType("application/json")
+                        .content("""
+                                {"name":"XML with golden source","formatType":"XML","fields":[
+                                  {"sourceTable":"GS_PARTY","sourceColumn":"BNP_ID","headerName":"id"},
+                                  {"sourceTable":"gs_party","sourceColumn":"full_name","headerName":"PartyName"},
+                                  {"sourceTable":"GS_ADDRESS","sourceColumn":"city","headerName":"city"},
+                                  {"sourceTable":"gs_identifier","sourceColumn":"id_value","headerName":"identifiers"}
+                                ]}
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.fields[1].sourceTable").value("GS_PARTY"))
+                .andExpect(jsonPath("$.fields[1].sourceColumn").value("FULL_NAME"))
+                .andExpect(jsonPath("$.fields[1].headerName").value("PartyName"))
+                .andExpect(jsonPath("$.fields[2].sourceTable").value("gs_address"))
+                .andExpect(jsonPath("$.fields[3].sourceTable").value("Gs_Identifier"))
+                .andReturn();
+        Number templateId = com.jayway.jsonpath.JsonPath.read(created.getResponse().getContentAsString(), "$.id");
+        mockMvc.perform(post("/api/format-templates/" + templateId + "/approve").with(user("approver").roles("APPROVER")))
+                .andExpect(status().isOk());
+
+        ExportJob job = await(orchestrator.triggerExport(43L, "test").getId());
+        var shine = orchestrator.getJob(job.getId()).subscribers().stream()
+                .filter(row -> "SHINE".equals(row.subscriberName()))
+                .findFirst()
+                .orElseThrow();
+        String xml = java.nio.file.Files.readString(java.nio.file.Path.of(shine.filePath()));
+        java.util.regex.Matcher record = java.util.regex.Pattern
+                .compile("<Record id=\"(\\d+)\">\\s*<id>BNP\\1</id>\\s*<PartyName>Party \\1</PartyName>\\s*<city>[^<]+</city>\\s*<identifiers>ID\\1")
+                .matcher(xml);
+        assertTrue(record.find(), "golden-source values should be joined on the record id:\n" + xml);
+
+        // ver_export_file has the file, and ver_export_file_record lists its records in file order
+        var file = exportedFileRepository.findFirstByFilePathOrderByIdDesc(shine.filePath()).orElseThrow();
+        assertEquals("XML", file.getFormatType());
+        assertEquals(shine.id(), file.getJobSubscriberId());
+        assertEquals(64, file.getFileHash().length());
+        var lines = exportedFileRecordRepository.findByFileIdOrderByLineNumberAsc(file.getId());
+        assertEquals(file.getRecordCount(), lines.size());
+        assertEquals(shine.recordsProcessed(), lines.size());
+        assertEquals(record.group(1), lines.get(0).getRecordId());
+        assertEquals(1, lines.get(0).getLineNumber());
+        if ("COMPLETED".equals(shine.status())) {
+            assertEquals("SENT", file.getStatus());
+        }
+
+        // ver_export_audit names who submitted and who approved the template
+        var templateAudit = auditLogRepository.findAll().stream()
+                .filter(entry -> "TEMPLATE".equals(entry.getEntityType()) && templateId.longValue() == entry.getEntityId())
+                .toList();
+        assertEquals(java.util.List.of("TEMPLATE_SUBMITTED", "TEMPLATE_APPROVED"),
+                templateAudit.stream().map(entry -> entry.getAction()).toList());
+        assertEquals(java.util.List.of("maker", "approver"),
+                templateAudit.stream().map(entry -> entry.getActor()).toList());
+    }
+
+    /** A job that was running when the application stopped must end FAILED (retryable), not stay "In progress". */
+    @Test
+    void interruptedExportsAreMarkedFailedAtStartUp() {
+        ExportJob job = new ExportJob();
+        job.setVersionId(42L);
+        job.setListCode("SANCTIONS");
+        job.setListName("Sanctions");
+        job.setStatus("IN_PROGRESS");
+        job.setTotalSubscribers(1);
+        job = exportJobRepository.save(job);
+        com.bnpp.export.model.ExportJobSubscriberStatus running = new com.bnpp.export.model.ExportJobSubscriberStatus();
+        running.setExportJobId(job.getId());
+        running.setSubscriberId(subscriberRepository.findByNameIgnoreCase("SUN").orElseThrow().getId());
+        running.setSubscriberName("SUN");
+        running.setFormatType("XML");
+        running.setStatus("IN_PROGRESS");
+        statusRepository.save(running);
+
+        assertTrue(orchestrator.recoverInterruptedExports() >= 1);
+
+        ExportJob recovered = exportJobRepository.findById(job.getId()).orElseThrow();
+        assertEquals("FAILED", recovered.getStatus());
+        assertTrue(recovered.getErrorMessage().startsWith("Interrupted"));
+        var row = orchestrator.getJob(job.getId()).subscribers().get(0);
+        assertEquals("FAILED", row.status());
+        assertEquals(1, recovered.getFailedSubscribers());
     }
 
     private ExportJob await(Long id) throws InterruptedException {

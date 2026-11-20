@@ -18,7 +18,9 @@ import com.bnpp.export.repository.ExportJobSubscriberStatusRepository;
 import com.bnpp.export.repository.QuarantineRepository;
 import com.bnpp.export.repository.SubscriberRepository;
 import com.bnpp.export.security.CurrentUser;
+import com.bnpp.export.service.AuditService;
 import com.bnpp.export.service.ExportOrchestrator;
+import com.bnpp.export.service.FormatTemplateService;
 import jakarta.validation.Valid;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.core.io.Resource;
@@ -48,7 +50,7 @@ import static org.springframework.http.HttpStatus.NOT_FOUND;
 @RequestMapping("/api")
 public class ExportController {
 
-    private static final Set<String> FORMATS = Set.of("FIRCOSOFT", "GENERIC_XML", "STANDARD_XML", "CSV");
+    private static final Set<String> FORMATS = Set.copyOf(FormatTemplateService.FORMATS);
     private static final Set<String> SCOPES = Set.of("ALL", "SANCTIONS", "WORLDCHECK", "PFA");
     private static final Set<String> MODES = Set.of("FULL", "DELTA");
 
@@ -58,19 +60,22 @@ public class ExportController {
     private final DeliveryRepository deliveryRepository;
     private final ExportJobSubscriberStatusRepository statusRepository;
     private final MockProperties mockProperties;
+    private final AuditService auditService;
 
     public ExportController(ExportOrchestrator orchestrator,
                             SubscriberRepository subscriberRepository,
                             QuarantineRepository quarantineRepository,
                             DeliveryRepository deliveryRepository,
                             ExportJobSubscriberStatusRepository statusRepository,
-                            MockProperties mockProperties) {
+                            MockProperties mockProperties,
+                            AuditService auditService) {
         this.orchestrator = orchestrator;
         this.subscriberRepository = subscriberRepository;
         this.quarantineRepository = quarantineRepository;
         this.deliveryRepository = deliveryRepository;
         this.statusRepository = statusRepository;
         this.mockProperties = mockProperties;
+        this.auditService = auditService;
     }
 
     @GetMapping("/dashboard")
@@ -83,8 +88,8 @@ public class ExportController {
         boolean mock = mockProperties.isEnabled();
         return Map.of(
                 "mockEnabled", mock,
-                "mode", mock ? "h2" : "postgres",
-                "label", mock ? "H2 Mock" : "PostgreSQL");
+                "mode", mock ? "h2" : "oracle",
+                "label", mock ? "H2 Mock" : "Oracle");
     }
 
     @GetMapping("/subscribers")
@@ -107,7 +112,16 @@ public class ExportController {
         profile.setActive(request.active() == null || request.active());
         profile.setSecretList(Boolean.TRUE.equals(request.secretList()));
         gateNewEndpoint(profile, null);
-        return decorate(subscriberRepository.save(profile));
+        SubscriberProfile saved = subscriberRepository.save(profile);
+        auditService.subscriber(saved.getId(), "SUBSCRIBER_CREATED", summary(saved));
+        return decorate(saved);
+    }
+
+    private String summary(SubscriberProfile profile) {
+        return profile.getName() + ": " + profile.getFormatType() + " " + profile.getScope() + " " + profile.getExportMode()
+                + ", endpoint " + (profile.getCftEndpoint() == null ? "none" : profile.getCftEndpoint() + " (" + profile.getEndpointStatus() + ")")
+                + (profile.isSecretList() ? ", secret list" : "")
+                + (profile.isActive() ? ", active" : ", inactive");
     }
 
     @PutMapping("/subscribers/{id}")
@@ -121,6 +135,7 @@ public class ExportController {
                     throw new ResponseStatusException(CONFLICT, "A subscriber named " + name + " already exists");
                 });
         String previousEndpoint = profile.getCftEndpoint();
+        String before = summary(profile);
         apply(profile, request, name);
         if (request.secretList() != null) {
             profile.setSecretList(request.secretList());
@@ -129,7 +144,12 @@ public class ExportController {
             profile.setActive(request.active());
         }
         gateNewEndpoint(profile, previousEndpoint);
-        return decorate(subscriberRepository.save(profile));
+        SubscriberProfile saved = subscriberRepository.save(profile);
+        String after = summary(saved);
+        if (!before.equals(after)) {
+            auditService.subscriber(saved.getId(), "SUBSCRIBER_UPDATED", "Before: " + before + ". After: " + after);
+        }
+        return decorate(saved);
     }
 
     @PostMapping("/subscribers/{id}/approve-endpoint")
@@ -141,7 +161,9 @@ public class ExportController {
         }
         profile.setEndpointStatus("APPROVED");
         profile.setActive(true);
-        return decorate(subscriberRepository.save(profile));
+        SubscriberProfile saved = subscriberRepository.save(profile);
+        auditService.subscriber(saved.getId(), "ENDPOINT_APPROVED", saved.getName() + ": " + saved.getCftEndpoint());
+        return decorate(saved);
     }
 
     @PostMapping("/subscribers/{id}/sample")
@@ -156,14 +178,14 @@ public class ExportController {
 
     @DeleteMapping("/subscribers/{id}")
     public ResponseEntity<Void> deleteSubscriber(@PathVariable Long id) {
-        if (!subscriberRepository.existsById(id)) {
-            throw new ResponseStatusException(NOT_FOUND, "Subscriber not found");
-        }
+        SubscriberProfile profile = subscriberRepository.findById(id)
+                .orElseThrow(() -> new ResponseStatusException(NOT_FOUND, "Subscriber not found"));
         if (statusRepository.existsBySubscriberId(id)
                 || deliveryRepository.existsBySubscriberId(id)
                 || quarantineRepository.existsBySubscriberId(id)) {
             throw new ResponseStatusException(CONFLICT, "Deactivate this subscriber. History still refers to it.");
         }
+        auditService.subscriber(id, "SUBSCRIBER_DELETED", summary(profile));
         subscriberRepository.deleteById(id);
         return ResponseEntity.noContent().build();
     }
@@ -262,7 +284,7 @@ public class ExportController {
 
     private void apply(SubscriberProfile profile, SubscriberRequest request, String name) {
         profile.setName(name);
-        profile.setFormatType(required(request.formatType(), FORMATS, "Format must be FIRCOSOFT, GENERIC_XML, STANDARD_XML, or CSV"));
+        profile.setFormatType(required(request.formatType(), FORMATS, "Format must be CSV or XML"));
         profile.setScope(required(request.scope(), SCOPES, "Scope must be ALL, SANCTIONS, WORLDCHECK, or PFA"));
         profile.setExportMode(required(request.exportMode(), MODES, "Mode must be FULL or DELTA"));
         profile.setBusinessLine(StringUtils.trimToNull(request.businessLine()));

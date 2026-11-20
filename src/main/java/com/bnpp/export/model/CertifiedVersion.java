@@ -12,7 +12,7 @@ import java.time.LocalDate;
 
 @Data
 @Entity
-@Table(name = "certified_versions")
+@Table(name = "ver_version")
 public class CertifiedVersion {
 
     @Id

@@ -10,8 +10,11 @@ const state = {
     jobDetail: null,
     exportMessage: null,
     templates: [],
-    catalogue: ["id", "action", "record_date", "name", "country", "risk_rating"],
     templateDraft: null,
+    sources: [],
+    sourcesError: null,
+    activeTable: null,
+    tableFilter: "",
     user: null,
     versions: [],
     preview: null,
@@ -21,11 +24,16 @@ const state = {
 const pages = ["dashboard", "export", "history", "subscribers", "quarantine", "templates", "approvals"];
 
 document.getElementById("db-h2").addEventListener("click", () => explainDatabase("h2"));
-document.getElementById("db-postgres").addEventListener("click", () => explainDatabase("postgres"));
+document.getElementById("db-oracle").addEventListener("click", () => explainDatabase("oracle"));
 window.addEventListener("hashchange", () => navigate());
 document.addEventListener("click", onClick);
 document.addEventListener("submit", onSubmit);
 document.addEventListener("input", onInput);
+document.addEventListener("keydown", event => {
+    if (event.key === "Enter" && event.target.matches && event.target.matches("[data-table-filter]")) {
+        event.preventDefault();
+    }
+});
 
 boot();
 
@@ -73,14 +81,19 @@ async function refresh() {
     } else if (state.page === "quarantine") {
         state.quarantine = await api("/api/quarantine?q=" + encodeURIComponent(state.search.quarantine));
     } else if (state.page === "templates") {
-        const [templates, columns] = await Promise.all([
+        const [templates, sources] = await Promise.all([
             api("/api/format-templates"),
-            api("/api/format-templates/columns")
+            api("/api/format-templates/sources").catch(error => ({ error }))
         ]);
         state.templates = templates;
-        state.catalogue = columns.columns;
+        state.sources = sources.error ? [] : sources;
+        state.sourcesError = sources.error ? sources.error.message : null;
         if (!state.templateDraft) {
             state.templateDraft = draftFromActive();
+        }
+        if (state.activeTable === null || !state.sources.some(source => !source.builtIn && tableKey(source.table) === state.activeTable)) {
+            const firstGs = state.sources.find(source => !source.builtIn);
+            state.activeTable = firstGs ? tableKey(firstGs.table) : null;
         }
     } else if (state.page === "approvals" && state.user && state.user.role === "APPROVER") {
         state.templates = await api("/api/format-templates");
@@ -134,7 +147,10 @@ async function poll() {
                 state.templates = templates;
                 const form = document.getElementById("template-form");
                 const editing = form && form.contains(document.activeElement);
-                if (!editing) render();
+                if (!editing) {
+                    if (state.page === "templates") renderTemplatesKeepingFilter();
+                    else render();
+                }
             }
         } catch (error) {
             /* keep the current screen if a refresh fails */
@@ -340,7 +356,7 @@ function subscribersHtml() {
         <section class="table-card">
             <form class="add-form" id="add-form">
                 <input name="name" placeholder="Subscriber name" required>
-                ${select("formatType", ["FIRCOSOFT", "GENERIC_XML", "STANDARD_XML", "CSV"], "FIRCOSOFT")}
+                ${select("formatType", ["CSV", "XML"], "CSV")}
                 ${select("scope", ["ALL", "SANCTIONS", "WORLDCHECK", "PFA"], "ALL")}
                 ${select("exportMode", ["DELTA", "FULL"], "DELTA")}
                 <input name="businessLine" placeholder="Business line">
@@ -357,14 +373,90 @@ function subscribersHtml() {
         </section>`;
 }
 
+function tableKey(table) {
+    return table ? String(table).toLowerCase() : "";
+}
+
+function fieldKey(table, column) {
+    return tableKey(table) + "." + String(column).toLowerCase();
+}
+
+function sourceLabel(table) {
+    return table || "List record";
+}
+
+function tablePickerHtml(draft) {
+    if (state.sourcesError) {
+        return `<div class="banner banner-error">${esc(state.sourcesError)}. Built-in list record columns are not shown either.</div>`;
+    }
+    const picked = new Set(draft.fields.map(field => fieldKey(field.sourceTable, field.sourceColumn)));
+    const gsCount = state.sources.filter(source => !source.builtIn).length;
+    const tables = state.sources.filter(source => !source.builtIn).map(source => {
+        const key = tableKey(source.table);
+        const count = source.columns.filter(column => picked.has(fieldKey(source.table, column.name))).length;
+        const meta = source.columns.length + " columns" + (source.keyColumn ? "" : " · no BNP_ID");
+        return `<button type="button" class="table-option ${key === state.activeTable ? "active" : ""} ${source.keyColumn ? "" : "unlinked"}" data-pick-table="${esc(key)}" data-table-name="${esc(source.label.toLowerCase())}">
+            <span class="table-name">${esc(source.label)}</span>
+            <span class="table-meta">${esc(meta)}</span>
+            ${count ? `<span class="table-count">${count}</span>` : ""}
+        </button>`;
+    }).join("");
+    const active = state.sources.find(source => tableKey(source.table) === state.activeTable);
+    let columns = '<div class="empty">Choose a table.</div>';
+    if (active) {
+        const usable = !!active.keyColumn;
+        const allPicked = active.columns.every(column => picked.has(fieldKey(active.table, column.name)));
+        const head = `<div class="columns-head">
+            <div>
+                <h3>${esc(active.label)}</h3>
+                <p class="muted">${usable
+                    ? `Matched to each list entry on <code>${esc(active.keyColumn)}</code>.`
+                    : "This table has no BNP_ID column, so its rows cannot be matched to list entries."}</p>
+            </div>
+            ${usable ? `<button type="button" class="btn-ghost" data-pick-all="${allPicked ? "none" : "all"}">${allPicked ? "Clear all" : "Select all"}</button>` : ""}
+        </div>`;
+        const items = active.columns.map(column => {
+            const key = fieldKey(active.table, column.name);
+            return `<label class="column-option ${usable ? "" : "disabled"}">
+                <input type="checkbox" data-pick-column="${esc(column.name)}" ${picked.has(key) ? "checked" : ""} ${usable ? "" : "disabled"}>
+                <span class="column-name">${esc(column.name)}</span>
+                <span class="column-type">${esc(column.type || column.description || "")}</span>
+            </label>`;
+        }).join("");
+        columns = head + `<div class="column-list">${items || '<div class="empty">This table has no columns.</div>'}</div>`;
+    }
+    return `<div class="picker">
+        <div class="picker-tables">
+            <div class="field-label">Source tables · ${gsCount} gs_ table${gsCount === 1 ? "" : "s"}</div>
+            <input class="table-filter" data-table-filter placeholder="Filter tables">
+            <div class="table-list">${tables}</div>
+            ${gsCount ? "" : '<p class="muted">No table starting with gs_ was found in the database.</p>'}
+        </div>
+        <div class="picker-columns">${columns}</div>
+    </div>`;
+}
+
+function exportColumnsHtml(draft) {
+    if (!draft.fields.length) {
+        return '<div class="empty">No columns yet. Tick columns in a table above to add them.</div>';
+    }
+    return draft.fields.map((field, index) => {
+        const renamed = field.headerName !== field.sourceColumn;
+        return `<div class="field-row export-col">
+            <span class="col-order">${index + 1}</span>
+            <span class="col-source" title="${esc(sourceLabel(field.sourceTable) + "." + field.sourceColumn)}"><span class="col-table">${esc(sourceLabel(field.sourceTable))}</span><strong>${esc(field.sourceColumn)}</strong></span>
+            <span class="muted">→</span>
+            <input data-draft-header="${index}" value="${esc(field.headerName)}" placeholder="${esc(field.sourceColumn)}" aria-label="Export name for ${esc(field.sourceColumn)}">
+            <button class="btn-ghost btn-small" type="button" data-reset-header="${index}" ${renamed ? "" : "disabled"} title="Use the column name as the export name">Keep original</button>
+            <button class="btn-ghost btn-icon" type="button" data-move="${index}:-1" ${index === 0 ? "disabled" : ""} aria-label="Move up">↑</button>
+            <button class="btn-ghost btn-icon" type="button" data-move="${index}:1" ${index === draft.fields.length - 1 ? "disabled" : ""} aria-label="Move down">↓</button>
+            <button class="btn-delete" type="button" data-remove-field="${index}">Remove</button>
+        </div>`;
+    }).join("");
+}
+
 function templatesHtml() {
     const draft = state.templateDraft || draftFromActive();
-    const rows = draft.fields.map((field, index) => `<div class="field-row">
-        <select data-draft-source="${index}">${state.catalogue.map(column => `<option ${column === field.sourceColumn ? "selected" : ""}>${esc(column)}</option>`).join("")}</select>
-        <span class="muted">→</span>
-        <input data-draft-header="${index}" value="${esc(field.headerName)}">
-        <button class="btn-delete" type="button" data-remove-field="${index}">Remove</button>
-    </div>`).join("");
     const saved = state.templates.map(template => `<tr>
         <td>${esc(template.name)}</td>
         <td class="fmt-${esc(template.formatType)}">${esc(template.formatType)}</td>
@@ -373,9 +465,8 @@ function templatesHtml() {
         <td>${esc(template.fields.map(field => field.headerName).join(", "))}</td>
     </tr>`).join("");
     const waiting = state.templates.some(template => template.status === "PENDING");
-    const unused = state.catalogue.filter(column => !draft.fields.some(field => field.sourceColumn === column));
     return `
-        ${head("Formats", "Format Templates", "Map list columns to CSV, Generic XML, or Standard XML fields. Fircosoft layout stays fixed. A saved version waits for approval.")}
+        ${head("Formats", "Format Templates", "The file holds exactly the gs_ columns you pick, one row per entry of the list version you export. A saved version waits for approval.")}
         <section class="export-card template-card">
             <h2>Create new template</h2>
             <p class="muted">Saving sends this version for approval. Exports keep using the last approved template until an approver accepts the new one.</p>
@@ -385,19 +476,14 @@ function templatesHtml() {
                     <input name="name" value="${esc(draft.name)}" required>
                     <select name="formatType" id="template-format">
                         <option value="CSV" ${draft.formatType === "CSV" ? "selected" : ""}>CSV Export</option>
-                        <option value="GENERIC_XML" ${draft.formatType === "GENERIC_XML" ? "selected" : ""}>Generic XML</option>
-                        <option value="STANDARD_XML" ${draft.formatType === "STANDARD_XML" ? "selected" : ""}>Standard XML</option>
+                        <option value="XML" ${draft.formatType === "XML" ? "selected" : ""}>XML Export</option>
                     </select>
                 </div>
-                <div class="field-label">Current fields</div>
-                <div class="field-list">${rows}</div>
-                <div class="field-row">
-                    <select id="new-source" ${unused.length ? "" : "disabled"}>${unused.map(column => `<option>${esc(column)}</option>`).join("")}</select>
-                    <span class="muted">→</span>
-                    <input id="new-header" placeholder="Header name" ${unused.length ? "" : "disabled"}>
-                    <button class="btn-edit" type="button" id="add-field" ${unused.length ? "" : "disabled"}>Add Field</button>
-                </div>
-                <div style="margin-top:14px"><button class="btn-primary" type="submit">Save</button></div>
+                ${tablePickerHtml(draft)}
+                <div class="field-label">Export columns · ${draft.fields.length} · in file order</div>
+                <p class="muted hint">Each column keeps its own name in the file unless you type a new one.</p>
+                <div class="field-list">${exportColumnsHtml(draft)}</div>
+                <div style="margin-top:14px"><button class="btn-primary" type="submit" ${draft.fields.length ? "" : "disabled"}>Save</button></div>
             </form>
         </section>
         <section class="table-card" style="margin-top:16px">
@@ -407,6 +493,24 @@ function templatesHtml() {
             </table>
             ${state.templates.length ? "" : '<div class="empty">No format templates yet.</div>'}
         </section>`;
+}
+
+function draftFromActive(formatType = "CSV") {
+    const active = state.templates.find(template => template.formatType === formatType && template.active);
+    if (active) {
+        const fields = active.fields.map(field => ({
+            sourceTable: field.sourceTable && field.sourceTable !== "List record" ? field.sourceTable : null,
+            sourceColumn: field.sourceColumn,
+            headerName: field.headerName
+        }));
+        return { name: active.name, formatType: active.formatType, fields };
+    }
+    const xml = formatType === "XML";
+    return {
+        name: xml ? "XML Export" : "CSV Export",
+        formatType,
+        fields: []
+    };
 }
 
 function templateStatus(template) {
@@ -486,7 +590,7 @@ function tablesHtml(template) {
     });
     return [...groups.entries()].map(([table, fields]) => `
         <div class="source-table">
-            <h3>Table: ${esc(table)}</h3>
+            <h3>Table: ${esc(table)}${table !== "List record" ? ` <span class="muted link-note">· matched on BNP_ID</span>` : ""}</h3>
             <table>
                 <thead><tr><th>Column</th><th>Data</th><th>Export header</th></tr></thead>
                 <tbody>${fields.map(field => `<tr>
@@ -496,31 +600,6 @@ function tablesHtml(template) {
                 </tr>`).join("")}</tbody>
             </table>
         </div>`).join("");
-}
-
-function draftFromActive(formatType = "CSV") {
-    const active = state.templates.find(template => template.formatType === formatType && template.active);
-    if (active) {
-        return {
-            name: active.name,
-            formatType: active.formatType,
-            fields: active.fields.map(field => ({ sourceColumn: field.sourceColumn, headerName: field.headerName }))
-        };
-    }
-    const defaultNames = {
-        CSV: "CSV Export",
-        GENERIC_XML: "Generic XML Export",
-        STANDARD_XML: "Standard XML Export"
-    };
-    return {
-        name: defaultNames[formatType] || (formatType + " Export"),
-        formatType,
-        fields: [
-            { sourceColumn: "id", headerName: formatType === "STANDARD_XML" ? "Id" : "id" },
-            { sourceColumn: "action", headerName: formatType === "STANDARD_XML" ? "Action" : "action" },
-            { sourceColumn: "record_date", headerName: formatType === "STANDARD_XML" ? "RecordDate" : "record_date" }
-        ]
-    };
 }
 
 function quarantineHtml() {
@@ -664,8 +743,52 @@ async function onClick(event) {
         document.getElementById("modal-root").innerHTML = "";
         return;
     }
-    if (event.target.id === "add-field") {
-        addTemplateField();
+    const pickTable = event.target.closest("[data-pick-table]");
+    if (pickTable) {
+        readDraftFromForm();
+        state.activeTable = pickTable.dataset.pickTable;
+        renderTemplatesKeepingFilter();
+        return;
+    }
+    if (event.target.matches && event.target.matches("input[data-pick-column]")) {
+        readDraftFromForm();
+        toggleColumn(event.target.dataset.pickColumn, event.target.checked);
+        renderTemplatesKeepingFilter();
+        return;
+    }
+    const pickAll = event.target.closest("[data-pick-all]");
+    if (pickAll) {
+        readDraftFromForm();
+        const source = state.sources.find(item => tableKey(item.table) === state.activeTable);
+        if (source) source.columns.forEach(column => toggleColumn(column.name, pickAll.dataset.pickAll === "all"));
+        renderTemplatesKeepingFilter();
+        return;
+    }
+    const resetHeader = event.target.closest("[data-reset-header]");
+    if (resetHeader) {
+        readDraftFromForm();
+        const field = state.templateDraft.fields[Number(resetHeader.dataset.resetHeader)];
+        if (field) field.headerName = field.sourceColumn;
+        renderTemplatesKeepingFilter();
+        return;
+    }
+    const move = event.target.closest("[data-move]");
+    if (move) {
+        readDraftFromForm();
+        const [index, step] = move.dataset.move.split(":").map(Number);
+        const fields = state.templateDraft.fields;
+        const target = index + step;
+        if (target >= 0 && target < fields.length) {
+            [fields[index], fields[target]] = [fields[target], fields[index]];
+        }
+        renderTemplatesKeepingFilter();
+        return;
+    }
+    const removeField = event.target.closest("[data-remove-field]");
+    if (removeField) {
+        readDraftFromForm();
+        state.templateDraft.fields.splice(Number(removeField.dataset.removeField), 1);
+        renderTemplatesKeepingFilter();
         return;
     }
     const fill = event.target.closest(".demo-accounts button");
@@ -694,12 +817,6 @@ async function onClick(event) {
             approve.disabled = false;
         }
         return;
-    }
-    const removeField = event.target.closest("[data-remove-field]");
-    if (removeField) {
-        readDraftFromForm();
-        state.templateDraft.fields.splice(Number(removeField.dataset.removeField), 1);
-        render();
     }
 }
 
@@ -782,13 +899,17 @@ async function onSubmit(event) {
                 body: {
                     name: state.templateDraft.name,
                     formatType: state.templateDraft.formatType,
-                    fields: state.templateDraft.fields
+                    fields: state.templateDraft.fields.map(field => ({
+                        sourceTable: field.sourceTable,
+                        sourceColumn: field.sourceColumn,
+                        headerName: (field.headerName || "").trim() || field.sourceColumn
+                    }))
                 }
             });
             toast(saved.name + " version " + saved.versionNumber + " is pending for approval", "success");
             state.templateDraft = null;
             await refresh();
-            render();
+            renderTemplatesKeepingFilter();
         } catch (error) {
             toast(error.message, "error");
         }
@@ -799,7 +920,25 @@ let searchTimer;
 function onInput(event) {
     if (event.target.id === "template-format") {
         state.templateDraft = draftFromActive(event.target.value);
-        render();
+        renderTemplatesKeepingFilter();
+        return;
+    }
+    if (event.target.matches("[data-table-filter]")) {
+        applyTableFilter(event.target.value);
+        return;
+    }
+    if (event.target.matches("[data-draft-header]") && state.templateDraft) {
+        const index = Number(event.target.dataset.draftHeader);
+        const field = state.templateDraft.fields[index];
+        if (field) {
+            field.headerName = event.target.value;
+            const reset = document.querySelector(`[data-reset-header="${index}"]`);
+            if (reset) reset.disabled = event.target.value === field.sourceColumn;
+        }
+        return;
+    }
+    if (event.target.closest("#template-form") && event.target.name === "name" && state.templateDraft) {
+        state.templateDraft.name = event.target.value;
         return;
     }
     if (event.target.id === "versionId" || event.target.id === "fromDate" || event.target.id === "toDate") {
@@ -941,7 +1080,7 @@ function openEdit(subscriber) {
                 <h2>Edit subscriber</h2>
                 <input type="hidden" name="id" value="${subscriber.id}">
                 <label>Name<input name="name" value="${esc(subscriber.name)}" required></label>
-                <label>Format<select name="formatType">${options(["FIRCOSOFT", "GENERIC_XML", "STANDARD_XML", "CSV"], subscriber.formatType)}</select></label>
+                <label>Format<select name="formatType">${options(["CSV", "XML"], subscriber.formatType)}</select></label>
                 <label>Scope<select name="scope">${options(["ALL", "SANCTIONS", "WORLDCHECK", "PFA"], subscriber.scope)}</select></label>
                 <label>Mode<select name="exportMode">${options(["FULL", "DELTA"], subscriber.exportMode)}</select></label>
                 <label>Business line<input name="businessLine" value="${esc(subscriber.businessLine || "")}"></label>
@@ -964,25 +1103,48 @@ function readDraftFromForm() {
     state.templateDraft.name = data.get("name");
     state.templateDraft.formatType = data.get("formatType");
     state.templateDraft.fields.forEach((field, index) => {
-        const source = form.querySelector(`[data-draft-source="${index}"]`);
         const header = form.querySelector(`[data-draft-header="${index}"]`);
-        if (source) field.sourceColumn = source.value;
         if (header) field.headerName = header.value;
     });
 }
 
-function addTemplateField() {
-    readDraftFromForm();
-    const source = document.getElementById("new-source");
-    const header = document.getElementById("new-header");
-    if (!source || !source.value) return;
-    const headerName = (header && header.value.trim()) || source.value;
-    if (state.templateDraft.fields.some(field => field.sourceColumn === source.value)) {
-        toast(source.value + " is already on the template", "error");
-        return;
+function toggleColumn(column, on) {
+    const source = state.sources.find(item => tableKey(item.table) === state.activeTable);
+    if (!source) return;
+    if (source.builtIn || !source.keyColumn) return;
+    const fields = state.templateDraft.fields;
+    const key = fieldKey(source.table, column);
+    const index = fields.findIndex(field => fieldKey(field.sourceTable, field.sourceColumn) === key);
+    if (on && index < 0) {
+        fields.push({
+            sourceTable: source.table || null,
+            sourceColumn: column,
+            headerName: column
+        });
+    } else if (!on && index >= 0) {
+        fields.splice(index, 1);
     }
-    state.templateDraft.fields.push({ sourceColumn: source.value, headerName });
+}
+
+function applyTableFilter(value) {
+    const needle = String(value || "").trim().toLowerCase();
+    state.tableFilter = value;
+    document.querySelectorAll("[data-pick-table]").forEach(button => {
+        button.hidden = needle !== "" && !button.dataset.tableName.includes(needle);
+    });
+}
+
+function renderTemplatesKeepingFilter() {
+    const columnList = document.querySelector(".column-list");
+    const scroll = columnList ? columnList.scrollTop : 0;
     render();
+    const filter = document.querySelector("[data-table-filter]");
+    if (filter && state.tableFilter) {
+        filter.value = state.tableFilter;
+        applyTableFilter(state.tableFilter);
+    }
+    const again = document.querySelector(".column-list");
+    if (again) again.scrollTop = scroll;
 }
 
 async function boot() {
@@ -1056,7 +1218,7 @@ async function loadSystem() {
     try {
         state.system = await api("/api/system");
         document.getElementById("db-h2").classList.toggle("selected", state.system.mode === "h2");
-        document.getElementById("db-postgres").classList.toggle("selected", state.system.mode === "postgres");
+        document.getElementById("db-oracle").classList.toggle("selected", state.system.mode === "oracle");
     } catch (error) {
         /* the sidebar still shows the default H2 selection */
     }
@@ -1065,10 +1227,10 @@ async function loadSystem() {
 function explainDatabase(mode) {
     const current = state.system ? state.system.mode : "h2";
     if (mode === current) return;
-    if (mode === "postgres") {
-        toast("PostgreSQL stays off. The reader still filters date of birth and does not apply business line or region.", "info");
+    if (mode === "oracle") {
+        toast("To use Oracle, restart with the oracle profile. See docs/oracle-testing.md.", "info");
     } else {
-        toast("H2 Mock is the default. Restart without the postgres profile.", "info");
+        toast("H2 Mock is the default. Restart without the oracle profile.", "info");
     }
 }
 
@@ -1092,12 +1254,26 @@ async function api(url, options = {}) {
     return data;
 }
 
-function toast(message, tone) {
+function toast(message, tone, action) {
     const element = document.getElementById("toast");
-    element.textContent = message;
-    element.className = "toast show " + (tone || "");
+    element.textContent = "";
+    const text = document.createElement("span");
+    text.textContent = message;
+    element.appendChild(text);
+    if (action) {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "toast-action";
+        button.textContent = action.label;
+        button.addEventListener("click", () => {
+            element.classList.remove("show");
+            action.run();
+        });
+        element.appendChild(button);
+    }
+    element.className = "toast show " + (tone || "") + (action ? " has-action" : "");
     clearTimeout(toast.timer);
-    toast.timer = setTimeout(() => element.classList.remove("show"), 3200);
+    toast.timer = setTimeout(() => element.classList.remove("show"), action ? 6000 : 3200);
 }
 
 function esc(value) {

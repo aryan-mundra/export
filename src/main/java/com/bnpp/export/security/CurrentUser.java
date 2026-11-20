@@ -17,6 +17,15 @@ public final class CurrentUser {
         return authentication.getName();
     }
 
+    /** The signed-in username for audit columns, or "system" for work no user started. */
+    public static String actor() {
+        Authentication authentication = authentication();
+        if (authentication == null || !authentication.isAuthenticated() || authentication.getName() == null) {
+            return "system";
+        }
+        return authentication.getName();
+    }
+
     public static String displayName() {
         Authentication authentication = authentication();
         if (authentication != null && authentication.getPrincipal() instanceof ExportPrincipal principal) {

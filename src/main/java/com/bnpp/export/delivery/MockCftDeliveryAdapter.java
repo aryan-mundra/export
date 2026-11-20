@@ -8,7 +8,7 @@ import org.springframework.stereotype.Component;
 import java.util.UUID;
 
 @Component
-@ConditionalOnProperty(name = "export.mock.enabled", havingValue = "true")
+@ConditionalOnProperty(name = "export.delivery.mock", havingValue = "true", matchIfMissing = true)
 public class MockCftDeliveryAdapter {
 
     public String deliver(SubscriberProfile subscriber, ExportFile file) {

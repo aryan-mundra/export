@@ -1,4 +1,0 @@
-# Read source rows from PostgreSQL. Application tables stay on H2.
-export:
-  mock:
-    enabled: false

@@ -16,7 +16,7 @@ import java.time.Duration;
 import java.util.UUID;
 
 @Component
-@ConditionalOnProperty(name = "export.mock.enabled", havingValue = "false", matchIfMissing = true)
+@ConditionalOnProperty(name = "export.delivery.mock", havingValue = "false")
 public class DefaultCftDeliveryAdapter {
 
     private final HttpClient httpClient = HttpClient.newBuilder()

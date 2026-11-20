@@ -40,4 +40,9 @@ public class RecordBatchProvider {
             consumer.accept(List.copyOf(buffer));
         }
     }
+
+    /** A database count when the selector supports one; empty means count by streaming. */
+    public java.util.Optional<RecordSelector.Counts> count(RecordSelector.CountRequest request) {
+        return recordSelector.count(request);
+    }
 }

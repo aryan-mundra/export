@@ -14,7 +14,7 @@ import java.time.LocalDateTime;
 
 @Data
 @Entity
-@Table(name = "subscriber_profiles")
+@Table(name = "ver_export_subscriber")
 public class SubscriberProfile {
 
     @Id

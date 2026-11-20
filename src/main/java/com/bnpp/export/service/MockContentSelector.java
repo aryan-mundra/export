@@ -68,6 +68,7 @@ public class MockContentSelector implements RecordSelector {
         Map<String, Object> record = new LinkedHashMap<>();
         long id = (versionId == null ? 1 : versionId) * 1_000_000L + index;
         record.put("id", id);
+        record.put(SourceCatalogService.RECORD_KEY, "BNP" + id);
         record.put("name", NAMES[index % NAMES.length]);
         record.put("country", COUNTRIES[index % COUNTRIES.length]);
         String recordDate = LocalDate.of(1950 + (index % 50), (index % 12) + 1, (index % 27) + 1).toString();

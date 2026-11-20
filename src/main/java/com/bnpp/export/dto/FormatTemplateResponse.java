@@ -25,7 +25,9 @@ public record FormatTemplateResponse(
             String sourceColumn,
             String headerName,
             String description,
-            int position
+            int position,
+            String joinColumn,
+            String joinField
     ) {
     }
 }
