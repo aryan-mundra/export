@@ -24,7 +24,7 @@ import java.util.Set;
 @Component
 public class GoldenSourceEnricher {
 
-    /** Stays under Oracle's limit of 1,000 values in an IN list. */
+    /** Keeps each IN list short, so the statement stays small and its plan reusable. */
     private static final int CHUNK = 500;
 
     private final SourceCatalogService catalog;

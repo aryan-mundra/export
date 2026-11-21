@@ -22,19 +22,16 @@ public class FormatField {
     @Column(nullable = false)
     private Long templateId;
 
-    /** A gs_ table name, or null for a built-in list record column. */
+    /** The gs_ table the column comes from. */
     private String sourceTable;
 
     @Column(nullable = false)
     private String sourceColumn;
 
-    /**
-     * For a gs_ column: the column of the gs_ table that links its rows to a list record.
-     * Null means the table's RECORD_ID or ID column.
-     */
+    /** The gs_ table's BNP_ID column, which matches its rows to a list entry. */
     private String joinColumn;
 
-    /** For a gs_ column: the list record field that joinColumn must equal. Null means the record id. */
+    /** The list entry field that joinColumn must equal: its BNP_ID. */
     private String joinField;
 
     @Column(nullable = false)

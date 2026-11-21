@@ -44,7 +44,10 @@ public record JobDetailResponse(
             String holdReason,
             String acceptedBy,
             Integer formatTemplateVersion,
-            String archiveFileName
+            String archiveFileName,
+            Long snapshotId,
+            String snapshotLabel,
+            String snapshotOutcome
     ) {
     }
 

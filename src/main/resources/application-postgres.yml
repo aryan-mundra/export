@@ -1,19 +1,19 @@
-# Oracle: list records (ver_version_member), certified versions (ver_version) and gs_ tables are
-# read from Oracle, and the module's own ver_export_ tables are written to the same schema.
+# PostgreSQL: list entries (ver_version_member), certified versions (ver_version) and gs_ tables are
+# read from PostgreSQL, and the module's own ver_export_ tables are written to the same database.
 #
 # Set the connection with environment variables:
-#   REGLISS_DB_URL       default jdbc:oracle:thin:@//localhost:1521/FREEPDB1
+#   REGLISS_DB_URL       default jdbc:postgresql://localhost:5432/regliss
 #   REGLISS_DB_USER      default regliss
 #   REGLISS_DB_PASSWORD  required
 #
-# Load the mock data first with db/oracle/regliss-mock.sql. See docs/oracle-testing.md.
+# Load the mock data first with db/postgres/regliss-mock.sql. See docs/postgres-testing.md.
 spring:
   datasource:
-    url: ${REGLISS_DB_URL:jdbc:oracle:thin:@//localhost:1521/FREEPDB1}
+    url: ${REGLISS_DB_URL:jdbc:postgresql://localhost:5432/regliss}
     username: ${REGLISS_DB_USER:regliss}
     password: ${REGLISS_DB_PASSWORD:}
     hikari:
-      pool-name: regliss-oracle
+      pool-name: regliss-postgres
       maximum-pool-size: 10
       connection-timeout: 10000
   jpa:
@@ -23,6 +23,7 @@ spring:
 
 export:
   mock:
+    # The source data comes from the database, not from the built-in demo seed.
     enabled: false
   delivery:
     # Keep sends simulated while testing; set to false to POST files to real CFT endpoints.

@@ -1,6 +1,5 @@
 package com.bnpp.export.service;
 
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
 
@@ -18,15 +17,14 @@ import java.util.Optional;
 import java.util.function.Consumer;
 
 /**
- * Reads the list records of a certified version from VER_VERSION_MEMBER in the database
- * (Oracle in the oracle profile) and hands them on in batches.
+ * Reads the list entries of a certified version from VER_VERSION_MEMBER and hands them on in
+ * batches. The same SQL runs on H2 (seeded with demo data) and on PostgreSQL.
  *
  * Full exports get every record of the version. Delta exports get records that carry an action,
  * limited to CHANGED_ON within the date window when one is given. The scope picks the list flag.
  * Business line and region are applied afterwards, per subscriber, by the orchestrator.
  */
 @Component
-@ConditionalOnProperty(name = "export.mock.enabled", havingValue = "false")
 public class ContentSelector implements RecordSelector {
 
     private static final int BATCH_SIZE = 500;
@@ -37,9 +35,11 @@ public class ContentSelector implements RecordSelector {
               FROM VER_VERSION_MEMBER
              WHERE VERSION_ID = ?""";
 
+    private final DataSource dataSource;
     private final JdbcTemplate jdbcTemplate;
 
     public ContentSelector(DataSource dataSource) {
+        this.dataSource = dataSource;
         this.jdbcTemplate = new JdbcTemplate(dataSource);
         this.jdbcTemplate.setFetchSize(BATCH_SIZE);
     }
@@ -58,13 +58,13 @@ public class ContentSelector implements RecordSelector {
         sql.append(" ORDER BY RECORD_ID");
 
         List<Map<String, Object>> batch = new ArrayList<>(BATCH_SIZE);
-        jdbcTemplate.query(sql.toString(), rs -> {
+        JdbcStreams.query(dataSource, sql.toString(), args, rs -> {
             batch.add(toRecord(rs));
             if (batch.size() >= BATCH_SIZE) {
                 consumer.accept(List.copyOf(batch));
                 batch.clear();
             }
-        }, args.toArray());
+        });
         if (!batch.isEmpty()) {
             consumer.accept(List.copyOf(batch));
         }
@@ -73,7 +73,7 @@ public class ContentSelector implements RecordSelector {
     /**
      * One COUNT query instead of reading the records. Applies the same rules as an export: scope,
      * delta window, the subscriber's business line and region (case-insensitive, as the export does),
-     * and a record is quarantined when any required field is empty or only spaces.
+     * the template's row filters, and a record is quarantined when any required field is empty or only spaces.
      */
     @Override
     public Optional<Counts> count(CountRequest request) {
@@ -88,7 +88,7 @@ public class ContentSelector implements RecordSelector {
                     : column.name() + " IS NULL");
         }
         String rejected = blankChecks.isEmpty() ? "0" : "CASE WHEN " + String.join(" OR ", blankChecks) + " THEN 1 ELSE 0 END";
-        StringBuilder sql = new StringBuilder("SELECT COUNT(*), COALESCE(SUM(" + rejected + "), 0) FROM VER_VERSION_MEMBER WHERE VERSION_ID = ?");
+        StringBuilder sql = new StringBuilder("SELECT COUNT(*), COALESCE(SUM(" + rejected + "), 0) FROM VER_VERSION_MEMBER e WHERE VERSION_ID = ?");
         List<Object> args = new ArrayList<>();
         args.add(request.versionId());
         appendFilters(sql, args, request.scope(), request.exportMode(), request.fromDate(), request.toDate());
@@ -99,6 +99,10 @@ public class ContentSelector implements RecordSelector {
         if (request.region() != null && !request.region().isBlank()) {
             sql.append(" AND UPPER(REGION) = UPPER(?)");
             args.add(request.region());
+        }
+        if (request.rowFilter() != null && !request.rowFilter().isEmpty()) {
+            sql.append(request.rowFilter().and());
+            args.addAll(request.rowFilter().args());
         }
         return Optional.ofNullable(jdbcTemplate.queryForObject(sql.toString(), (rs, row) -> {
             long total = rs.getLong(1);

@@ -8,13 +8,16 @@ import org.springframework.context.ApplicationListener;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
 
+import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Demo golden-source tables for H2 mock mode. Row ids match the ids MockContentSelector
- * produces (versionId * 1,000,000 + index), so exports can join them to list records.
- * Names use mixed case on purpose: the gs_ prefix is matched without regard to case.
+ * Demo source data for the H2 database: VER_VERSION_MEMBER (the list entries of each certified
+ * version) and the golden-source (gs_) tables. The module then reads them with exactly the SQL it
+ * uses on PostgreSQL. Every gs_ row carries BNP_ID = "BNP" + entry id (versionId * 1,000,000 + index).
+ * Some gs_ table names are quoted in mixed case on purpose: the gs_ prefix is matched without
+ * regard to case.
  */
 @Component
 @ConditionalOnProperty(name = "export.mock.enabled", havingValue = "true")
@@ -25,8 +28,17 @@ public class MockGoldenSourceSeeder implements ApplicationListener<ApplicationRe
 
     /** Mirrors the versions seeded by CertifiedVersionSeeder. */
     private static final long[] VERSIONS = {42L, 43L, 44L, 77L};
-    private static final int RECORDS_PER_VERSION = 400;
 
+    private static final String[] NAMES = {
+            "Amina Diallo", "Hugo Martin", "Priya Nair", "Elena Rossi", "Noah Keller",
+            "Sofia Alvarez", "James Okonkwo", "Mei Chen", "Lars Andersen", "Fatima Haddad",
+            "Owen Blake", "Chloe Dubois", "Ravi Kapoor", "Nora Berg", "Hassan Ali",
+            "Emma Clarke", "Luca Bianchi", "Yuki Tanaka", "Ines Moreau", "Daniel Kruger"
+    };
+    private static final String[] ACTIONS = {"ADD", "MODIFY", "DELETE"};
+    private static final String[] RISKS = {"LOW", "MEDIUM", "HIGH"};
+    private static final String[] LINES = {"CIB", "Retail", "Compliance", "Financial Security"};
+    private static final String[] REGIONS = {"EMEA", "APAC", "Europe", "Americas", "Global"};
     private static final String[] CITIES = {"Paris", "New York", "London", "Berlin", "Mumbai", "Singapore", "Dubai", "Zurich", "Tokyo", "Sao Paulo"};
     private static final String[] COUNTRIES = {"FR", "US", "GB", "DE", "IN", "SG", "AE", "CH", "JP", "BR"};
     private static final String[] STREETS = {"Rue de Rivoli", "Fifth Avenue", "Baker Street", "Unter den Linden", "Marine Drive"};
@@ -35,13 +47,58 @@ public class MockGoldenSourceSeeder implements ApplicationListener<ApplicationRe
     private static final String[] ID_TYPES = {"PASSPORT", "NATIONAL_ID", "TAX_ID"};
 
     private final JdbcTemplate jdbcTemplate;
+    private final int entriesPerVersion;
+    private final int recordsPerVersion;
 
-    public MockGoldenSourceSeeder(JdbcTemplate jdbcTemplate) {
+    public MockGoldenSourceSeeder(JdbcTemplate jdbcTemplate, MockProperties mockProperties) {
         this.jdbcTemplate = jdbcTemplate;
+        this.entriesPerVersion = Math.max(0, mockProperties.getRecordsPerSubscriber());
+        // Every list entry has gs_ rows.
+        this.recordsPerVersion = Math.max(400, entriesPerVersion);
+    }
+
+    /** The list entries of every demo version: all on every list, each with an action and a recent change date. */
+    private void seedListEntries() {
+        jdbcTemplate.execute("""
+                CREATE TABLE IF NOT EXISTS VER_VERSION_MEMBER (
+                    VERSION_ID BIGINT NOT NULL,
+                    RECORD_ID BIGINT NOT NULL,
+                    BNP_ID VARCHAR(20),
+                    NAME VARCHAR(200),
+                    COUNTRY VARCHAR(2),
+                    RECORD_DATE DATE,
+                    ACTION VARCHAR(10),
+                    RISK_RATING VARCHAR(10),
+                    BUSINESS_LINE VARCHAR(50),
+                    REGION VARCHAR(50),
+                    CHANGED_ON DATE,
+                    ON_SANCTIONS SMALLINT DEFAULT 0 NOT NULL,
+                    ON_WORLDCHECK SMALLINT DEFAULT 0 NOT NULL,
+                    ON_PFA SMALLINT DEFAULT 0 NOT NULL,
+                    PRIMARY KEY (VERSION_ID, RECORD_ID))""");
+        Integer existing = jdbcTemplate.queryForObject("SELECT COUNT(*) FROM VER_VERSION_MEMBER", Integer.class);
+        if (existing != null && existing > 0) {
+            return;
+        }
+        for (long version : VERSIONS) {
+            List<Object[]> rows = new ArrayList<>();
+            for (int index = 1; index <= entriesPerVersion; index++) {
+                long id = version * 1_000_000L + index;
+                LocalDate recordDate = LocalDate.of(1950 + (index % 50), (index % 12) + 1, (index % 27) + 1);
+                rows.add(new Object[] {
+                        version, id, "BNP" + id, NAMES[index % NAMES.length], COUNTRIES[index % COUNTRIES.length],
+                        java.sql.Date.valueOf(recordDate), ACTIONS[index % ACTIONS.length], RISKS[index % 3],
+                        LINES[index % 4], REGIONS[index % 5], java.sql.Date.valueOf(LocalDate.now().minusDays(index % 90)),
+                        1, 1, 1});
+            }
+            jdbcTemplate.batchUpdate("INSERT INTO VER_VERSION_MEMBER VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", rows);
+        }
+        jdbcTemplate.execute("CREATE INDEX IF NOT EXISTS IX_VER_VERSION_MEMBER_BNP ON VER_VERSION_MEMBER (VERSION_ID, BNP_ID)");
     }
 
     @Override
     public synchronized void onApplicationEvent(ApplicationReadyEvent event) {
+        seedListEntries();
         // Every gs_ table carries BNP_ID, the key shared with the list entries ("BNP" + entry id here).
         jdbcTemplate.execute("""
                 CREATE TABLE IF NOT EXISTS GS_PARTY (
@@ -100,7 +157,7 @@ public class MockGoldenSourceSeeder implements ApplicationListener<ApplicationRe
         List<Object[]> programs = new ArrayList<>();
         List<Object[]> countryRisks = new ArrayList<>();
         for (long version : VERSIONS) {
-            for (int index = 1; index <= RECORDS_PER_VERSION; index++) {
+            for (int index = 1; index <= recordsPerVersion; index++) {
                 long id = version * 1_000_000L + index;
                 String bnpId = "BNP" + id;
                 int country = index % COUNTRIES.length;

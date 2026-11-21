@@ -8,6 +8,8 @@ import com.bnpp.export.model.FormatField;
 import com.bnpp.export.model.FormatTemplate;
 import com.bnpp.export.model.SubscriberProfile;
 import com.bnpp.export.repository.FormatFieldRepository;
+import com.bnpp.export.repository.FormatFilterRepository;
+import com.bnpp.export.model.FormatFilter;
 import com.bnpp.export.repository.FormatTemplateRepository;
 import com.bnpp.export.repository.SubscriberRepository;
 import com.bnpp.export.security.CurrentUser;
@@ -32,70 +34,57 @@ import static org.springframework.http.HttpStatus.NOT_FOUND;
 @Service
 public class FormatTemplateService {
 
-    public static final String SOURCE_TABLE = "List record";
-
     /** The only file formats the module builds. */
     public static final List<String> FORMATS = List.of("CSV", XmlFormatGenerator.FORMAT);
 
-    public static final List<String> SOURCE_COLUMNS = List.of(
-            "id", "action", "record_date", "name", "country", "risk_rating");
-
-
-    private static final Map<String, String> COLUMN_DETAILS = Map.of(
-            "id", "Record identifier",
-            "action", "Add, modify, or delete",
-            "record_date", "Date of the list record",
-            "name", "Party name",
-            "country", "Country of the record",
-            "risk_rating", "Risk rating on the record");
-
     private final FormatTemplateRepository templateRepository;
     private final FormatFieldRepository fieldRepository;
+    private final FormatFilterRepository filterRepository;
     private final SubscriberRepository subscriberRepository;
     private final SourceCatalogService sourceCatalog;
+    private final RowFilterService rowFilters;
     private final AuditService auditService;
 
     public FormatTemplateService(FormatTemplateRepository templateRepository,
                                  FormatFieldRepository fieldRepository,
+                                 FormatFilterRepository filterRepository,
                                  SubscriberRepository subscriberRepository,
                                  SourceCatalogService sourceCatalog,
+                                 RowFilterService rowFilters,
                                  AuditService auditService) {
         this.templateRepository = templateRepository;
         this.fieldRepository = fieldRepository;
+        this.filterRepository = filterRepository;
         this.subscriberRepository = subscriberRepository;
         this.sourceCatalog = sourceCatalog;
+        this.rowFilters = rowFilters;
         this.auditService = auditService;
     }
 
-    /** The built-in list record columns first, then every gs_ table in the source database. */
+    /** Every gs_ table in the source database, with its columns. */
     public List<SourceTableResponse> sources() {
         List<SourceTableResponse> sources = new ArrayList<>();
-        sources.add(new SourceTableResponse(
-                null, SOURCE_TABLE, true, "id", true,
-                SOURCE_COLUMNS.stream()
-                        .map(column -> new SourceColumnResponse(column, null, COLUMN_DETAILS.get(column), false))
-                        .toList()));
         for (SourceCatalogService.SourceTable table : sourceCatalog.tables()) {
             boolean linkable = table.keyColumn() != null;
             sources.add(new SourceTableResponse(
-                    table.name(), table.name(), false, table.keyColumn(), linkable,
+                    table.name(), table.name(), table.keyColumn(), linkable,
                     table.columns().stream()
-                            .map(column -> new SourceColumnResponse(column.name(), column.type(), null, column.linkable()))
+                            .map(column -> new SourceColumnResponse(column.name(), column.type(), column.kind()))
                             .toList()));
         }
         return sources;
     }
 
     /**
-     * @param keyColumn the default link column (RECORD_ID/ID, matched to the record id), or null when the user must choose
-     * @param joinable  whether the table has any column it can be linked on
+     * @param keyColumn the table's BNP_ID column, or null when it has none (the table cannot be used)
+     * @param joinable  whether the table can be matched to list entries
      */
-    public record SourceTableResponse(String table, String label, boolean builtIn, String keyColumn,
+    public record SourceTableResponse(String table, String label, String keyColumn,
                                       boolean joinable, List<SourceColumnResponse> columns) {
     }
 
-    /** @param linkable gs_ table: the column can link rows to a record. List record: the field can be linked to. */
-    public record SourceColumnResponse(String name, String type, String description, boolean linkable) {
+    /** @param kind text, number, date or other: how the column can be filtered */
+    public record SourceColumnResponse(String name, String type, String kind) {
     }
 
     public List<FormatTemplateResponse> list() {
@@ -123,12 +112,16 @@ public class FormatTemplateService {
      * Saves a new version for approval. A name that already exists for this format adds a version to
      * that template; a new name starts a new template at version 1. Nothing changes for subscribers
      * until an approver approves the version.
+     *
+     * A version still waiting for review is replaced (SUPERSEDED), so approvers only ever review the
+     * newest submission. Saving after an approver requested changes is a resubmission.
      */
     @Transactional
     public FormatTemplateResponse save(FormatTemplateRequest request) {
         String formatType = normalizeFormat(request.formatType());
         String name = request.name().trim();
         List<FormatFieldRequest> fields = validateFields(request.fields(), true, formatType);
+        List<FormatFilter> filters = rowFilters.validate(request.filters(), toFields(fields));
         FormatTemplate latest = templateRepository
                 .findFirstByFormatTypeAndNameIgnoreCaseOrderByVersionNumberDesc(formatType, name).orElse(null);
         FormatTemplate template = new FormatTemplate();
@@ -145,10 +138,56 @@ public class FormatTemplateService {
             template.setFamilyId(template.getId());
             template = templateRepository.save(template);
         }
+        boolean resubmission = latest != null && "CHANGES_REQUESTED".equals(latest.getStatus());
+        if (latest != null && "PENDING".equals(latest.getStatus())) {
+            latest.setStatus("SUPERSEDED");
+            latest.setReviewedBy(CurrentUser.username());
+            latest.setReviewedByName(CurrentUser.displayName());
+            latest.setReviewedAt(LocalDateTime.now());
+            templateRepository.save(latest);
+            auditService.template(latest.getId(), "TEMPLATE_SUPERSEDED",
+                    "v" + latest.getVersionNumber() + " replaced by v" + template.getVersionNumber() + " before it was reviewed");
+        }
         saveFields(template.getId(), fields);
-        auditService.template(template.getId(), "TEMPLATE_SUBMITTED",
-                formatType + " \"" + template.getName() + "\" v" + template.getVersionNumber() + ": " + describe(fields));
+        for (FormatFilter filter : filters) {
+            filter.setTemplateId(template.getId());
+        }
+        filterRepository.saveAll(filters);
+        auditService.template(template.getId(), resubmission ? "TEMPLATE_RESUBMITTED" : "TEMPLATE_SUBMITTED",
+                formatType + " \"" + template.getName() + "\" v" + template.getVersionNumber() + ": " + describe(fields)
+                        + ". Rows: " + describeRows(filters));
         return toResponse(template);
+    }
+
+    /** The row filters in words, or "every list entry" when there are none. */
+    private String describeRows(List<FormatFilter> filters) {
+        return filters.isEmpty() ? "every list entry"
+                : String.join("; ", filters.stream().map(rowFilters::describe).toList());
+    }
+
+    /** The row filters of a template version, in order. */
+    public List<FormatFilter> filters(Long templateId) {
+        if (templateId == null) {
+            return List.of();
+        }
+        return filterRepository.findByTemplateIdOrderByPositionAsc(templateId);
+    }
+
+    /** The row filters of a template version in words, for screens and messages. */
+    public List<String> filterSummaries(Long templateId) {
+        return filters(templateId).stream().map(rowFilters::describe).toList();
+    }
+
+    private static List<FormatField> toFields(List<FormatFieldRequest> fields) {
+        List<FormatField> rows = new ArrayList<>();
+        for (FormatFieldRequest field : fields) {
+            FormatField row = new FormatField();
+            row.setSourceTable(field.sourceTable());
+            row.setSourceColumn(field.sourceColumn());
+            row.setHeaderName(field.headerName());
+            rows.add(row);
+        }
+        return rows;
     }
 
     private String describe(List<FormatFieldRequest> fields) {
@@ -185,17 +224,13 @@ public class FormatTemplateService {
                 .map(FormatTemplate::getName).orElse(null);
     }
 
-    /** Puts a version in use for its own template only; other templates are not affected. */
+    /**
+     * Puts a version in use for its own template only; other templates are not affected. Its
+     * subscribers get it from their next export. The comment is optional.
+     */
     @Transactional
-    public FormatTemplateResponse approve(Long id) {
-        if (!CurrentUser.approver()) {
-            throw new ResponseStatusException(FORBIDDEN, "Only an approver can approve a template");
-        }
-        FormatTemplate template = templateRepository.findById(id)
-                .orElseThrow(() -> new ResponseStatusException(NOT_FOUND, "Template not found"));
-        if (!"PENDING".equals(template.getStatus())) {
-            throw new ResponseStatusException(CONFLICT, "This template is not waiting for approval");
-        }
+    public FormatTemplateResponse approve(Long id, String comment) {
+        FormatTemplate template = forDecision(id);
         templateRepository.findByFamilyIdAndActiveTrue(template.getFamilyId()).forEach(existing -> {
             existing.setActive(false);
             templateRepository.save(existing);
@@ -205,10 +240,82 @@ public class FormatTemplateService {
         template.setApprovedBy(CurrentUser.username());
         template.setApprovedByName(CurrentUser.displayName());
         template.setApprovedAt(LocalDateTime.now());
-        templateRepository.save(template);
+        decided(template, StringUtils.trimToNull(comment));
         auditService.template(template.getId(), "TEMPLATE_APPROVED",
-                template.getFormatType() + " \"" + template.getName() + "\" v" + template.getVersionNumber() + " is now in use");
+                template.getFormatType() + " \"" + template.getName() + "\" v" + template.getVersionNumber() + " is now in use"
+                        + (template.getReviewComment() == null ? "" : ". Comment: " + template.getReviewComment()));
         return toResponse(template);
+    }
+
+    public FormatTemplateResponse approve(Long id) {
+        return approve(id, null);
+    }
+
+    /** Closes a version for good. The version in use, if any, stays in use. A reason is required. */
+    @Transactional
+    public FormatTemplateResponse reject(Long id, String comment) {
+        FormatTemplate template = forDecision(id);
+        template.setStatus("REJECTED");
+        decided(template, requiredComment(comment, "rejecting"));
+        auditService.template(template.getId(), "TEMPLATE_REJECTED",
+                "v" + template.getVersionNumber() + " rejected. Comment: " + template.getReviewComment());
+        return toResponse(template);
+    }
+
+    /**
+     * Returns a version to its maker, who edits it and resubmits it as a new version. The version
+     * in use, if any, stays in use meanwhile. What to change is required.
+     */
+    @Transactional
+    public FormatTemplateResponse requestChanges(Long id, String comment) {
+        FormatTemplate template = forDecision(id);
+        template.setStatus("CHANGES_REQUESTED");
+        decided(template, requiredComment(comment, "requesting changes"));
+        auditService.template(template.getId(), "TEMPLATE_CHANGES_REQUESTED",
+                "v" + template.getVersionNumber() + " returned to " + template.getCreatedByName() + ". Comment: " + template.getReviewComment());
+        return toResponse(template);
+    }
+
+    /** A version an approver may decide on now: waiting for review, and not submitted by them. */
+    private FormatTemplate forDecision(Long id) {
+        if (!CurrentUser.approver()) {
+            throw new ResponseStatusException(FORBIDDEN, "Only an approver can review a template");
+        }
+        FormatTemplate template = templateRepository.findById(id)
+                .orElseThrow(() -> new ResponseStatusException(NOT_FOUND, "Template not found"));
+        if ("SUPERSEDED".equals(template.getStatus())) {
+            int newest = templateRepository.findFirstByFamilyIdOrderByVersionNumberDesc(template.getFamilyId())
+                    .map(FormatTemplate::getVersionNumber).orElse(template.getVersionNumber());
+            throw new ResponseStatusException(CONFLICT, "Version " + template.getVersionNumber()
+                    + " was replaced by version " + newest + " before it was reviewed. Review the newest version.");
+        }
+        if (!"PENDING".equals(template.getStatus())) {
+            throw new ResponseStatusException(CONFLICT, "This version has already been reviewed ("
+                    + template.getStatus().toLowerCase(Locale.ROOT).replace('_', ' ') + ")");
+        }
+        if (template.getCreatedBy() != null && template.getCreatedBy().equalsIgnoreCase(CurrentUser.username())) {
+            throw new ResponseStatusException(FORBIDDEN, "You submitted this version. Another approver must review it.");
+        }
+        return template;
+    }
+
+    private void decided(FormatTemplate template, String comment) {
+        template.setReviewedBy(CurrentUser.username());
+        template.setReviewedByName(CurrentUser.displayName());
+        template.setReviewedAt(LocalDateTime.now());
+        template.setReviewComment(comment);
+        templateRepository.save(template);
+    }
+
+    private static String requiredComment(String comment, String action) {
+        String text = StringUtils.trimToEmpty(comment);
+        if (text.length() < 10) {
+            throw new ResponseStatusException(BAD_REQUEST, "Explain to the maker why you are " + action + " (at least 10 characters)");
+        }
+        if (text.length() > 2000) {
+            throw new ResponseStatusException(BAD_REQUEST, "Keep the comment under 2,000 characters");
+        }
+        return text;
     }
 
     /**
@@ -286,7 +393,7 @@ public class FormatTemplateService {
 
     /**
      * Checks the source of each column but not the export names, which may be blank or repeated
-     * while the user is still typing. Used for the live preview.
+     * while the user is still typing. Used by the data explorer.
      */
     public List<FormatField> previewFields(List<FormatFieldRequest> fields) {
         List<FormatField> rows = new ArrayList<>();
@@ -318,7 +425,7 @@ public class FormatTemplateService {
             String source = field.sourceColumn() == null ? "" : field.sourceColumn().trim();
             String joinColumn = null;
             String joinField = null;
-            if (table == null || SOURCE_TABLE.equalsIgnoreCase(table)) {
+            if (table == null) {
                 // A file holds only the gs_ columns picked on the template. List entries decide which
                 // rows there are; their own fields are not offered as columns.
                 throw new ResponseStatusException(BAD_REQUEST,
@@ -414,13 +521,11 @@ public class FormatTemplateService {
         List<FormatTemplateResponse.FieldResponse> fields = fieldRepository.findByTemplateIdOrderByPositionAsc(template.getId()).stream()
                 .map(field -> new FormatTemplateResponse.FieldResponse(
                         field.getId(),
-                        field.isGoldenSource() ? field.getSourceTable() : SOURCE_TABLE,
+                        field.getSourceTable(),
                         field.getSourceColumn(),
                         field.getHeaderName(),
-                        field.isGoldenSource()
-                                ? "Matched where " + StringUtils.defaultString(field.getJoinColumn(), SourceCatalogService.KEY)
-                                        + " = list entry " + StringUtils.defaultString(field.getJoinField(), SourceCatalogService.RECORD_KEY)
-                                : COLUMN_DETAILS.getOrDefault(field.getSourceColumn(), field.getSourceColumn()),
+                        "Matched where " + StringUtils.defaultString(field.getJoinColumn(), SourceCatalogService.KEY)
+                                + " = list entry " + StringUtils.defaultString(field.getJoinField(), SourceCatalogService.RECORD_KEY),
                         field.getPosition(),
                         field.getJoinColumn(),
                         field.getJoinField()))
@@ -440,6 +545,19 @@ public class FormatTemplateService {
                 template.getApprovedAt(),
                 template.getCreatedAt(),
                 fields,
-                usedBy(template.getFamilyId()));
+                filters(template.getId()).stream()
+                        .map(filter -> new FormatTemplateResponse.FilterResponse(
+                                filter.getSourceTable(),
+                                filter.getSourceColumn(),
+                                filter.getOperator(),
+                                rowFilters.values(filter),
+                                filter.isIncludeBlank(),
+                                rowFilters.describe(filter)))
+                        .toList(),
+                usedBy(template.getFamilyId()),
+                template.getReviewedBy(),
+                template.getReviewedByName(),
+                template.getReviewedAt(),
+                template.getReviewComment());
     }
 }

@@ -102,7 +102,7 @@ class ExportModuleIntegrationTest {
                 .andExpect(jsonPath("$[0].status").value("APPROVED"))
                 .andExpect(jsonPath("$[0].fields", hasSize(3)))
                 // Demo templates are built from gs_ columns only
-                .andExpect(jsonPath("$[0].fields[*].sourceTable", org.hamcrest.Matchers.everyItem(org.hamcrest.Matchers.is("GS_PARTY"))));
+                .andExpect(jsonPath("$[0].fields[*].sourceTable", org.hamcrest.Matchers.everyItem(org.hamcrest.Matchers.is("gs_party"))));
 
         // A file holds only gs_ columns: the list entry's own fields cannot be picked.
         mockMvc.perform(post("/api/format-templates")
@@ -129,8 +129,8 @@ class ExportModuleIntegrationTest {
                 .andExpect(jsonPath("$.active").value(false))
                 .andExpect(jsonPath("$.createdByName").value("List operator"))
                 .andExpect(jsonPath("$.fields", hasSize(4)))
-                .andExpect(jsonPath("$.fields[3].sourceTable").value("GS_PARTY"))
-                .andExpect(jsonPath("$.fields[3].joinColumn").value("BNP_ID"))
+                .andExpect(jsonPath("$.fields[3].sourceTable").value("gs_party"))
+                .andExpect(jsonPath("$.fields[3].joinColumn").value("bnp_id"))
                 .andExpect(jsonPath("$.fields[3].joinField").value("bnp_id"))
                 .andReturn();
         Number templateId = com.jayway.jsonpath.JsonPath.read(created.getResponse().getContentAsString(), "$.id");
@@ -212,7 +212,7 @@ class ExportModuleIntegrationTest {
      * Every active subscriber gets a file, whatever list the version belongs to: the subscriber's
      * scope filters the records inside it. The demo data has no blank fields, so nothing is held.
      * Quarantine, accepting omissions and the delivery proof on a held file are covered by
-     * OracleExportFilesTest, whose data has blank fields.
+     * PostgresExportFilesTest, whose data has blank fields.
      */
     @Test
     void exportWritesAFileForEverySubscriber() throws Exception {
@@ -331,17 +331,16 @@ class ExportModuleIntegrationTest {
     void templatesPickColumnsFromGoldenSourceTables() throws Exception {
         mockMvc.perform(get("/api/format-templates/sources").with(user("maker").roles("MAKER")))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$[0].builtIn").value(true))
-                .andExpect(jsonPath("$[0].label").value("List record"))
+                .andExpect(jsonPath("$[*].label", org.hamcrest.Matchers.not(org.hamcrest.Matchers.hasItem("List record"))))
                 .andExpect(jsonPath("$[*].table", org.hamcrest.Matchers.hasItems(
-                        "GS_PARTY", "gs_address", "Gs_Identifier", "GS_SANCTION_PROGRAM", "GS_LOAD_LOG")))
-                .andExpect(jsonPath("$[*].table", org.hamcrest.Matchers.not(org.hamcrest.Matchers.hasItem("REF_COUNTRY"))))
+                        "gs_party", "gs_address", "Gs_Identifier", "gs_sanction_program", "gs_load_log")))
+                .andExpect(jsonPath("$[*].table", org.hamcrest.Matchers.not(org.hamcrest.Matchers.hasItem("ref_country"))))
                 // Every usable gs_ table has BNP_ID; GS_LOAD_LOG has none and is locked
-                .andExpect(jsonPath("$[?(@.table == 'GS_LOAD_LOG')].keyColumn").value(org.hamcrest.Matchers.contains((Object) null)))
-                .andExpect(jsonPath("$[?(@.table == 'GS_LOAD_LOG')].joinable").value(false))
-                .andExpect(jsonPath("$[?(@.table == 'GS_COUNTRY_RISK')].keyColumn").value("BNP_ID"))
+                .andExpect(jsonPath("$[?(@.table == 'gs_load_log')].keyColumn").value(org.hamcrest.Matchers.contains((Object) null)))
+                .andExpect(jsonPath("$[?(@.table == 'gs_load_log')].joinable").value(false))
+                .andExpect(jsonPath("$[?(@.table == 'gs_country_risk')].keyColumn").value("bnp_id"))
                 .andExpect(jsonPath("$[?(@.table == 'gs_address')].keyColumn").value("bnp_id"))
-                .andExpect(jsonPath("$[?(@.table == 'GS_PARTY')].keyColumn").value("BNP_ID"));
+                .andExpect(jsonPath("$[?(@.table == 'gs_party')].keyColumn").value("bnp_id"));
 
         String badTable = "{\"name\":\"X\",\"formatType\":\"XML\",\"fields\":[{\"sourceTable\":\"REF_COUNTRY\",\"sourceColumn\":\"NAME\",\"headerName\":\"n\"}]}";
         mockMvc.perform(post("/api/format-templates").with(user("maker").roles("MAKER"))
@@ -352,7 +351,7 @@ class ExportModuleIntegrationTest {
         mockMvc.perform(post("/api/format-templates").with(user("maker").roles("MAKER"))
                         .contentType("application/json").content(noKey))
                 .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.message").value("GS_LOAD_LOG has no BNP_ID column, so its rows cannot be matched to list entries"));
+                .andExpect(jsonPath("$.message").value("gs_load_log has no BNP_ID column, so its rows cannot be matched to list entries"));
         String duplicateHeader = """
                 {"name":"X","formatType":"XML","fields":[
                   {"sourceTable":"GS_PARTY","sourceColumn":"BNP_ID","headerName":"same"},
@@ -362,19 +361,20 @@ class ExportModuleIntegrationTest {
                         .contentType("application/json").content(duplicateHeader))
                 .andExpect(status().isBadRequest());
 
-        mockMvc.perform(post("/api/format-templates/preview").with(user("maker").roles("MAKER"))
+        // The data explorer shows the rows the template would put in a file
+        mockMvc.perform(post("/api/format-templates/explore").with(user("maker").roles("MAKER"))
                         .contentType("application/json")
                         .content("""
                                 {"fields":[
                                   {"sourceTable":"GS_PARTY","sourceColumn":"BNP_ID","headerName":""},
                                   {"sourceTable":"gs_party","sourceColumn":"full_name","headerName":""}
-                                ]}
+                                ],"limit":3}
                                 """))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.versionId").value(42))
-                .andExpect(jsonPath("$.recordIds", hasSize(3)))
-                .andExpect(jsonPath("$.rows[0][0]").value("BNP42000001"))
-                .andExpect(jsonPath("$.rows[0][1]").value("Party 42000001"));
+                .andExpect(jsonPath("$.rows", hasSize(3)))
+                .andExpect(jsonPath("$.rows[0].cells[0]").value("BNP42000001"))
+                .andExpect(jsonPath("$.rows[0].cells[1]").value("Party 42000001"));
 
         MvcResult created = mockMvc.perform(post("/api/format-templates").with(user("maker").roles("MAKER"))
                         .contentType("application/json")
@@ -387,8 +387,8 @@ class ExportModuleIntegrationTest {
                                 ]}
                                 """))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.fields[1].sourceTable").value("GS_PARTY"))
-                .andExpect(jsonPath("$.fields[1].sourceColumn").value("FULL_NAME"))
+                .andExpect(jsonPath("$.fields[1].sourceTable").value("gs_party"))
+                .andExpect(jsonPath("$.fields[1].sourceColumn").value("full_name"))
                 .andExpect(jsonPath("$.fields[1].headerName").value("PartyName"))
                 .andExpect(jsonPath("$.fields[2].sourceTable").value("gs_address"))
                 .andExpect(jsonPath("$.fields[3].sourceTable").value("Gs_Identifier"))

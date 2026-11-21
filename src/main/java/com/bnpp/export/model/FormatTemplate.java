@@ -38,6 +38,11 @@ public class FormatTemplate {
     /** The approved version in use for its template. At most one per family. */
     private boolean active;
 
+    /**
+     * PENDING (waiting for an approver), APPROVED, CHANGES_REQUESTED (returned to the maker, who
+     * resubmits as a new version), REJECTED (closed), or SUPERSEDED (a newer version was submitted
+     * before this one was reviewed).
+     */
     @Column(nullable = false)
     private String status;
 
@@ -52,6 +57,17 @@ public class FormatTemplate {
     private String approvedByName;
 
     private LocalDateTime approvedAt;
+
+    /** Who decided on this version (approved, rejected, requested changes, or replaced it), and when. */
+    private String reviewedBy;
+
+    private String reviewedByName;
+
+    private LocalDateTime reviewedAt;
+
+    /** The approver's comment: required when rejecting or requesting changes. */
+    @Column(length = 2000)
+    private String reviewComment;
 
     private LocalDateTime createdAt;
 

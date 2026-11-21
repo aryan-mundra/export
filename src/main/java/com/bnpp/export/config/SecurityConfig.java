@@ -31,7 +31,8 @@ public class SecurityConfig {
                         .requestMatchers("/", "/index.html", "/css/**", "/js/**", "/img/**", "/favicon.ico").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/auth/login").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/auth/config").permitAll()
-                        .requestMatchers(HttpMethod.POST, "/api/format-templates/*/approve").hasRole("APPROVER")
+                        .requestMatchers(HttpMethod.POST, "/api/format-templates/*/approve",
+                                "/api/format-templates/*/reject", "/api/format-templates/*/request-changes").hasRole("APPROVER")
                         .requestMatchers(HttpMethod.POST, "/api/subscribers/*/approve-endpoint").hasRole("APPROVER")
                         .anyRequest().authenticated())
                 .csrf(csrf -> csrf.disable())

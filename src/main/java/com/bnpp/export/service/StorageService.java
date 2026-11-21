@@ -97,7 +97,7 @@ public class StorageService {
             paths.filter(Files::isRegularFile)
                     .filter(path -> {
                         String name = path.getFileName().toString();
-                        return name.endsWith(".part") || name.endsWith(".body");
+                        return name.endsWith(".part") || name.endsWith(".body") || name.endsWith(".staging");
                     })
                     .forEach(path -> {
                         try {

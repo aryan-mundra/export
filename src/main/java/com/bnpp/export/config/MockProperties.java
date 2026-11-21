@@ -9,5 +9,5 @@ public class MockProperties {
 
     private boolean enabled = true;
 
-    private int recordsPerSubscriber = 50;
+    private int recordsPerSubscriber = 400;
 }

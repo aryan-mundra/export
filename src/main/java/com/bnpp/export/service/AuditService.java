@@ -12,6 +12,7 @@ public class AuditService {
     public static final String EXPORT_JOB = "EXPORT_JOB";
     public static final String SUBSCRIBER = "SUBSCRIBER";
     public static final String TEMPLATE = "TEMPLATE";
+    public static final String SNAPSHOT = "DATA_VERSION";
 
     private final ExportAuditLogRepository repository;
 
@@ -29,6 +30,10 @@ public class AuditService {
 
     public void template(Long templateId, String action, String details) {
         write(TEMPLATE, templateId, null, null, action, details);
+    }
+
+    public void snapshot(Long snapshotId, String action, String details) {
+        write(SNAPSHOT, snapshotId, null, null, action, details);
     }
 
     private void write(String entityType, Long entityId, Long jobId, Long subscriberId, String action, String details) {

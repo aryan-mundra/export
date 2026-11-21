@@ -15,4 +15,6 @@ public interface ExportJobSubscriberStatusRepository extends JpaRepository<Expor
     long countByStatusIn(Collection<String> statuses);
 
     boolean existsBySubscriberId(Long subscriberId);
+
+    List<ExportJobSubscriberStatus> findBySnapshotIdOrderByIdDesc(Long snapshotId);
 }

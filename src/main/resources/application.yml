@@ -1,6 +1,7 @@
-# Default: everything runs in an in-memory H2 database with generated demo data.
-# To run against Oracle instead (see docs/oracle-testing.md):
-#   mvn spring-boot:run -Dspring-boot.run.profiles=oracle
+# Default: everything runs in an in-memory H2 database with generated demo data. H2 runs in
+# PostgreSQL mode with lower-case names, and the module uses the same SQL as on PostgreSQL.
+# To run against PostgreSQL instead (see docs/postgres-testing.md):
+#   mvn spring-boot:run -Dspring-boot.run.profiles=postgres
 server:
   port: 8082
   servlet:
@@ -16,7 +17,7 @@ spring:
   application:
     name: export-module
   datasource:
-    url: jdbc:h2:mem:regliss;DB_CLOSE_DELAY=-1;MODE=Oracle
+    url: jdbc:h2:mem:regliss;DB_CLOSE_DELAY=-1;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE;DEFAULT_NULL_ORDERING=HIGH
     username: sa
     password: ""
   jpa:
@@ -33,10 +34,10 @@ spring:
 
 export:
   mock:
-    # true: list records, certified versions and gs_ tables are generated in memory.
-    # false: they are read from the database (the oracle profile).
+    # true: demo certified versions, list entries and gs_ tables are seeded into the H2 database.
+    # false: they are already in the database (the postgres profile).
     enabled: true
-    records-per-subscriber: 50
+    records-per-subscriber: 400
   delivery:
     # true: CFT sends are simulated. false: files are POSTed to each subscriber's endpoint.
     mock: true

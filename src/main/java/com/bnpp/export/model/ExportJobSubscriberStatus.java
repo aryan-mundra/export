@@ -53,6 +53,14 @@ public class ExportJobSubscriberStatus {
 
     private Integer formatTemplateVersion;
 
+    /** The data version (snapshot) this file was built from. A retry rebuilds it from the same one. */
+    private Long snapshotId;
+
+    private String snapshotLabel;
+
+    /** CREATED: this export produced a new data version. REUSED: the data was identical to an existing one. */
+    private String snapshotOutcome;
+
     @Column(length = 1000)
     private String archivePath;
 

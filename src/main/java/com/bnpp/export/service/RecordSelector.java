@@ -28,6 +28,7 @@ public interface RecordSelector {
      * @param businessLine   null or blank for no business line filter
      * @param region         null or blank for no region filter
      * @param requiredFields record fields that must not be blank (blank ones are quarantined)
+     * @param rowFilter      the template's row filters, as a condition on the list entry row aliased e
      */
     record CountRequest(Long versionId,
                         String scope,
@@ -36,7 +37,8 @@ public interface RecordSelector {
                         LocalDate toDate,
                         String businessLine,
                         String region,
-                        List<String> requiredFields) {
+                        List<String> requiredFields,
+                        RowFilterService.Condition rowFilter) {
     }
 
     /** Records that would go in the file, and records that would be quarantined. */

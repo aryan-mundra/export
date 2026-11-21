@@ -8,6 +8,7 @@ import com.bnpp.export.dto.JobDetailResponse;
 import com.bnpp.export.format.ExportFormat;
 import com.bnpp.export.format.RecordBatchProvider;
 import com.bnpp.export.model.CertifiedVersion;
+import com.bnpp.export.model.DataSnapshot;
 import com.bnpp.export.model.DeliveryRecord;
 import com.bnpp.export.model.DeliveryReport;
 import com.bnpp.export.model.ExportAuditLog;
@@ -77,6 +78,8 @@ public class ExportOrchestrator {
     private final GoldenSourceEnricher goldenSourceEnricher;
     private final ExportManifestService manifestService;
     private final AuditService auditService;
+    private final RowFilterService rowFilters;
+    private final SnapshotService snapshotService;
     private final ExportOrchestrator self;
 
     public ExportOrchestrator(SubscriberRepository subscriberRepository,
@@ -95,7 +98,11 @@ public class ExportOrchestrator {
                               GoldenSourceEnricher goldenSourceEnricher,
                               ExportManifestService manifestService,
                               AuditService auditService,
+                              RowFilterService rowFilters,
+                              SnapshotService snapshotService,
                               @Lazy ExportOrchestrator self) {
+        this.rowFilters = rowFilters;
+        this.snapshotService = snapshotService;
         this.goldenSourceEnricher = goldenSourceEnricher;
         this.manifestService = manifestService;
         this.auditService = auditService;
@@ -318,6 +325,7 @@ public class ExportOrchestrator {
         FormatTemplate template = formatTemplateService.inUse(subscriber.getTemplateFamilyId())
                 .orElseThrow(() -> new ResponseStatusException(BAD_REQUEST, noTemplate(subscriber)));
         List<FormatField> fields = formatTemplateService.fields(template.getId());
+        RowFilterService.Condition rowFilter = rowFilters.condition(formatTemplateService.filters(template.getId()), "e");
         StorageService.PendingFile pending = storageService.reserve(
                 subscriber.getName() + "_sample", version.getVersionId(), format.fileExtension());
         long written;
@@ -327,8 +335,10 @@ public class ExportOrchestrator {
                     // Stops reading as soon as the sample is full, instead of reading the whole version.
                     recordBatchProvider.stream(version.getVersionId(), subscriber.getScope(), subscriber.getExportMode(),
                             null, null, 50, batch -> {
-                                List<Map<String, Object>> accepted = batch.stream()
+                                List<Map<String, Object>> matching = batch.stream()
                                         .filter(record -> profileMatch(subscriber, record))
+                                        .toList();
+                                List<Map<String, Object>> accepted = rowFilters.keep(version.getVersionId(), matching, rowFilter).stream()
                                         .filter(record -> qualityChecker.validateRecord(record, columns) == null)
                                         .toList();
                                 for (Map<String, Object> record : goldenSourceEnricher.enrich(accepted, fields)) {
@@ -469,9 +479,12 @@ public class ExportOrchestrator {
             return previewRow(subscriber, false, false, 0, 0,
                     "Not on the " + version.getListName() + " list");
         }
-        RecordSelector.Counts counts = countFor(version, subscriber, fromDate, toDate, columns);
+        FormatTemplate template = formatTemplateService.inUse(subscriber.getTemplateFamilyId()).orElse(null);
+        RowFilterService.Condition rowFilter = template == null ? RowFilterService.Condition.NONE
+                : rowFilters.condition(formatTemplateService.filters(template.getId()), "e");
+        RecordSelector.Counts counts = countFor(version, subscriber, fromDate, toDate, columns, rowFilter);
         String outcome;
-        if (formatTemplateService.inUse(subscriber.getTemplateFamilyId()).isEmpty()) {
+        if (template == null) {
             outcome = "Will fail: " + noTemplate(subscriber);
         } else if (counts.rejected() > 0) {
             outcome = "Held until omissions are accepted";
@@ -502,6 +515,7 @@ public class ExportOrchestrator {
                 subscriber.getRegion(),
                 template == null ? null : template.getName(),
                 template == null ? null : template.getVersionNumber(),
+                template == null ? List.of() : formatTemplateService.filterSummaries(template.getId()),
                 included,
                 datesApplied,
                 records,
@@ -546,12 +560,12 @@ public class ExportOrchestrator {
             }
 
             requireVersion(job.getVersionId());
-            rememberTemplate(status, subscriber);
             ExportFormat format = formats.get(subscriber.getFormatType().toUpperCase(Locale.ROOT));
             if (format == null) {
                 throw new IllegalArgumentException("Unsupported format " + subscriber.getFormatType());
             }
-            Streamed streamed = streamFile(job, subscriber, status, format);
+            DataSnapshot snapshot = snapshotFor(job, status, subscriber);
+            Streamed streamed = streamFile(job, subscriber, status, format, snapshot);
             status.setRecordsProcessed(toInt(streamed.valid));
             status.setRecordsQuarantined(toInt(streamed.rejected));
 
@@ -639,11 +653,50 @@ public class ExportOrchestrator {
     }
 
     /** Records which template version this subscriber's file is built with: the one in use for its template. */
-    private void rememberTemplate(ExportJobSubscriberStatus status, SubscriberProfile subscriber) {
+    private FormatTemplate rememberTemplate(ExportJobSubscriberStatus status, SubscriberProfile subscriber) {
         FormatTemplate template = formatTemplateService.inUse(subscriber.getTemplateFamilyId())
                 .orElseThrow(() -> new IllegalStateException(noTemplate(subscriber)));
         status.setFormatTemplateId(template.getId());
         status.setFormatTemplateVersion(template.getVersionNumber());
+        return template;
+    }
+
+    /**
+     * The data version this subscriber's file is built from.
+     *
+     * A retry uses the version the first attempt used, so it sends the same data. Within one export,
+     * subscribers on the same template share one version: the source is read once per template, not
+     * once per subscriber. Otherwise the current data is read and matched against stored versions.
+     */
+    private DataSnapshot snapshotFor(ExportJob job, ExportJobSubscriberStatus status, SubscriberProfile subscriber) {
+        if (status.getSnapshotId() != null) {
+            DataSnapshot snapshot = snapshotService.get(status.getSnapshotId());
+            status.setFormatTemplateId(snapshot.getTemplateId());
+            status.setFormatTemplateVersion(snapshot.getMajor());
+            statusRepository.save(status);
+            return snapshot;
+        }
+        FormatTemplate template = rememberTemplate(status, subscriber);
+        for (ExportJobSubscriberStatus sibling : statusRepository.findByExportJobIdOrderByIdAsc(job.getId())) {
+            if (!sibling.getId().equals(status.getId()) && sibling.getSnapshotId() != null
+                    && template.getId().equals(sibling.getFormatTemplateId())) {
+                status.setSnapshotId(sibling.getSnapshotId());
+                status.setSnapshotLabel(sibling.getSnapshotLabel());
+                status.setSnapshotOutcome(sibling.getSnapshotOutcome());
+                statusRepository.save(status);
+                return snapshotService.get(sibling.getSnapshotId());
+            }
+        }
+        SnapshotService.Resolution resolution = snapshotService.resolve(job.getVersionId(), template, job.getId());
+        DataSnapshot snapshot = resolution.snapshot();
+        status.setSnapshotId(snapshot.getId());
+        status.setSnapshotLabel(snapshot.getLabel());
+        status.setSnapshotOutcome(resolution.created() ? "CREATED" : "REUSED");
+        statusRepository.save(status);
+        audit(job.getId(), subscriber.getId(), resolution.created() ? "DATA_VERSION_CREATED" : "DATA_VERSION_REUSED",
+                template.getName() + " · " + snapshot.getListName() + ": data version " + snapshot.getLabel()
+                        + (resolution.created() ? " created (" + snapshot.getRowCount() + " rows)" : " reused, the data has not changed"));
+        return snapshot;
     }
 
     private static String noTemplate(SubscriberProfile subscriber) {
@@ -653,16 +706,19 @@ public class ExportOrchestrator {
     }
 
     /**
-     * Streams one subscriber's file: each batch of records is filtered, quality-checked, joined to
-     * its gs_ values and written to the file and the manifest straight away. Quarantined records are
-     * saved in batches. Nothing accumulates, so memory use does not grow with the size of the file.
+     * Streams one subscriber's file from its data version: the stored rows (already filtered by the
+     * template and holding their gs_ values) are narrowed to the subscriber's scope, delta window,
+     * business line and region, quality-checked, and written to the file and the manifest straight
+     * away. The source tables are not read again. Nothing accumulates, so memory use does not grow
+     * with the size of the file.
      */
     private Streamed streamFile(ExportJob job,
                                 SubscriberProfile subscriber,
                                 ExportJobSubscriberStatus status,
-                                ExportFormat format) {
+                                ExportFormat format,
+                                DataSnapshot snapshot) {
         List<String> columns = decisionColumns();
-        Long templateId = status.getFormatTemplateId();
+        Long templateId = snapshot.getTemplateId();
         List<FormatField> fields = formatTemplateService.fields(templateId);
         StorageService.PendingFile pending = storageService.reserve(subscriber.getName(), job.getVersionId(), format.fileExtension());
         Streamed run = new Streamed();
@@ -672,46 +728,52 @@ public class ExportOrchestrator {
         try {
             ExportFormat.RecordWriter out = format.open(pending.temp(), job.getVersionId(), subscriber.getName(), templateId);
             writer = out;
-            recordBatchProvider.stream(
-                    job.getVersionId(),
-                    subscriber.getScope(),
-                    subscriber.getExportMode(),
-                    job.getFromDate(),
-                    job.getToDate(),
-                    STREAM_BATCH,
-                    batch -> {
-                        List<Map<String, Object>> accepted = new ArrayList<>(batch.size());
-                        for (Map<String, Object> record : batch) {
-                            if (!profileMatch(subscriber, record)) {
-                                continue;
-                            }
-                            String reason = qualityChecker.validateRecord(record, columns);
-                            if (reason == null) {
-                                accepted.add(record);
-                            } else {
-                                held.add(quarantine(job, status, subscriber, record, reason));
-                                run.rejected++;
-                            }
+            List<Map<String, Object>> batch = new ArrayList<>(STREAM_BATCH);
+            java.util.function.Consumer<List<Map<String, Object>>> handle = rows -> {
+                List<Map<String, Object>> accepted = new ArrayList<>(rows.size());
+                for (Map<String, Object> record : rows) {
+                    if (!profileMatch(subscriber, record)) {
+                        continue;
+                    }
+                    String reason = qualityChecker.validateRecord(record, columns);
+                    if (reason == null) {
+                        accepted.add(record);
+                    } else {
+                        held.add(quarantine(job, status, subscriber, record, reason));
+                        run.rejected++;
+                    }
+                }
+                if (!accepted.isEmpty()) {
+                    if (run.manifest == null) {
+                        run.manifest = manifestService.begin(job, status, subscriber, format.formatType(),
+                                pending.fileName(), pending.target().toString());
+                    }
+                    for (Map<String, Object> record : accepted) {
+                        write(out, record);
+                        run.manifest.add(record);
+                        run.valid++;
+                    }
+                }
+                if (held.size() >= STREAM_BATCH) {
+                    qualityChecker.saveQuarantineRecords(held);
+                    held.clear();
+                }
+                status.setRecordsProcessed(toInt(run.valid));
+                status.setRecordsQuarantined(toInt(run.rejected));
+                statusRepository.save(status);
+            };
+            snapshotService.stream(snapshot,
+                    new SnapshotService.Selection(subscriber.getScope(), subscriber.getExportMode(), job.getFromDate(), job.getToDate()),
+                    fields, record -> {
+                        batch.add(record);
+                        if (batch.size() >= STREAM_BATCH) {
+                            handle.accept(List.copyOf(batch));
+                            batch.clear();
                         }
-                        if (!accepted.isEmpty()) {
-                            if (run.manifest == null) {
-                                run.manifest = manifestService.begin(job, status, subscriber, format.formatType(),
-                                        pending.fileName(), pending.target().toString());
-                            }
-                            for (Map<String, Object> record : goldenSourceEnricher.enrich(accepted, fields)) {
-                                write(out, record);
-                                run.manifest.add(record);
-                                run.valid++;
-                            }
-                        }
-                        if (held.size() >= STREAM_BATCH) {
-                            qualityChecker.saveQuarantineRecords(held);
-                            held.clear();
-                        }
-                        status.setRecordsProcessed(toInt(run.valid));
-                        status.setRecordsQuarantined(toInt(run.rejected));
-                        statusRepository.save(status);
                     });
+            if (!batch.isEmpty()) {
+                handle.accept(List.copyOf(batch));
+            }
             qualityChecker.saveQuarantineRecords(held);
             if (run.valid > 0) {
                 out.finish();
@@ -761,18 +823,20 @@ public class ExportOrchestrator {
                                            SubscriberProfile subscriber,
                                            LocalDate fromDate,
                                            LocalDate toDate,
-                                           List<String> columns) {
+                                           List<String> columns,
+                                           RowFilterService.Condition rowFilter) {
         RecordSelector.CountRequest request = new RecordSelector.CountRequest(
                 version.getVersionId(), subscriber.getScope(), subscriber.getExportMode(), fromDate, toDate,
-                subscriber.getBusinessLine(), subscriber.getRegion(), columns);
+                subscriber.getBusinessLine(), subscriber.getRegion(), columns, rowFilter);
         return recordBatchProvider.count(request).orElseGet(() -> {
             long[] counts = new long[2];
             recordBatchProvider.stream(version.getVersionId(), subscriber.getScope(), subscriber.getExportMode(),
                     fromDate, toDate, STREAM_BATCH, batch -> {
-                        for (Map<String, Object> record : batch) {
-                            if (profileMatch(subscriber, record)) {
-                                counts[qualityChecker.validateRecord(record, columns) == null ? 0 : 1]++;
-                            }
+                        List<Map<String, Object>> matching = batch.stream()
+                                .filter(record -> profileMatch(subscriber, record))
+                                .toList();
+                        for (Map<String, Object> record : rowFilters.keep(version.getVersionId(), matching, rowFilter)) {
+                            counts[qualityChecker.validateRecord(record, columns) == null ? 0 : 1]++;
                         }
                     });
             return new RecordSelector.Counts(counts[0], counts[1]);
@@ -1000,7 +1064,10 @@ public class ExportOrchestrator {
                                 status.getHoldReason(),
                                 status.getAcceptedBy(),
                                 status.getFormatTemplateVersion(),
-                                status.getArchivePath() == null ? null : Path.of(status.getArchivePath()).getFileName().toString()))
+                                status.getArchivePath() == null ? null : Path.of(status.getArchivePath()).getFileName().toString(),
+                                status.getSnapshotId(),
+                                status.getSnapshotLabel(),
+                                status.getSnapshotOutcome()))
                         .toList();
         List<JobDetailResponse.AuditEntry> audits =
                 auditLogRepository.findByExportJobIdOrderByTimestampAsc(job.getId()).stream()

@@ -14,32 +14,44 @@
 5. **Every file can be proven.** Each built file is recorded with its SHA-256 hash, and every record in it is
    listed, so "did subscriber X receive record Y, and in which file?" has an answer.
 6. **Template changes are versioned, not edited.** Saving a template adds a new version; approving one switches
-   which version is in use.
+   which version is in use. A version's columns and row filters never change after it is saved.
+7. **Four eyes on every template.** An approver approves, rejects, or sends back each version, and cannot decide on
+   a version they submitted. Rejecting or sending back needs a written reason, kept on the version and in the audit.
+   A maker's newer submission replaces one still waiting for review, so only the newest is ever reviewed.
 
 ## Tables
 
 | Table | One row per | Written when |
 |---|---|---|
 | `ver_export_subscriber` | Subscriber (format, scope, mode, delivery endpoint, chosen template) | A subscriber is added, changed, or its endpoint approved |
-| `ver_export_template` | Version of a named CSV or XML template (versions of one template share `family_id`; one approved version is in use per template) | A template is submitted or approved |
+| `ver_export_template` | Version of a named CSV or XML template (versions of one template share `family_id`; one approved version is in use per template). `status` is PENDING, APPROVED, CHANGES_REQUESTED, REJECTED or SUPERSEDED; `reviewed_by`, `reviewed_at` and `review_comment` hold the decision | A template is submitted, reviewed, or replaced by a newer submission |
 | `ver_export_template_field` | Column in a template version (gs_ table, column, name in the file, order; matched on BNP_ID) | A template is submitted |
+| `ver_export_template_filter` | Row filter of a template version: gs_ column, operator (`in`, `not_in`, `contains`, `eq`, `ne`, `gt`, `gte`, `lt`, `lte`, `between`, `empty`, `not_empty`), values (JSON), whether empty cells count. All filters of a version must pass | A template is submitted |
 | `ver_export_job` | Export run of a certified version (date window, counters, final status) | An export is triggered, and as it progresses |
-| `ver_export_job_subscriber` | Subscriber within a run (status, hold reason, retries, acceptance) | Each subscriber is processed, accepted, released, or retried |
+| `ver_export_job_subscriber` | Subscriber within a run (status, hold reason, retries, acceptance, the data version its file was built from and whether the run created or reused it) | Each subscriber is processed, accepted, released, or retried |
 | `ver_export_file` | File built for a subscriber (name, path, size, SHA-256, template version, status BUILDING/BUILT/SENT/FAILED, archive) | When a file starts streaming, when it is complete, and when it is sent |
 | `ver_export_file_record` | List record inside a file (record id, action, line number) | A file is built |
 | `ver_export_delivery` | Delivery attempt over CFT (tracking id, hash, result, error) | Each send attempt |
 | `ver_export_quarantine` | Record held back from a file, with the reason and who accepted the omission | A record fails the quality check, or omissions are accepted |
 | `ver_export_audit` | Change of any kind (entity type and id, action, details, actor, time) | Every write above |
+| `ver_export_snapshot` | Data version: what one template version produced from one list, numbered `template version.revision`, with its fingerprint, row counts, the changes against the previous version and how often it was reused | An export finds new data (created), or the same data again (usage counters) |
+| `ver_export_snapshot_row` | Line of a data version: line number, record id, and the key of its stored row | A data version is created |
+| `ver_export_snapshot_data` | Distinct row (list entry fields and template values), stored once and shared by every version that holds it | A data version holds a row not stored before |
+| `ver_export_snapshot_series` | Template and list pair, locked while a new data version is numbered | The first export of a template and list |
 | `ver_export_user` | User who can sign in to the module (role MAKER or APPROVER) | Seeded at start-up |
 
-The module reads, and never writes, `VER_VERSION` (certified versions), `VER_VERSION_MEMBER` (list entries, each with a `BNP_ID`) and the
-`GS_*` tables. In H2 mock mode the module fills `VER_VERSION` with demo versions itself; on Oracle they come from
-the database (see `db/oracle/regliss-mock.sql` and `docs/oracle-testing.md`).
+The module reads, and never writes, `ver_version` (certified versions), `ver_version_member` (list entries, each with a `BNP_ID`) and the
+`gs_*` tables. On H2 the module seeds them with demo data at start-up; on PostgreSQL they come from the database (see
+`db/postgres/regliss-mock.sql` and `docs/postgres-testing.md`).
+
+Data versions are never updated (apart from their usage counters) or deleted: each one can be downloaded, in any format,
+exactly as it was first produced.
 
 ## Audit actions
 
 | Entity type | Actions |
 |---|---|
-| `EXPORT_JOB` | `EXPORT_QUEUED`, `EXPORT_STARTED`, `SUBSCRIBER_STARTED`, `SUBSCRIBER_SKIPPED`, `SUBSCRIBER_HELD`, `OMISSIONS_ACCEPTED`, `DELIVERY_SUCCESS`, `SUBSCRIBER_FAILED`, `EXPORT_COMPLETED`, `EXPORT_HELD`, `EXPORT_FAILED` |
+| `EXPORT_JOB` | `EXPORT_QUEUED`, `EXPORT_STARTED`, `SUBSCRIBER_STARTED`, `DATA_VERSION_CREATED`, `DATA_VERSION_REUSED`, `SUBSCRIBER_SKIPPED`, `SUBSCRIBER_HELD`, `OMISSIONS_ACCEPTED`, `DELIVERY_SUCCESS`, `SUBSCRIBER_FAILED`, `EXPORT_COMPLETED`, `EXPORT_HELD`, `EXPORT_FAILED` |
 | `SUBSCRIBER` | `SUBSCRIBER_CREATED`, `SUBSCRIBER_UPDATED` (before and after), `ENDPOINT_APPROVED`, `SUBSCRIBER_DELETED` |
-| `TEMPLATE` | `TEMPLATE_SUBMITTED` (columns and names), `TEMPLATE_APPROVED` |
+| `DATA_VERSION` | `DATA_VERSION_CREATED` (rows, rows newly stored, changes against the previous version), `DATA_VERSION_REUSED`, `DATA_VERSION_DOWNLOADED` (format and audience) |
+| `TEMPLATE` | `TEMPLATE_SUBMITTED` (columns, names and row filters), `TEMPLATE_RESUBMITTED` (after changes were requested), `TEMPLATE_SUPERSEDED`, `TEMPLATE_CHANGES_REQUESTED`, `TEMPLATE_REJECTED`, `TEMPLATE_APPROVED` (each decision with the approver's comment) |

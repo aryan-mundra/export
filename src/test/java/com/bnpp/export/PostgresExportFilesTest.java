@@ -43,25 +43,25 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /**
- * The module's main job, checked end to end on the oracle profile: read list records and gs_ values
+ * The module's main job, checked end to end on the postgres profile: read list records and gs_ values
  * from the database and write them into correct CSV and XML files.
  *
- * The database is H2 in Oracle mode, loaded with db/oracle/regliss-mock.sql (the same file used on a
- * real Oracle). Every expected value is read back with plain SQL written here, independent of the
+ * The database is H2 in PostgreSQL mode, loaded with db/postgres/regliss-mock.sql (the same file used on a
+ * real PostgreSQL). Every expected value is read back with plain SQL written here, independent of the
  * module's code, and every file is read with a real CSV or XML parser.
  */
 @SpringBootTest(properties = {
-        "spring.profiles.active=oracle",
-        "spring.datasource.url=jdbc:h2:mem:oracle_export_files;MODE=Oracle;DB_CLOSE_DELAY=-1",
+        "spring.profiles.active=postgres",
+        "spring.datasource.url=jdbc:h2:mem:postgres_export_files;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE;DEFAULT_NULL_ORDERING=HIGH;DB_CLOSE_DELAY=-1",
         "spring.datasource.username=regliss",
         "spring.datasource.password=regliss",
         "spring.sql.init.mode=always",
-        "spring.sql.init.schema-locations=file:db/oracle/regliss-mock.sql",
+        "spring.sql.init.schema-locations=file:db/postgres/regliss-mock.sql",
         "spring.sql.init.encoding=UTF-8",
-        "export.storage.directory=target/oracle-export-files"
+        "export.storage.directory=target/postgres-export-files"
 })
 @AutoConfigureMockMvc
-class OracleExportFilesTest {
+class PostgresExportFilesTest {
 
     private static final long VERSION = 42L;
 

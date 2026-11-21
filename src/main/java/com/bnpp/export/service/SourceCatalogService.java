@@ -18,7 +18,7 @@ import static org.springframework.http.HttpStatus.SERVICE_UNAVAILABLE;
 
 /**
  * Reads the golden-source tables (any table whose name starts with gs_, in any case)
- * from the database: the in-memory H2 database in mock mode, Oracle in the oracle profile.
+ * from the database: H2 by default, PostgreSQL in the postgres profile.
  */
 @Service
 public class SourceCatalogService {
@@ -50,7 +50,7 @@ public class SourceCatalogService {
         try {
             List<SourceTable> tables = jdbc().execute((java.sql.Connection connection) -> {
                 DatabaseMetaData meta = connection.getMetaData();
-                // Only look in one schema: scanning every schema on a shared Oracle database is slow.
+                // Only look in one schema: scanning every schema on a shared database is slow.
                 String owner = schema != null ? schema : connection.getSchema();
                 List<SourceTable> found = new ArrayList<>();
                 try (ResultSet rows = meta.getTables(null, owner, "%", new String[] {"TABLE", "VIEW"})) {
@@ -134,6 +134,22 @@ public class SourceCatalogService {
         /** Whether rows can be linked to a record on this column (dates and large objects cannot). */
         public boolean linkable() {
             return numeric() || text();
+        }
+
+        public boolean date() {
+            String t = type == null ? "" : type.toUpperCase(Locale.ROOT);
+            return t.contains("DATE") || t.contains("TIMESTAMP");
+        }
+
+        /** How the column can be filtered and sorted: text, number, date, or other (not filterable). */
+        public String kind() {
+            if (date()) {
+                return "date";
+            }
+            if (numeric()) {
+                return "number";
+            }
+            return text() ? "text" : "other";
         }
     }
 

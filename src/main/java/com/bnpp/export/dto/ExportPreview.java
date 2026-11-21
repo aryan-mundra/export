@@ -25,6 +25,8 @@ public record ExportPreview(
             /** Template the file will be built with (its version in use), or null when the subscriber has none. */
             String templateName,
             Integer templateVersion,
+            /** The template's row filters in words; empty means every list entry. */
+            List<String> templateFilters,
             boolean included,
             boolean datesApplied,
             int records,

@@ -91,8 +91,8 @@ public class ExportController {
         boolean mock = mockProperties.isEnabled();
         return Map.of(
                 "mockEnabled", mock,
-                "mode", mock ? "h2" : "oracle",
-                "label", mock ? "H2 Mock" : "Oracle");
+                "mode", mock ? "h2" : "postgres",
+                "label", mock ? "H2" : "PostgreSQL");
     }
 
     @GetMapping("/subscribers")

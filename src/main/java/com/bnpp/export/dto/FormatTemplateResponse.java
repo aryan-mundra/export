@@ -19,9 +19,27 @@ public record FormatTemplateResponse(
         LocalDateTime approvedAt,
         LocalDateTime createdAt,
         List<FieldResponse> fields,
+        /** Row filters: only list entries that pass every one go in the file. Empty means every entry. */
+        List<FilterResponse> filters,
         /** Subscribers that use this template. */
-        List<String> usedBy
+        List<String> usedBy,
+        String reviewedBy,
+        String reviewedByName,
+        LocalDateTime reviewedAt,
+        /** The approver's comment on this version (reason for rejection or requested changes). */
+        String reviewComment
 ) {
+    /** @param summary the filter in words, e.g. "gs_address.city is Paris, London" */
+    public record FilterResponse(
+            String sourceTable,
+            String sourceColumn,
+            String op,
+            List<String> values,
+            boolean blank,
+            String summary
+    ) {
+    }
+
     public record FieldResponse(
             Long id,
             String sourceTable,
