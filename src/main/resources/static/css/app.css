@@ -1865,3 +1865,12 @@ tr.xp-version-row:hover { background: #f7fbf8; }
     .xp-vmeta .xp-rows { justify-self: start; text-align: left; }
     .xp-changes { white-space: normal; }
 }
+
+/* Database switch dialog */
+.db-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px 14px; }
+.db-grid .span-2 { grid-column: span 2; }
+.db-grid input { padding: 10px 12px; border: 1px solid #d3e2da; border-radius: 10px; font: inherit; font-weight: 500; }
+.db-restarting { text-align: center; justify-items: center; }
+.db-spinner { width: 34px; height: 34px; border-radius: 50%; border: 3px solid var(--green-soft); border-top-color: var(--green); animation: db-spin .9s linear infinite; }
+@keyframes db-spin { to { transform: rotate(360deg); } }
+@media (max-width: 560px) { .db-grid { grid-template-columns: 1fr; } .db-grid .span-2 { grid-column: auto; } }

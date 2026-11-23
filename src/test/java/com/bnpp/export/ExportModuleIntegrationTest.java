@@ -217,7 +217,15 @@ class ExportModuleIntegrationTest {
 
         mockMvc.perform(get("/api/system").session(maker))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.mode").value("h2"));
+                .andExpect(jsonPath("$.mode").value("h2"))
+                .andExpect(jsonPath("$.postgresPassword").doesNotExist());
+
+        // The Database switch restarts the module, which a test context cannot do: it says so and changes nothing.
+        mockMvc.perform(post("/api/system/database").session(maker)
+                        .contentType("application/json")
+                        .content("{\"mode\":\"postgres\",\"host\":\"localhost\",\"port\":5432,\"database\":\"shinedata\",\"username\":\"postgres\",\"password\":\"x\"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message", org.hamcrest.Matchers.containsString("cannot be switched")));
     }
 
     /**

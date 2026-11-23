@@ -2,72 +2,44 @@
 
 Put a PostgreSQL dump here (for example `shine-dump-shinedata-202611230033.sql`) and start the application
 with the `postgres` profile. Before anything else starts, the application loads the dump's data into the
-database configured in `REGLISS_DB_URL`.
+database configured in `REGLISS_DB_URL`, once.
 
-The application **creates nothing**: no database, no table, no user. You create the database and the
-`ver_export_` tables once, by hand. The application then only reads and writes rows.
+The application creates no database, no user and none of its `ver_export_` tables: you create the database and
+run `db/postgres/ver-export-schema.sql` once, by hand. (The only tables it creates are the per-version tables
+`ver_<list>_v<major>_<minor>`, when an export makes a new data version.)
 
 Files in this folder are **not committed** (see `.gitignore`): dumps hold bank data. Copy the dump here by hand
-on each machine.
+on each machine, directly in this folder (not in a sub-folder).
 
-## One-time setup on a new laptop
+## One-time setup
 
-1. Install PostgreSQL 16 or 17 for Windows from postgresql.org (the EDB installer). Keep **Command Line Tools**
-   ticked and remember the password you give the `postgres` user. If you cannot install software, ask IT for
-   PostgreSQL with its command line tools.
-2. In PowerShell, in the project folder, make the tools available (use your version number):
+The full walk-through, with pgAdmin and IntelliJ on Windows, is in
+[docs/postgres-testing.md](../../docs/postgres-testing.md#set-up-on-a-windows-laptop-with-pgadmin-and-intellij). In short:
 
-```powershell
-$env:Path += ";C:\Program Files\PostgreSQL\17\bin"
-```
+1. In pgAdmin, on **PostgreSQL 17**: create the database `shinedata`.
+2. In a Query Tool opened from `shinedata`: open `db/postgres/ver-export-schema.sql` and run it (F5).
+3. Copy the dump file into this folder.
+4. Start the application (no profile needed), sign in, and click **PostgreSQL** under **Database** in the sidebar.
+   Enter the connection (localhost, 5432, shinedata, your user and password) and click **Connect and restart**. The
+   connection is saved in `data/database.properties` (git-ignored) and used on every start.
 
-3. Create the database, once:
-
-```powershell
-createdb -U postgres shinedata
-```
-
-4. Create the application's tables in it, once (every table is `ver_export_*`):
-
-```powershell
-psql -U postgres -d shinedata -f db/postgres/ver-export-schema.sql
-```
-
-   Or in pgAdmin: open the `shinedata` database, Query Tool, open `db/postgres/ver-export-schema.sql`, run it.
-
-5. Copy the dump file into this folder (`db/dumps`).
-6. Set the connection (use your own `postgres` password):
-
-```powershell
-$env:REGLISS_DB_URL = "jdbc:postgresql://localhost:5432/shinedata"; $env:REGLISS_DB_USER = "postgres"; $env:REGLISS_DB_PASSWORD = "your-postgres-password"
-```
-
-7. Start the application:
-
-```powershell
-mvn spring-boot:run "-Dspring-boot.run.profiles=postgres"
-```
-
-The log shows the import (`Importing … into "shinedata"`, then `Imported … in N s`). Large dumps take a few
-minutes. Then open http://localhost:8082.
+The log shows `Importing … into "shinedata"`, then `Imported … in N s`. Large dumps take a few minutes. Then open
+http://localhost:8082.
 
 ## What happens on start-up
 
 | Situation | What the application does |
 |---|---|
 | No file here | Nothing; it uses the database as it is. |
-| Database missing, or `ver_export_` tables missing | Stops, and says which of steps 3 and 4 to run. |
+| Database missing, or `ver_export_` tables missing | Stops, and says which of steps 1 and 2 to do. |
 | Same file imported before | Skips it (files are recognised by their content, so renaming does not matter). |
-| A different dump, after one was imported | Keeps the data and logs a warning. To load the new dump: drop and recreate the database by hand, repeat steps 3 and 4, restart. |
+| A different dump, after one was imported | Keeps the data and logs a warning. To load the new dump: drop and recreate the database by hand, repeat steps 1 and 2, restart. |
 | Dump creates its own database (`CREATE DATABASE`) | Stops: ask for a dump made without `--create`. |
 | Dump owned by users that do not exist here | Loads anyway; the objects are owned by your user. Those lines are listed as harmless errors. |
 | Other errors inside the dump | Logged with the first lines; the full output is in `db/dumps/import-logs/`. |
 
 Plain SQL dumps are run with `psql`; `pg_dump` archives (files starting with `PGDMP`, from `pg_dump -Fc`) with
-`pg_restore`. If they are not found automatically, point to them:
+`pg_restore`. They are taken from `PG_BIN`, else the PATH, else the newest `C:\Program Files\PostgreSQL\<version>\bin`.
+Set `PG_BIN` when several PostgreSQL versions are installed.
 
-```powershell
-$env:PG_BIN = "C:\Program Files\PostgreSQL\17\bin"
-```
-
-To start without importing, set `$env:REGLISS_IMPORT_ENABLED = "false"`.
+To start without importing, set `REGLISS_IMPORT_ENABLED=false`.

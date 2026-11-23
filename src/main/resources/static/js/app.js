@@ -1163,19 +1163,119 @@ async function loadSystem() {
         state.system = await api("/api/system");
         document.getElementById("db-h2").classList.toggle("selected", state.system.mode === "h2");
         document.getElementById("db-postgres").classList.toggle("selected", state.system.mode === "postgres");
+        const error = state.system.switchError;
+        let shown = null;
+        try { shown = sessionStorage.getItem("db-switch-error"); } catch (ignored) { /* storage may be blocked */ }
+        if (error && shown !== error) {
+            toast(error + " The module is on H2.", "error");
+            try { sessionStorage.setItem("db-switch-error", error); } catch (ignored) { /* storage may be blocked */ }
+        }
     } catch (error) {
         /* the sidebar still shows the default H2 selection */
     }
 }
 
+/** The sidebar's Database switch: H2 or PostgreSQL. Switching restarts the module on the chosen database. */
 function explainDatabase(mode) {
-    const current = state.system ? state.system.mode : "h2";
-    if (mode === current) return;
-    if (mode === "postgres") {
-        toast("To use PostgreSQL, restart with the postgres profile. See docs/postgres-testing.md.", "info");
-    } else {
-        toast("H2 is the default. Restart without the postgres profile.", "info");
+    const system = state.system || { mode: "h2" };
+    if (mode === system.mode) return;
+    if (!system.switchable) {
+        toast("The database is fixed for this run: the module was started with a profile. Start it without one to use this switch.", "info");
+        return;
     }
+    const root = document.getElementById("modal-root");
+    if (mode === "h2") {
+        root.innerHTML = `
+            <div class="modal-back" data-db-close>
+                <form class="modal" id="db-form">
+                    <h2>Switch to H2?</h2>
+                    <p class="muted">The module restarts on the built-in H2 demo database, in about 15 seconds. You then sign in again.
+                        Your PostgreSQL data stays where it is; switch back any time.</p>
+                    <div class="modal-actions">
+                        <button type="button" class="btn-ghost" data-db-close>Cancel</button>
+                        <button type="submit" class="btn-primary">Switch to H2</button>
+                    </div>
+                </form>
+            </div>`;
+    } else {
+        const password = system.postgresPasswordSaved ? "Saved. Leave empty to keep it" : "Password";
+        root.innerHTML = `
+            <div class="modal-back" data-db-close>
+                <form class="modal db-modal" id="db-form">
+                    <h2>Connect to PostgreSQL</h2>
+                    <p class="muted">The module restarts on this database in about 20 seconds (longer the first time, while a dump in db/dumps is imported). You then sign in again.</p>
+                    <div class="db-grid">
+                        <label>Host<input name="host" value="${esc(system.postgresHost || "localhost")}" required autocomplete="off"></label>
+                        <label>Port<input name="port" type="number" min="1" max="65535" value="${esc(String(system.postgresPort || 5432))}" required></label>
+                        <label class="span-2">Database<input name="database" value="${esc(system.postgresDatabase || "shinedata")}" required autocomplete="off"></label>
+                        <label>User<input name="username" value="${esc(system.postgresUsername || "postgres")}" required autocomplete="off"></label>
+                        <label>Password<input name="password" type="password" placeholder="${esc(password)}" autocomplete="new-password"></label>
+                    </div>
+                    <p class="muted small-note">Saved on this computer only (data/database.properties, never committed). The database needs the module's tables: run db/postgres/ver-export-schema.sql on it once in pgAdmin.</p>
+                    <div class="modal-actions">
+                        <button type="button" class="btn-ghost" data-db-close>Cancel</button>
+                        <button type="submit" class="btn-primary">Connect and restart</button>
+                    </div>
+                </form>
+            </div>`;
+    }
+    root.querySelectorAll("[data-db-close]").forEach(element => element.addEventListener("click", event => {
+        if (event.target === element) root.innerHTML = "";
+    }));
+    const form = document.getElementById("db-form");
+    const first = form.querySelector("input[name=password]") || form.querySelector("button[type=submit]");
+    if (first) first.focus();
+    form.addEventListener("submit", async event => {
+        event.preventDefault();
+        const button = form.querySelector("button[type=submit]");
+        button.disabled = true;
+        const data = new FormData(form);
+        const body = mode === "h2" ? { mode } : {
+            mode,
+            host: data.get("host"),
+            port: Number(data.get("port")) || 5432,
+            database: data.get("database"),
+            username: data.get("username"),
+            password: data.get("password") || ""
+        };
+        button.textContent = mode === "h2" ? "Switching…" : "Checking the connection…";
+        try {
+            const result = await api("/api/system/database", { method: "POST", body });
+            root.innerHTML = `
+                <div class="modal-back">
+                    <div class="modal db-restarting">
+                        <h2>${mode === "h2" ? "Restarting on H2" : "Restarting on PostgreSQL"}</h2>
+                        <p class="muted">${esc(result.message)}</p>
+                        <div class="db-spinner" aria-hidden="true"></div>
+                    </div>
+                </div>`;
+            waitForRestart();
+        } catch (error) {
+            toast(error.message, "error");
+            button.disabled = false;
+            button.textContent = mode === "h2" ? "Switch to H2" : "Connect and restart";
+        }
+    });
+}
+
+/** Waits until the module has stopped and answers again, then reloads the page (to the sign-in screen). */
+async function waitForRestart() {
+    const started = Date.now();
+    let wentDown = false;
+    while (Date.now() - started < 15 * 60 * 1000) {
+        await new Promise(resolve => setTimeout(resolve, 1500));
+        try {
+            const response = await fetch("/api/auth/config", { cache: "no-store" });
+            if (response.ok && (wentDown || Date.now() - started > 8000)) {
+                location.reload();
+                return;
+            }
+            if (!response.ok) wentDown = true;
+        } catch (error) {
+            wentDown = true;
+        }
+    }
+    toast("The module has not come back yet. Check the Run window, then reload the page.", "error");
 }
 
 async function api(url, options = {}) {
