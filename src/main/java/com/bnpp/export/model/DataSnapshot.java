@@ -20,7 +20,8 @@ import java.time.LocalDateTime;
  *
  * Numbered {@code templateVersion.revision}: the first number is the approved template version that
  * built it (its columns and row filters), the second counts data changes under that template. So a
- * change of configuration (2.0) can never be mistaken for a change of data (1.3).
+ * change of configuration (2.1) can never be mistaken for a change of data (1.3). The first data version
+ * of template version N is N.1.
  *
  * The rows live in ver_export_snapshot_row / ver_export_snapshot_data. Nothing here is ever updated
  * except the usage counters, and nothing is ever deleted.
@@ -78,8 +79,9 @@ public class DataSnapshot {
     /** Rows this version added to storage; the others are shared with earlier versions. */
     private long storedRows;
 
-    /** The column layout: header, gs_ table and column of each file column, in order (JSON). */
+    /** The column layout: header, gs_ table and column of each file column, in order (JSON). Sent with the detail only. */
     @JdbcTypeCode(SqlTypes.LONGVARCHAR)
+    @com.fasterxml.jackson.annotation.JsonIgnore
     private String columnsJson;
 
     /** The data version this one was compared with when it was created (the newest before it), and the result. */

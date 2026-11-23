@@ -13,6 +13,13 @@ public interface DataSnapshotRepository extends JpaRepository<DataSnapshot, Long
 
     List<DataSnapshot> findByFamilyIdOrderByIdDesc(Long familyId);
 
+    org.springframework.data.domain.Page<DataSnapshot> findByFamilyIdAndListCodeOrderByIdDesc(Long familyId, String listCode,
+                                                                                            org.springframework.data.domain.Pageable page);
+
+    List<DataSnapshot> findTop200ByOrderByIdDesc();
+
+    List<DataSnapshot> findTop200ByFamilyIdOrderByIdDesc(Long familyId);
+
     Optional<DataSnapshot> findFirstByFamilyIdAndListCodeAndTemplateIdAndFingerprint(Long familyId, String listCode,
                                                                                      Long templateId, String fingerprint);
 

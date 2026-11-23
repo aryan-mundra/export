@@ -24,7 +24,7 @@ const state = {
     editor: null
 };
 
-const pages = ["dashboard", "export", "history", "subscribers", "quarantine", "templates", "approvals", "versions"];
+const pages = ["dashboard", "export", "history", "subscribers", "quarantine", "templates", "approvals"];
 
 document.getElementById("db-h2").addEventListener("click", () => explainDatabase("h2"));
 document.getElementById("db-postgres").addEventListener("click", () => explainDatabase("postgres"));
@@ -61,7 +61,7 @@ async function navigate() {
     try {
         await refresh();
         render();
-        if (state.page === "versions" && state.dv) loadVersionTab();
+        if (state.page === "export") startExportPage();
         void main.offsetWidth;
         main.classList.add("is-entering");
         schedulePoll();
@@ -74,9 +74,8 @@ async function refresh() {
     if (state.page === "dashboard") {
         state.dashboard = await api("/api/dashboard");
     } else if (state.page === "export") {
-        state.subscribers = await api("/api/subscribers");
-        state.templates = await api("/api/format-templates");
-        state.versions = await api("/api/versions");
+        // Only the recent exports; lists and subscribers are searched and paged on demand.
+        state.dashboard = await api("/api/dashboard");
     } else if (state.page === "subscribers") {
         state.subscribers = await api("/api/subscribers?q=" + encodeURIComponent(state.search.subscribers));
         state.templates = await api("/api/format-templates");
@@ -85,10 +84,6 @@ async function refresh() {
         if (state.openJobId) {
             state.jobDetail = await api("/api/jobs/" + state.openJobId);
         }
-    } else if (state.page === "versions") {
-        const [dataVersions, subscribers] = await Promise.all([api("/api/data-versions"), api("/api/subscribers")]);
-        state.dataVersions = dataVersions;
-        state.subscribers = subscribers;
     } else if (state.page === "quarantine") {
         state.quarantine = await api("/api/quarantine?q=" + encodeURIComponent(state.search.quarantine));
     } else if (state.page === "templates") {
@@ -109,16 +104,9 @@ async function refresh() {
             state.activeTable = firstGs ? tableKey(firstGs.table) : null;
         }
     } else if (state.page === "approvals" && state.user && state.user.role === "APPROVER") {
-        const [templates, subscribers, sources, versions] = await Promise.all([
-            api("/api/format-templates"),
-            api("/api/subscribers"),
-            api("/api/format-templates/sources").catch(() => []),
-            api("/api/versions").catch(() => [])
-        ]);
+        const [templates, subscribers] = await Promise.all([api("/api/format-templates"), api("/api/subscribers")]);
         state.templates = templates;
         state.subscribers = subscribers;
-        state.sources = sources;
-        state.versions = versions;
     }
     if (state.page === "templates" || state.page === "approvals") updateBadges(state.templates);
 }
@@ -131,7 +119,6 @@ function render() {
     if (state.page === "subscribers") main.innerHTML = subscribersHtml();
     if (state.page === "quarantine") main.innerHTML = quarantineHtml();
     if (state.page === "templates") main.innerHTML = templatesHtml();
-    if (state.page === "versions") main.innerHTML = versionsHtml();
     if (state.page === "approvals") {
         main.innerHTML = state.user && state.user.role === "APPROVER"
             ? approvalsHtml()
@@ -243,54 +230,6 @@ function activityRow(job) {
     </button>`;
 }
 
-function exportHtml() {
-    const active = state.subscribers.filter(subscriber => subscriber.active);
-    return `
-        ${head("Delivery", "Trigger Export", "Review the export, then send it. Each subscriber gets its own template; the date window limits delta subscribers only.")}
-        ${state.exportMessage ? `<div class="banner">${state.exportMessage}</div>` : ""}
-        <section class="export-card">
-            <div class="date-range" style="margin-top:0">
-                <label class="field-label" for="versionId">List version<select id="versionId">${state.versions.map(version => `<option value="${version.versionId}" ${state.previewRequest && String(state.previewRequest.versionId) === String(version.versionId) ? "selected" : ""}>${esc(version.listName)} · version ${esc(version.versionId)}${version.contentAsOf ? " · as of " + esc(version.contentAsOf) : ""}</option>`).join("")}</select></label>
-                <label class="field-label" for="fromDate">Delta window from<input id="fromDate" type="date"></label>
-                <label class="field-label" for="toDate">Delta window to<input id="toDate" type="date"></label>
-            </div>
-            <div class="note"><strong>Full</strong> subscribers receive the whole version. The dates do not apply to them. <strong>Delta</strong> subscribers receive only records that changed inside the window.</div>
-            <button id="reviewBtn" class="btn-primary" type="button" ${active.length ? "" : "disabled"}>Review export</button>
-            ${previewHtml()}
-            <div class="section-label">Active subscribers (${active.length})</div>
-            <div class="chips">
-                ${active.length ? active.map(chip).join("") : '<span class="muted">No active subscribers.</span>'}
-            </div>
-        </section>`;
-}
-
-function previewHtml() {
-    const preview = state.preview;
-    if (!preview) return "";
-    const rows = preview.subscribers.map(row => `<tr>
-        <td>${esc(row.name)}</td>
-        <td>${esc(row.scope)}</td>
-        <td>${esc(row.formatType)} · ${esc(row.exportMode)}</td>
-        <td>${row.templateName ? `${esc(row.templateName)} <span class="muted">v${row.templateVersion}</span>${(row.templateFilters || []).length ? `<div class="row-rule">Rows: ${esc(row.templateFilters.join("; "))}</div>` : ""}` : '<span class="error-text">No approved template</span>'}</td>
-        <td>${row.included ? num(row.records) + (row.quarantined ? ` <span class="error-text">+ ${num(row.quarantined)} held</span>` : "") : "—"}</td>
-    </tr>`).join("");
-    return `<div class="detail">
-        <p>${preview.fromDate ? `Delta window ${esc(preview.fromDate)} to ${esc(preview.toDate)}.` : "No date window."}</p>
-        <table class="detail-table">
-            <thead><tr><th>Subscriber</th><th>Scope</th><th>File</th><th>Template</th><th>Records</th></tr></thead>
-            <tbody>${rows}</tbody>
-        </table>
-        <div class="modal-actions">
-            <button id="preview-cancel" class="btn-ghost" type="button">Cancel</button>
-            <button id="triggerBtn" class="btn-primary" type="button">Confirm send</button>
-        </div>
-    </div>`;
-}
-
-function chip(subscriber) {
-    return `<span class="chip"><span class="chip-name">${esc(subscriber.name)}</span><span class="fmt-${esc(subscriber.formatType)}">${esc(subscriber.formatType)}</span><span class="chip-mode">${esc(subscriber.scope)} ${esc(subscriber.exportMode)}</span></span>`;
-}
-
 function historyHtml() {
     const rows = state.jobs.map(job => {
         const open = String(state.openJobId) === String(job.id);
@@ -298,8 +237,8 @@ function historyHtml() {
             <td>${job.id}</td>
             <td>${esc(job.versionId)}</td>
             <td>${badge(job.status)}</td>
-            <td>${esc(job.listName || "")}</td>
-            <td>${job.fromDate ? esc(job.fromDate) + " → " + esc(job.toDate) : "All changes"}</td>
+            <td>${esc(job.listName || "")}${job.mode === "RESEND" ? `<div class="muted">Sent ${esc(job.snapshotTemplate || "")} version ${esc(job.snapshotLabel || "")}</div>` : ""}</td>
+            <td>${job.mode === "RESEND" ? '<span class="muted">Stored version</span>' : job.fromDate ? esc(job.fromDate) + " → " + esc(job.toDate) : "All changes"}</td>
             <td>${esc(job.triggeredBy || "")}</td>
             <td>${num(job.totalRecordsProcessed)}</td>
             <td>${num(job.completedSubscribers)} sent · ${num(job.heldSubscribers)} held · ${num(job.skippedSubscribers)} other list</td>
@@ -327,7 +266,7 @@ function detailHtml(detail) {
         <td>${num(subscriber.recordsProcessed)}</td>
         <td>${num(subscriber.recordsQuarantined)}</td>
         <td>${subscriber.fileName ? `<a class="file-link" href="/api/jobs/${detail.id}/subscribers/${subscriber.id}/file">${esc(subscriber.fileName)}</a>` : "—"}</td>
-        <td>${subscriber.snapshotLabel ? `<span class="dv-chip" title="${subscriber.snapshotOutcome === "CREATED" ? "This export found changed data and created this data version" : "The data was identical to this existing data version, so it was reused"}">${esc(subscriber.snapshotLabel)} · ${subscriber.snapshotOutcome === "CREATED" ? "new" : "reused"}</span>` : '<span class="muted">—</span>'}</td>
+        <td>${subscriber.snapshotLabel ? `<span class="dv-chip" title="${subscriber.snapshotOutcome === "CREATED" ? "This export found changed data and created this data version" : "The data was identical to this existing data version, so it was reused"}">${esc(subscriber.snapshotLabel)} · ${subscriber.snapshotOutcome === "CREATED" ? "new" : subscriber.snapshotOutcome === "RESENT" ? "resent" : "reused"}</span>` : '<span class="muted">—</span>'}</td>
         <td class="error-text">${esc([subscriber.holdReason || subscriber.errorMessage || "", subscriber.acceptedBy ? "Accepted by " + subscriber.acceptedBy : ""].filter(Boolean).join(" "))}</td>
         <td class="actions">${subscriberActions(detail, subscriber)}</td>
     </tr>`).join("");
@@ -351,6 +290,9 @@ function subscriberActions(detail, subscriber) {
     if (subscriber.archiveFileName) {
         buttons.push(`<button class="btn-ghost" type="button" data-proof="${detail.id}:${subscriber.id}">Check proof</button>`);
     }
+    if (subscriber.snapshotId) {
+        buttons.push(`<button class="btn-ghost" type="button" data-resend-snapshot="${subscriber.snapshotId}" data-resend-to="${subscriber.subscriberId}" title="Send data version ${esc(subscriber.snapshotLabel || "")} to this subscriber again">Send again</button>`);
+    }
     return buttons.join(" ");
 }
 
@@ -370,7 +312,6 @@ function subscribersHtml() {
         <td class="actions">
             <button class="btn-edit" type="button" data-edit="${subscriber.id}">Edit</button>
             <button class="btn-ghost" type="button" data-sample="${subscriber.id}">Sample</button>
-            ${subscriber.templateFamilyId ? `<button class="btn-ghost" type="button" data-versions-family="${subscriber.templateFamilyId}" data-versions-subscriber="${subscriber.id}">Versions</button>` : ""}
             <button class="btn-delete" type="button" data-delete="${subscriber.id}">Delete</button>
         </td>
     </tr>`).join("");
@@ -483,7 +424,7 @@ function templatesHtml() {
     const families = templateFamilies(draft.formatType);
     const current = families.find(family => String(family.id) === String(draft.familyId));
     const saved = state.templates.map(template => `<tr>
-        <td>${esc(template.name)}${template.active ? `<div><button type="button" class="link-btn" data-versions-family="${template.familyId}">Data versions</button></div>` : ""}</td>
+        <td>${esc(template.name)}</td>
         <td class="fmt-${esc(template.formatType)}">${esc(template.formatType)}</td>
         <td>${template.versionNumber}</td>
         <td>${templateStatus(template)}</td>
@@ -671,13 +612,8 @@ function label(status) {
 }
 
 async function onClick(event) {
+    if (onSendClick(event)) return;
     if (state.page === "approvals" && onReviewClick(event)) return;
-    if (state.page === "versions" && onVersionsClick(event)) return;
-    const versionsLink = event.target.closest("[data-versions-family]");
-    if (versionsLink) {
-        openDataVersions(Number(versionsLink.dataset.versionsFamily), versionsLink.dataset.versionsSubscriber || null);
-        return;
-    }
     if (onExplorerClick(event)) return;
     const historyButton = event.target.closest("[data-history]");
     if (historyButton) {
@@ -693,20 +629,6 @@ async function onClick(event) {
             state.jobDetail = await api("/api/jobs/" + id);
         }
         render();
-        return;
-    }
-    if (event.target.id === "reviewBtn") {
-        await reviewExport();
-        return;
-    }
-    if (event.target.id === "preview-cancel") {
-        state.preview = null;
-        state.previewRequest = null;
-        render();
-        return;
-    }
-    if (event.target.id === "triggerBtn") {
-        await triggerExport();
         return;
     }
     const accept = event.target.closest("[data-accept]");
@@ -964,8 +886,8 @@ async function onSubmit(event) {
 
 let searchTimer;
 function onInput(event) {
+    if (state.page === "export" && onSendInput(event)) return;
     if (state.page === "approvals" && onReviewInput(event)) return;
-    if (state.page === "versions" && onVersionsInput(event)) return;
     if (onExplorerInput(event)) return;
     if (event.target.name === "formatType" && event.target.closest("#add-form, #edit-form")) {
         const pick = event.target.form.querySelector('select[name="templateId"]');
@@ -1004,13 +926,6 @@ function onInput(event) {
         state.templateDraft.name = event.target.value;
         return;
     }
-    if (event.target.id === "versionId" || event.target.id === "fromDate" || event.target.id === "toDate") {
-        state.preview = null;
-        state.previewRequest = null;
-        const existing = document.querySelector(".export-card .detail");
-        if (existing) existing.remove();
-        return;
-    }
     const field = event.target.closest("[data-search]");
     if (!field) return;
     state.search[field.dataset.search] = field.value;
@@ -1029,77 +944,6 @@ function onInput(event) {
             toast(error.message, "error");
         }
     }, 200);
-}
-
-function dateWindow() {
-    const fromDate = document.getElementById("fromDate").value;
-    const toDate = document.getElementById("toDate").value;
-    if ((fromDate && !toDate) || (!fromDate && toDate)) {
-        toast("Enter both dates, or leave both empty", "error");
-        return null;
-    }
-    if (fromDate && toDate && fromDate > toDate) {
-        toast("From date must be on or before the to date", "error");
-        return null;
-    }
-    return { fromDate: fromDate || null, toDate: toDate || null };
-}
-
-async function reviewExport() {
-    const versionEl = document.getElementById("versionId");
-    const versionId = versionEl
-        ? Number(versionEl.value)
-        : ((state.versions && state.versions[0] && state.versions[0].versionId) || 42);
-    if (!versionId) {
-        toast("Choose a certified list version", "error");
-        return;
-    }
-    const dates = dateWindow();
-    if (!dates) return;
-    const button = document.getElementById("reviewBtn");
-    button.disabled = true;
-    try {
-        state.previewRequest = { versionId, ...dates };
-        state.preview = await api("/api/exports/preview", {
-            method: "POST",
-            body: { versionId, fromDate: dates.fromDate, toDate: dates.toDate }
-        });
-        render();
-    } catch (error) {
-        toast(error.message, "error");
-        button.disabled = false;
-    }
-}
-
-async function triggerExport() {
-    const request = state.previewRequest;
-    if (!request) {
-        toast("Review the export before sending", "error");
-        return;
-    }
-    const button = document.getElementById("triggerBtn");
-    button.disabled = true;
-    try {
-        const job = await api("/api/exports", {
-            method: "POST",
-            body: {
-                versionId: request.versionId,
-                fromDate: request.fromDate,
-                toDate: request.toDate,
-                reviewToken: state.preview ? state.preview.reviewToken : null
-            }
-        });
-        const windowText = request.fromDate ? ` from ${request.fromDate} to ${request.toDate}` : "";
-        state.exportMessage = `Export job #${job.id} started for ${state.preview.listName} version ${request.versionId}${windowText}. <a href="#/history">View history</a>`;
-        state.preview = null;
-        state.previewRequest = null;
-        state.dashboard = await api("/api/dashboard");
-        toast("Export job #" + job.id + " started", "success");
-        render();
-    } catch (error) {
-        toast(error.message, "error");
-        button.disabled = false;
-    }
 }
 
 async function postJobAction(pair, action, message) {
@@ -2042,18 +1886,7 @@ document.addEventListener("scroll", event => {
 }, true);
 window.addEventListener("resize", () => placeEditor());
 
-/* ---------- Template review: what an approver sees and decides on ---------- */
-
-const OP_SYMBOL = {
-    in: "IN", not_in: "NOT IN", contains: "CONTAINS", eq: "=", ne: "≠", gt: ">", gte: "≥", lt: "<", lte: "≤",
-    between: "BETWEEN", empty: "IS EMPTY", not_empty: "IS NOT EMPTY"
-};
-
-const OP_WORDS = {
-    in: "is one of", not_in: "is none of", contains: "contains the text", eq: "equals", ne: "does not equal",
-    gt: "is greater than", gte: "is at least", lt: "is less than", lte: "is at most", between: "is between",
-    empty: "is empty", not_empty: "has a value"
-};
+/* ---------- Approvals: a simple card per submission ---------- */
 
 const STATUS_INFO = {
     PENDING: ["Waiting for review", "wait"],
@@ -2080,15 +1913,6 @@ function statusPill(template) {
     return `<span class="pill pill-${info[1]}">${esc(info[0])}</span>`;
 }
 
-function headerOf(template, filter) {
-    const field = template.fields.find(item => fieldKey(item.sourceTable, item.sourceColumn) === fieldKey(filter.sourceTable, filter.sourceColumn));
-    return field ? field.headerName : filter.sourceColumn;
-}
-
-function columnKindOf(table, column) {
-    return sourceColumnInfo(table, column);
-}
-
 function tablesOf(template) {
     const tables = new Map();
     template.fields.forEach(field => {
@@ -2098,389 +1922,46 @@ function tablesOf(template) {
     return tables;
 }
 
-/** The whole template in one or two plain sentences. */
-function plainSummary(template) {
-    const tables = tablesOf(template);
-    const columns = template.fields.length;
-    let text = `Builds a <strong>${esc(template.formatType)}</strong> file with <strong>${columns} column${columns === 1 ? "" : "s"}</strong> from <strong>${tables.size} source table${tables.size === 1 ? "" : "s"}</strong>. Each row is one entry of the exported list version; the tables are matched to it on its BNP ID.`;
-    const filters = template.filters || [];
-    if (!filters.length) {
-        text += " <strong>Every list entry</strong> is included.";
-    } else {
-        text += " Only entries where " + filters.map(filter =>
-            `<strong>${esc(headerOf(template, filter))}</strong> ${esc(filterPhrase(filter.op, filter.values, filter.blank))}`).join(" <em>and</em> ") + " are included.";
-    }
-    return text;
-}
-
-function impactHtml(template) {
-    const inUse = familyInUse(template.familyId);
-    const users = template.usedBy || [];
-    if (!users.length) {
-        return `<span class="impact-chip">No subscriber uses this template yet. Once approved, makers can choose it for ${esc(template.formatType)} subscribers.</span>`;
-    }
-    const from = inUse && inUse.id !== template.id ? ` move from version ${inUse.versionNumber} to version ${template.versionNumber}` : " use it";
-    return `<span class="impact-chip impact-live"><strong>${users.length} subscriber${users.length === 1 ? "" : "s"}</strong> (${esc(users.join(", "))}) will${from} from their next export once approved.</span>`;
-}
-
-/** What changed between two versions, keyed by source table and column. */
-function diffTemplates(base, next) {
-    const key = field => fieldKey(field.sourceTable, field.sourceColumn);
-    const baseFields = new Map(base.fields.map((field, index) => [key(field), { field, index }]));
-    const nextFields = new Map(next.fields.map((field, index) => [key(field), { field, index }]));
-    const columns = { added: [], removed: [], renamed: [], moved: [], same: 0 };
-    next.fields.forEach((field, index) => {
-        const before = baseFields.get(key(field));
-        if (!before) {
-            columns.added.push(field);
-            return;
-        }
-        let changed = false;
-        if (before.field.headerName !== field.headerName) {
-            columns.renamed.push({ field, from: before.field.headerName });
-            changed = true;
-        }
-        if (before.index !== index) {
-            columns.moved.push({ field, from: before.index + 1, to: index + 1 });
-            changed = true;
-        }
-        if (!changed) columns.same++;
-    });
-    base.fields.forEach(field => {
-        if (!nextFields.has(key(field))) columns.removed.push(field);
-    });
-    const phrase = filter => filterPhrase(filter.op, filter.values, filter.blank);
-    const baseFilters = new Map((base.filters || []).map(filter => [key(filter), filter]));
-    const nextFilters = new Map((next.filters || []).map(filter => [key(filter), filter]));
-    const filters = { added: [], removed: [], changed: [], same: 0 };
-    (next.filters || []).forEach(filter => {
-        const before = baseFilters.get(key(filter));
-        if (!before) filters.added.push(filter);
-        else if (phrase(before) !== phrase(filter)) filters.changed.push({ filter, from: before });
-        else filters.same++;
-    });
-    (base.filters || []).forEach(filter => {
-        if (!nextFilters.has(key(filter))) filters.removed.push(filter);
-    });
-    const count = columns.added.length + columns.removed.length + columns.renamed.length + columns.moved.length
-        + filters.added.length + filters.removed.length + filters.changed.length;
-    return { columns, filters, count };
-}
-
-function reviewQueue() {
-    return state.templates.filter(item => item.status === "PENDING")
-        .sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)));
-}
-
-function recentDecisions() {
-    return state.templates.filter(item => item.reviewedAt && ["APPROVED", "REJECTED", "CHANGES_REQUESTED"].includes(item.status))
-        .sort((a, b) => String(b.reviewedAt).localeCompare(String(a.reviewedAt)))
-        .slice(0, 8);
-}
-
-function ensureReview() {
-    if (!state.review) state.review = { id: null, tab: null, baseline: null, preview: null };
-    const known = state.templates.some(item => String(item.id) === String(state.review.id));
-    if (!known) {
-        const first = reviewQueue()[0] || recentDecisions()[0];
-        selectReview(first ? first.id : null);
-    }
-    return state.review;
-}
-
-function selectReview(id) {
-    const template = state.templates.find(item => String(item.id) === String(id));
-    const previous = template ? familyVersions(template.familyId).filter(item => item.versionNumber < template.versionNumber).pop() : null;
-    const inUse = template ? familyInUse(template.familyId) : null;
-    // A resubmission is compared with the version that was sent back; anything else with the version in use.
-    let baseline = null;
-    if (previous && previous.status === "CHANGES_REQUESTED") baseline = previous.id;
-    else if (inUse && template && inUse.id !== template.id) baseline = inUse.id;
-    else if (previous) baseline = previous.id;
-    state.review = {
-        id: template ? template.id : null,
-        tab: baseline ? "changes" : "columns",
-        baseline: baseline,
-        preview: null,
-        versionId: state.review && state.review.versionId ? state.review.versionId : (state.versions[0] ? state.versions[0].versionId : null)
-    };
-}
-
 function approvalsHtml() {
-    const review = ensureReview();
-    const queue = reviewQueue();
-    const decided = recentDecisions();
-    const template = state.templates.find(item => String(item.id) === String(review.id));
-    const queueItem = item => {
-        const inUse = familyInUse(item.familyId);
-        const previous = familyVersions(item.familyId).filter(other => other.versionNumber < item.versionNumber).pop();
-        const kind = previous && previous.status === "CHANGES_REQUESTED" ? '<span class="tag tag-warn">Resubmitted</span>'
-            : inUse ? `<span class="tag">Update to v${inUse.versionNumber}</span>` : '<span class="tag tag-new">New template</span>';
-        const filters = (item.filters || []).length;
-        return `<button type="button" class="queue-item ${String(item.id) === String(review.id) ? "active" : ""}" data-review="${item.id}">
-            <span class="queue-name">${esc(item.name)} <span class="muted">v${item.versionNumber}</span></span>
-            <span class="queue-meta"><span class="fmt-${esc(item.formatType)}">${esc(item.formatType)}</span> · ${item.fields.length} columns · ${filters ? filters + " filter" + (filters === 1 ? "" : "s") : "all rows"}</span>
-            <span class="queue-meta">${kind} by ${esc(item.createdByName || item.createdBy)} · ${when(item.createdAt)}</span>
-        </button>`;
-    };
-    const decidedItem = item => `<button type="button" class="queue-item compact ${String(item.id) === String(review.id) ? "active" : ""}" data-review="${item.id}">
-            <span class="queue-name">${esc(item.name)} <span class="muted">v${item.versionNumber}</span></span>
-            <span class="queue-meta">${statusPill(item)} ${esc(item.reviewedByName || "")}</span>
-        </button>`;
-    return `
-        ${head("Review", "Approvals", "See exactly what each submission will put in subscribers' files, then decide.")}
-        ${endpointApprovals()}
-        <div class="review-layout">
-            <aside class="review-queue" aria-label="Review queue">
-                <div class="field-label">Waiting for you · ${queue.length}</div>
-                ${queue.length ? queue.map(queueItem).join("") : '<div class="queue-empty">Nothing is waiting. You are all caught up.</div>'}
-                ${decided.length ? `<div class="field-label" style="margin-top:18px">Recently decided</div>${decided.map(decidedItem).join("")}` : ""}
-            </aside>
-            <section class="review-detail">${template ? reviewDetailHtml(template) : '<div class="empty">Choose a submission to review.</div>'}</section>
-        </div>`;
-}
-
-function reviewDetailHtml(template) {
-    const review = state.review;
-    const versions = familyVersions(template.familyId);
-    const previous = versions.filter(item => item.versionNumber < template.versionNumber).pop();
-    const resubmitted = previous && previous.status === "CHANGES_REQUESTED";
-    const baseline = state.templates.find(item => String(item.id) === String(review.baseline));
-    const diff = baseline ? diffTemplates(baseline, template) : null;
-    const tabs = [
-        ["changes", "Changes", diff ? String(diff.count) : "new"],
-        ["columns", "Tables & columns", String(template.fields.length)],
-        ["filters", "Row filters", String((template.filters || []).length)],
-        ["data", "Data preview", ""],
-        ["history", "History", String(versions.length)]
-    ];
-    let body = "";
-    if (review.tab === "changes") body = changesTabHtml(template, baseline, diff, versions);
-    else if (review.tab === "columns") body = columnsTabHtml(template);
-    else if (review.tab === "filters") body = filtersTabHtml(template);
-    else if (review.tab === "data") body = dataTabHtml(template);
-    else body = templateHistoryHtml(template.familyId, template.id);
-    const kicker = `${esc(template.formatType)} template · version ${template.versionNumber}${resubmitted ? " · resubmitted" : ""}`;
-    return `
-        <header class="review-head">
-            <div>
-                <p class="kicker">${kicker}</p>
-                <h2>${esc(template.name)}</h2>
-                <p class="muted">Submitted by <strong>${esc(template.createdByName || template.createdBy)}</strong> · ${when(template.createdAt)}</p>
+    const pending = state.templates.filter(item => item.status === "PENDING")
+        .sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)));
+    const cards = pending.map(template => {
+        const own = state.user && template.createdBy && state.user.username
+            && template.createdBy.toLowerCase() === state.user.username.toLowerCase();
+        const previous = familyVersions(template.familyId).filter(item => item.versionNumber < template.versionNumber).pop();
+        const returned = previous && previous.status === "CHANGES_REQUESTED"
+            ? `<p class="approval-note">Resubmitted after you asked: “${esc(previous.reviewComment || "")}”</p>` : "";
+        const tables = [...tablesOf(template).entries()].map(([table, fields]) =>
+            `<li><strong>${esc(table)}</strong>: ${esc(fields.map(field => field.sourceColumn).join(", "))}</li>`).join("");
+        const filters = template.filters || [];
+        const rows = filters.length
+            ? `<div class="approval-rows-simple"><strong>Rows:</strong> only where<ul>${filters.map(filter => `<li>${esc(filter.summary)}</li>`).join("")}</ul></div>`
+            : '<p class="muted"><strong>Rows:</strong> all list entries</p>';
+        const actions = own
+            ? '<span class="muted">You submitted this; another approver must review it.</span>'
+            : `<button class="btn-ghost" type="button" data-decide="request-changes" data-id="${template.id}">Request changes</button>
+               <button class="btn-delete" type="button" data-decide="reject" data-id="${template.id}">Reject</button>
+               <button class="btn-primary" type="button" data-decide="approve" data-id="${template.id}">Approve</button>`;
+        return `<article class="approval-card">
+            <div class="approval-head">
+                <div>
+                    <h2>${esc(template.name)} · version ${template.versionNumber}</h2>
+                    <p class="muted">Created by <strong>${esc(template.createdByName || template.createdBy)}</strong> · ${when(template.createdAt)} · ${esc(template.formatType)}</p>
+                </div>
+                <div class="approval-actions">${actions}</div>
             </div>
-            <div>${statusPill(template)}</div>
-        </header>
-        ${resubmitted ? `<div class="review-callout warn"><strong>You asked for changes on version ${previous.versionNumber}:</strong> “${esc(previous.reviewComment || "")}” <span class="muted">— ${esc(previous.reviewedByName || "")}, ${when(previous.reviewedAt)}</span><br>The Changes tab compares this version with the one that was sent back.</div>` : ""}
-        ${template.status !== "PENDING" && template.reviewedAt ? `<div class="review-callout ${template.status === "APPROVED" ? "good" : template.status === "REJECTED" ? "bad" : "warn"}"><strong>${esc((STATUS_INFO[template.status] || [template.status])[0])}</strong> by ${esc(template.reviewedByName || template.approvedByName || "")} · ${when(template.reviewedAt)}${template.reviewComment ? `<br>“${esc(template.reviewComment)}”` : ""}</div>` : ""}
-        <div class="review-plain">
-            <p>${plainSummary(template)}</p>
-            ${template.status === "PENDING" ? impactHtml(template) : ""}
-        </div>
-        <nav class="review-tabs" role="tablist">
-            ${tabs.map(([id, label, count]) => `<button type="button" role="tab" class="review-tab ${review.tab === id ? "active" : ""}" aria-selected="${review.tab === id}" data-review-tab="${id}">${esc(label)}${count ? `<span class="tab-count">${esc(count)}</span>` : ""}</button>`).join("")}
-        </nav>
-        <div class="review-body" id="review-body">${body}</div>
-        ${decisionBarHtml(template)}`;
-}
-
-function changesTabHtml(template, baseline, diff, versions) {
-    const options = versions.filter(item => item.id !== template.id).map(item =>
-        `<option value="${item.id}" ${baseline && baseline.id === item.id ? "selected" : ""}>Version ${item.versionNumber} · ${esc((STATUS_INFO[item.status] || [item.status])[0])}${item.active ? " · in use" : ""}</option>`).join("");
-    if (!baseline) {
-        return `<div class="review-section"><h3>A new template</h3>
-            <p>Nothing of this template is in use yet, so everything in it is new. Check the <button type="button" class="link-btn" data-review-tab="columns">tables and columns</button>, the <button type="button" class="link-btn" data-review-tab="filters">row filters</button> and the <button type="button" class="link-btn" data-review-tab="data">data it produces</button>.</p></div>`;
-    }
-    const line = (tone, text) => `<li class="change change-${tone}"><span class="change-mark">${tone === "add" ? "+" : tone === "remove" ? "−" : "~"}</span><span>${text}</span></li>`;
-    const col = field => `<strong>${esc(field.headerName)}</strong> <span class="muted mono">${esc(field.sourceTable)}.${esc(field.sourceColumn)}</span>`;
-    const columnLines = [
-        ...diff.columns.added.map(field => line("add", "Column added: " + col(field))),
-        ...diff.columns.removed.map(field => line("remove", "Column removed: " + col(field))),
-        ...diff.columns.renamed.map(item => line("change", `Renamed in the file: <strong>${esc(item.from)}</strong> → <strong>${esc(item.field.headerName)}</strong> <span class="muted mono">${esc(item.field.sourceTable)}.${esc(item.field.sourceColumn)}</span>`)),
-        ...diff.columns.moved.map(item => line("change", `Moved: <strong>${esc(item.field.headerName)}</strong> from position ${item.from} to ${item.to}`))
-    ];
-    const filterLines = [
-        ...diff.filters.added.map(filter => line("add", `Filter added: <strong>${esc(headerOf(template, filter))}</strong> ${esc(filterPhrase(filter.op, filter.values, filter.blank))}`)),
-        ...diff.filters.removed.map(filter => line("remove", `Filter removed: <strong>${esc(headerOf(baseline, filter))}</strong> ${esc(filterPhrase(filter.op, filter.values, filter.blank))}`)),
-        ...diff.filters.changed.map(item => line("change", `Filter changed on <strong>${esc(headerOf(template, item.filter))}</strong>: <span class="was">${esc(filterPhrase(item.from.op, item.from.values, item.from.blank))}</span> → ${esc(filterPhrase(item.filter.op, item.filter.values, item.filter.blank))}`))
-    ];
-    return `<div class="review-section">
-            <div class="section-head">
-                <h3>${diff.count ? `${diff.count} change${diff.count === 1 ? "" : "s"}` : "No changes"}</h3>
-                <label class="compare">Compared with <select id="review-baseline">${options}</select></label>
-            </div>
-            ${diff.count ? "" : `<p class="muted">This version has the same columns, names, order and filters as version ${baseline.versionNumber}.</p>`}
-            <h4>Columns <span class="muted">· ${diff.columns.same} unchanged</span></h4>
-            ${columnLines.length ? `<ul class="change-list">${columnLines.join("")}</ul>` : '<p class="muted">No column changes.</p>'}
-            <h4>Row filters <span class="muted">· ${diff.filters.same} unchanged</span></h4>
-            ${filterLines.length ? `<ul class="change-list">${filterLines.join("")}</ul>` : '<p class="muted">No filter changes.</p>'}
-        </div>`;
-}
-
-function columnsTabHtml(template) {
-    const tables = tablesOf(template);
-    const filtered = new Set((template.filters || []).map(filter => fieldKey(filter.sourceTable, filter.sourceColumn)));
-    const cards = [...tables.entries()].map(([table, fields]) => `<div class="rel-row">
-            <span class="rel-link" title="Rows of ${esc(table)} belong to the list entry with the same BNP ID">BNP_ID = BNP_ID</span>
-            <div class="rel-table">
-                <div class="rel-table-name">${esc(table)}</div>
-                <ul>${fields.map(field => `<li><span class="mono">${esc(field.sourceColumn)}</span> <span class="muted">→</span> <strong>${esc(field.headerName)}</strong></li>`).join("")}</ul>
-            </div>
-        </div>`).join("");
-    const rows = template.fields.map((field, index) => {
-        const info = columnKindOf(field.sourceTable, field.sourceColumn);
-        return `<tr>
-            <td class="muted">${index + 1}</td>
-            <td><strong>${esc(field.headerName)}</strong>${field.headerName.toLowerCase() !== field.sourceColumn.toLowerCase() ? ' <span class="tag">renamed</span>' : ""}</td>
-            <td class="mono">${esc(field.sourceTable)}.${esc(field.sourceColumn)}</td>
-            <td><span class="kind kind-${info.kind}">${kindTag(info.kind)}</span> <span class="muted">${esc(info.type || "")}</span></td>
-            <td>${filtered.has(fieldKey(field.sourceTable, field.sourceColumn)) ? '<span class="filtered-tag">filtered</span>' : ""}</td>
-        </tr>`;
+            ${returned}
+            <ul class="approval-tables">${tables}</ul>
+            ${rows}
+        </article>`;
     }).join("");
-    const headers = template.fields.map(field => field.headerName);
-    const sample = template.formatType === "CSV"
-        ? esc(headers.map(header => /[",\n]/.test(header) ? '"' + header.replace(/"/g, '""') + '"' : header).join(","))
-        : esc(`<Record id="…">\n${headers.map(header => `  <${header}>…</${header}>`).join("\n")}\n</Record>`);
-    return `<div class="review-section">
-            <h3>How the data is joined</h3>
-            <p class="muted">Each row of the file is one entry of the exported list version. Every table is matched to the entry on its BNP ID. When a table has several rows for one entry, their values are joined with “; ”. An entry with no matching row gets an empty cell.</p>
-            <div class="rel-diagram">
-                <div class="rel-hub"><strong>List entry</strong><span>one row per entry</span><span class="mono">BNP_ID</span></div>
-                <div class="rel-tables">${cards}</div>
-            </div>
-            <h3>File layout · in order</h3>
-            <table class="detail-table review-table">
-                <thead><tr><th>#</th><th>Name in the file</th><th>Comes from</th><th>Type</th><th></th></tr></thead>
-                <tbody>${rows}</tbody>
-            </table>
-            <h4>${template.formatType === "CSV" ? "First line of the file" : "Each record in the file"}</h4>
-            <pre class="file-sample">${sample}</pre>
-        </div>`;
+    return `
+        ${head("Review", "Approvals", "Templates waiting for your approval.")}
+        ${endpointApprovals()}
+        ${pending.length ? `<div class="approval-list">${cards}</div>` : '<section class="panel"><div class="empty">No templates are waiting for approval.</div></section>'}`;
 }
 
-function filtersTabHtml(template) {
-    const filters = template.filters || [];
-    if (!filters.length) {
-        return `<div class="review-section"><h3>No row filters</h3>
-            <p>Every entry of the exported list version goes in the file. Each subscriber's own scope, business line and region still apply.</p></div>`;
-    }
-    const valueChips = filter => {
-        if (filter.op === "empty" || filter.op === "not_empty") return "";
-        if (filter.op === "between") {
-            const [from, to] = filter.values;
-            return `<span class="value-chip">${esc(from || "any")}</span><span class="muted">and</span><span class="value-chip">${esc(to || "any")}</span>`;
-        }
-        const values = filter.values || [];
-        const shown = values.slice(0, 12).map(value => `<span class="value-chip">${esc(value)}</span>`).join("");
-        const rest = values.length > 12 ? `<details class="more-values"><summary>+ ${values.length - 12} more</summary>${values.slice(12).map(value => `<span class="value-chip">${esc(value)}</span>`).join("")}</details>` : "";
-        const blank = filter.blank ? `<span class="value-chip empty-chip">${filter.op === "not_in" ? "and not empty" : "or empty"}</span>` : "";
-        return shown + rest + blank;
-    };
-    const cards = filters.map((filter, index) => `${index ? '<div class="logic-and">AND</div>' : ""}
-        <div class="condition">
-            <div class="condition-col"><strong>${esc(headerOf(template, filter))}</strong><span class="mono muted">${esc(filter.sourceTable)}.${esc(filter.sourceColumn)}</span></div>
-            <div class="condition-op"><span class="op-badge">${esc(OP_SYMBOL[filter.op] || filter.op)}</span><span>${esc(OP_WORDS[filter.op] || filter.op)}</span></div>
-            <div class="condition-values">${valueChips(filter)}</div>
-        </div>`).join("");
-    const expression = filters.map(filter => {
-        const name = headerOf(template, filter);
-        const quote = value => "'" + String(value).replace(/'/g, "''") + "'";
-        switch (filter.op) {
-            case "in": return `(${name} IN (${filter.values.map(quote).join(", ")})${filter.blank ? ` OR ${name} IS EMPTY` : ""})`;
-            case "not_in": return `(${name} NOT IN (${filter.values.map(quote).join(", ")})${filter.blank ? ` AND ${name} IS NOT EMPTY` : ""})`;
-            case "contains": return `(${name} CONTAINS ${quote(filter.values[0])})`;
-            case "between": return filter.values[0] && filter.values[1] ? `(${name} BETWEEN ${filter.values[0]} AND ${filter.values[1]})`
-                : filter.values[0] ? `(${name} ≥ ${filter.values[0]})` : `(${name} ≤ ${filter.values[1]})`;
-            case "empty": return `(${name} IS EMPTY)`;
-            case "not_empty": return `(${name} IS NOT EMPTY)`;
-            default: return `(${name} ${OP_SYMBOL[filter.op]} ${filter.values[0]})`;
-        }
-    }).join("\nAND ");
-    return `<div class="review-section">
-            <h3>A list entry goes in the file only when <span class="all-tag">all</span> of these are true</h3>
-            <div class="conditions">${cards}</div>
-            <p class="muted small-note">A filter on a column with several values per entry matches when any of them matches; “is none of” and “does not equal” need none of them to match. On top of these, each subscriber's scope, business line and region apply.</p>
-            <details class="expression"><summary>Show as a single expression</summary><pre class="file-sample">${esc(expression)}</pre></details>
-        </div>`;
-}
-
-function dataTabHtml(template) {
-    const review = state.review;
-    const preview = review.preview;
-    const versions = state.versions.map(version => `<option value="${version.versionId}" ${String(version.versionId) === String(review.versionId) ? "selected" : ""}>${esc(version.listName)} · version ${esc(version.versionId)}</option>`).join("");
-    let summary = '<span class="muted">Loading…</span>';
-    let grid = "";
-    if (preview && preview.error) {
-        summary = "";
-        grid = `<div class="banner banner-error">${esc(preview.error)}</div>`;
-    } else if (preview && preview.page) {
-        const page = preview.page;
-        const share = page.entries ? Math.round(page.total * 100 / page.entries) : 0;
-        summary = `<strong>${num(page.total)}</strong> of ${num(page.entries)} list entries (${share}%) go in a full file`;
-        if (preview.inUseTotal !== null && preview.inUseTotal !== undefined) {
-            const delta = page.total - preview.inUseTotal;
-            summary += ` <span class="delta ${delta < 0 ? "down" : delta > 0 ? "up" : ""}">${delta === 0 ? "same as" : (delta > 0 ? "+" : "−") + num(Math.abs(delta)) + " vs"} version ${preview.inUseVersion} in use (${num(preview.inUseTotal)})</span>`;
-        }
-        const kinds = template.fields.map(field => columnKindOf(field.sourceTable, field.sourceColumn).kind);
-        grid = `<div class="grid-wrap review-grid"><table class="grid">
-                <thead><tr><th class="rownum">#</th>${template.fields.map((field, index) => `<th class="${kinds[index] === "number" ? "num" : ""}"><div class="gh"><span class="gh-title">${esc(field.headerName)}</span></div><div class="gh-src"><span class="kind kind-${kinds[index]}">${kindTag(kinds[index])}</span>${esc(field.sourceTable)}.${esc(field.sourceColumn)}</div></th>`).join("")}</tr></thead>
-                <tbody>${preview.rows.map((row, index) => `<tr><td class="rownum">${index + 1}</td>${row.cells.map((cell, column) => cell === null || cell === undefined ? '<td class="nul">(empty)</td>' : `<td class="${kinds[column] === "number" ? "num" : ""}" title="${esc(cell)}">${esc(cell)}</td>`).join("")}</tr>`).join("")}</tbody>
-            </table>${page.total === 0 ? '<div class="empty">No list entry of this version passes the filters.</div>' : ""}</div>
-            <div class="grid-foot">Showing ${num(preview.rows.length)} of ${num(page.total)} rows ${preview.more ? '<button type="button" class="link-btn" data-review-more>Show 100 more</button>' : ""}</div>`;
-    }
-    return `<div class="review-section">
-            <div class="section-head">
-                <div class="explorer-count">${summary}</div>
-                <label class="compare">Sample data from <select id="review-version">${versions}</select></label>
-            </div>
-            <p class="muted small-note">Exactly the rows and values this version would write, before each subscriber's own scope, business line and region. Read-only.</p>
-            ${grid}
-        </div>`;
-}
-
-function templateConfig(template) {
-    return {
-        fields: template.fields.map(field => ({ sourceTable: field.sourceTable, sourceColumn: field.sourceColumn, headerName: field.headerName })),
-        filters: (template.filters || []).map(filter => ({ sourceTable: filter.sourceTable, sourceColumn: filter.sourceColumn, op: filter.op, values: filter.values, blank: filter.blank }))
-    };
-}
-
-async function loadReviewPreview(more) {
-    const review = state.review;
-    const template = state.templates.find(item => String(item.id) === String(review.id));
-    if (!template) return;
-    const id = template.id;
-    const offset = more && review.preview ? review.preview.rows.length : 0;
-    try {
-        const body = Object.assign(templateConfig(template), { versionId: review.versionId, offset: offset, limit: 100, withTotal: !more });
-        const page = await api("/api/format-templates/explore", { method: "POST", body: body });
-        if (!state.review || state.review.id !== id) return;
-        if (more) {
-            review.preview.rows = review.preview.rows.concat(page.rows);
-            review.preview.more = page.more;
-        } else {
-            review.preview = { page: page, rows: page.rows, more: page.more, inUseTotal: null };
-            const inUse = familyInUse(template.familyId);
-            if (inUse && inUse.id !== template.id) {
-                const current = await api("/api/format-templates/explore", { method: "POST", body: Object.assign(templateConfig(inUse), { versionId: review.versionId, limit: 1, withTotal: true }) });
-                if (state.review && state.review.id === id) {
-                    review.preview.inUseTotal = current.total;
-                    review.preview.inUseVersion = inUse.versionNumber;
-                }
-            }
-        }
-    } catch (error) {
-        if (state.review && state.review.id === id) review.preview = { error: error.message };
-    }
-    if (state.review && state.review.id === id && state.review.tab === "data") renderReviewBody();
-}
-
-function renderReviewBody() {
-    const detail = document.querySelector(".review-detail");
-    const template = state.templates.find(item => String(item.id) === String(state.review.id));
-    if (detail && template) detail.innerHTML = reviewDetailHtml(template);
-}
-
-/** Every step of a template's life, oldest first, from its versions. */
+/** Every step of a template's life, oldest first, from its versions (shown to makers on Format Templates). */
 function historyEvents(familyId) {
     const events = [];
     const versions = familyVersions(familyId);
@@ -2491,17 +1972,16 @@ function historyEvents(familyId) {
             at: version.createdAt, tone: "submit", version: version,
             title: version.createdBy === "system" ? `Version ${version.versionNumber} set up with the demo data`
                 : `${resubmitted ? "Resubmitted" : "Submitted"} version ${version.versionNumber}`,
-            who: version.createdByName || version.createdBy,
-            detail: `${version.fields.length} columns · ${(version.filters || []).length ? (version.filters || []).length + " row filters" : "every list entry"}`
+            who: version.createdByName || version.createdBy
         });
         if (version.status === "APPROVED" && (version.reviewedAt || version.approvedAt)) {
             events.push({ at: version.reviewedAt || version.approvedAt, tone: "good", version: version, title: `Approved version ${version.versionNumber}`, who: version.reviewedByName || version.approvedByName, comment: version.reviewComment });
         } else if (version.status === "REJECTED") {
             events.push({ at: version.reviewedAt, tone: "bad", version: version, title: `Rejected version ${version.versionNumber}`, who: version.reviewedByName, comment: version.reviewComment });
         } else if (version.status === "CHANGES_REQUESTED") {
-            events.push({ at: version.reviewedAt, tone: "warn", version: version, title: `Asked for changes to version ${version.versionNumber}`, who: version.reviewedByName, comment: version.reviewComment });
+            events.push({ at: version.reviewedAt, tone: "warn", version: version, title: `Changes requested on version ${version.versionNumber}`, who: version.reviewedByName, comment: version.reviewComment });
         } else if (version.status === "SUPERSEDED") {
-            events.push({ at: version.reviewedAt, tone: "off", version: version, title: `Version ${version.versionNumber} replaced by a newer submission before review`, who: version.reviewedByName });
+            events.push({ at: version.reviewedAt, tone: "off", version: version, title: `Version ${version.versionNumber} replaced before review`, who: version.reviewedByName });
         }
     });
     return events.sort((a, b) => String(a.at).localeCompare(String(b.at)));
@@ -2512,89 +1992,53 @@ function templateHistoryHtml(familyId, currentId) {
     if (!events.length) return '<div class="empty">No history yet.</div>';
     return `<ol class="timeline">${events.map(event => `<li class="tl tl-${event.tone} ${event.version.id === currentId ? "tl-current" : ""}">
             <div class="tl-title">${esc(event.title)}${event.version.active && event.tone === "good" ? ' <span class="pill pill-on">in use</span>' : ""}</div>
-            <div class="tl-meta">${esc(event.who || "")} · ${when(event.at)}${event.detail ? " · " + esc(event.detail) : ""}</div>
+            <div class="tl-meta">${esc(event.who || "")} · ${when(event.at)}</div>
             ${event.comment ? `<blockquote>${esc(event.comment)}</blockquote>` : ""}
         </li>`).join("")}</ol>`;
 }
 
-function decisionBarHtml(template) {
-    if (template.status !== "PENDING" || !state.user || state.user.role !== "APPROVER") return "";
-    const own = template.createdBy && state.user.username && template.createdBy.toLowerCase() === state.user.username.toLowerCase();
-    if (own) {
-        return `<div class="decision-bar"><span class="muted">You submitted this version, so another approver must review it.</span></div>`;
-    }
-    return `<div class="decision-bar">
-            <span class="muted">Your decision on version ${template.versionNumber}</span>
-            <span class="spacer"></span>
-            <button type="button" class="btn-ghost" data-decide="request-changes">Request changes</button>
-            <button type="button" class="btn-delete" data-decide="reject">Reject</button>
-            <button type="button" class="btn-primary" data-decide="approve">Approve</button>
-        </div>`;
-}
-
-function openDecision(action) {
-    const template = state.templates.find(item => String(item.id) === String(state.review.id));
+/** Rejecting or sending back asks for a reason the maker will see. */
+function openDecision(action, id) {
+    const template = state.templates.find(item => String(item.id) === String(id));
     if (!template) return;
-    const inUse = familyInUse(template.familyId);
-    const users = template.usedBy || [];
-    const keeps = inUse && inUse.id !== template.id ? `Version ${inUse.versionNumber} stays in use.` : "Nothing is in use for this template yet.";
-    const copy = {
-        approve: {
-            title: `Approve ${template.name} version ${template.versionNumber}?`,
-            text: (users.length ? `${users.join(", ")} will use version ${template.versionNumber} from their next export.` : "It becomes available for makers to choose on the Subscribers page.")
-                + ` Its exports produce data versions ${template.versionNumber}.0, ${template.versionNumber}.1 and so on.`,
-            label: "Comment (optional)", confirm: "Approve", tone: "btn-primary", required: false
-        },
-        "request-changes": {
-            title: "Request changes",
-            text: `Version ${template.versionNumber} goes back to ${template.createdByName || template.createdBy}, who can edit it and resubmit. ${keeps}`,
-            label: "What should change? (required)", confirm: "Send back to the maker", tone: "btn-primary", required: true
-        },
-        reject: {
-            title: `Reject version ${template.versionNumber}?`,
-            text: `The version is closed for good and the maker sees your reason. ${keeps}`,
-            label: "Reason (required)", confirm: "Reject", tone: "btn-danger", required: true
-        }
-    }[action];
+    const copy = action === "reject"
+        ? { title: `Reject ${template.name} version ${template.versionNumber}?`, label: "Reason (required)", confirm: "Reject", tone: "btn-danger" }
+        : { title: `Request changes to ${template.name}`, label: "What should change? (required)", confirm: "Send back", tone: "btn-primary" };
     document.getElementById("modal-root").innerHTML = `
         <div class="modal-back" data-modal-close>
-            <form class="modal decision-modal" id="decision-form" data-action="${action}">
+            <form class="modal decision-modal" id="decision-form" data-action="${action}" data-id="${template.id}">
                 <h2>${esc(copy.title)}</h2>
-                <p class="muted">${esc(copy.text)}</p>
-                <label>${esc(copy.label)}<textarea name="comment" rows="5" maxlength="2000" ${copy.required ? 'required minlength="10"' : ""} placeholder="${copy.required ? "At least 10 characters. The maker will see this." : "Visible in the template's history."}"></textarea></label>
-                <div class="counter" id="decision-counter">${copy.required ? "0 / at least 10 characters" : ""}</div>
+                <label>${esc(copy.label)}<textarea name="comment" rows="4" maxlength="2000" required minlength="10" placeholder="At least 10 characters. The maker will see this."></textarea></label>
                 <div class="modal-actions">
                     <button type="button" class="btn-ghost" data-modal-close>Cancel</button>
-                    <button type="submit" class="${copy.tone}" ${copy.required ? "disabled" : ""}>${esc(copy.confirm)}</button>
+                    <button type="submit" class="${copy.tone}" disabled>${esc(copy.confirm)}</button>
                 </div>
             </form>
         </div>`;
-    const area = document.querySelector("#decision-form textarea");
-    if (area) area.focus();
+    document.querySelector("#decision-form textarea").focus();
 }
 
-async function submitDecision(form) {
-    const action = form.dataset.action;
-    const comment = new FormData(form).get("comment");
-    const button = form.querySelector('button[type="submit"]');
-    button.disabled = true;
+async function decide(action, id, comment, button) {
+    if (button) button.disabled = true;
     try {
-        const saved = await api(`/api/format-templates/${state.review.id}/${action}`, { method: "POST", body: { comment: comment } });
+        const saved = await api(`/api/format-templates/${id}/${action}`, { method: "POST", body: { comment: comment } });
         document.getElementById("modal-root").innerHTML = "";
         const words = { approve: "approved", reject: "rejected", "request-changes": "sent back to the maker" }[action];
         toast(`${saved.name} version ${saved.versionNumber} ${words}`, "success");
         state.templates = await api("/api/format-templates");
-        const next = reviewQueue()[0];
-        selectReview(next ? next.id : saved.id);
         render();
-        updateBadges();
+        updateBadges(state.templates);
     } catch (error) {
         toast(error.message, "error");
-        button.disabled = false;
+        if (button) button.disabled = false;
     }
 }
 
-/** Returns true when the click belonged to the review screen. */
+async function submitDecision(form) {
+    await decide(form.dataset.action, form.dataset.id, new FormData(form).get("comment"), form.querySelector('button[type="submit"]'));
+}
+
+/** Returns true when the click belonged to the approvals page. */
 function onReviewClick(event) {
     const target = event.target;
     // The backdrop itself or a Cancel button closes the dialog; clicks inside the form do not.
@@ -2602,26 +2046,10 @@ function onReviewClick(event) {
         document.getElementById("modal-root").innerHTML = "";
         return true;
     }
-    const pick = target.closest("[data-review]");
-    if (pick) {
-        selectReview(pick.dataset.review);
-        render();
-        return true;
-    }
-    const tab = target.closest("[data-review-tab]");
-    if (tab) {
-        state.review.tab = tab.dataset.reviewTab;
-        renderReviewBody();
-        if (state.review.tab === "data" && !state.review.preview) loadReviewPreview(false);
-        return true;
-    }
-    if (target.closest("[data-review-more]")) {
-        loadReviewPreview(true);
-        return true;
-    }
-    const decide = target.closest("[data-decide]");
-    if (decide) {
-        openDecision(decide.dataset.decide);
+    const button = target.closest("[data-decide]");
+    if (button) {
+        if (button.dataset.decide === "approve") decide("approve", button.dataset.id, null, button);
+        else openDecision(button.dataset.decide, button.dataset.id);
         return true;
     }
     return false;
@@ -2629,27 +2057,8 @@ function onReviewClick(event) {
 
 function onReviewInput(event) {
     const target = event.target;
-    if (target.id === "review-baseline") {
-        state.review.baseline = Number(target.value);
-        renderReviewBody();
-        return true;
-    }
-    if (target.id === "review-version") {
-        state.review.versionId = Number(target.value);
-        state.review.preview = null;
-        renderReviewBody();
-        loadReviewPreview(false);
-        return true;
-    }
     if (target.closest && target.closest("#decision-form") && target.name === "comment") {
-        const counter = document.getElementById("decision-counter");
-        const form = target.closest("#decision-form");
-        if (counter && form.dataset.action !== "approve") {
-            const length = target.value.trim().length;
-            counter.textContent = length < 10 ? `${length} / at least 10 characters` : `${length} / 2,000`;
-            counter.classList.toggle("ok", length >= 10);
-            form.querySelector('button[type="submit"]').disabled = length < 10;
-        }
+        target.closest("#decision-form").querySelector('button[type="submit"]').disabled = target.value.trim().length < 10;
         return true;
     }
     return false;
@@ -2692,355 +2101,659 @@ function setBadge(selector, count, label) {
     badge.title = count + " " + label;
 }
 
-/* ---------- Data versions: every dataset an export produced, kept as it was ---------- */
+/* ---------- Data version search helpers (used by "Send a stored version" on the Export page) ---------- */
 
-function seriesKey(snapshot) {
-    return snapshot.familyId + "|" + snapshot.listCode;
+const CATALOG_PAGE = 50;
+
+function seriesKeyOf(item) {
+    return item.familyId + "|" + item.listCode;
 }
 
-/** Data versions grouped by template and list, newest version first in each. */
-function dataSeries() {
-    const groups = new Map();
-    (state.dataVersions || []).forEach(snapshot => {
-        const key = seriesKey(snapshot);
-        if (!groups.has(key)) groups.set(key, { key, familyId: snapshot.familyId, listCode: snapshot.listCode, listName: snapshot.listName, versions: [] });
-        groups.get(key).versions.push(snapshot);
-    });
-    const list = [...groups.values()];
-    list.forEach(group => {
-        group.versions.sort((a, b) => b.id - a.id);
-        group.latest = group.versions[0];
-        group.name = group.latest.templateName;
-    });
-    return list.sort((a, b) => a.name.localeCompare(b.name) || a.listName.localeCompare(b.listName));
+function seriesUrl(q, sort, familyId, offset, limit) {
+    const params = new URLSearchParams({ sort: sort || "recent", offset: String(offset || 0), limit: String(limit || CATALOG_PAGE) });
+    if (q) params.set("q", q);
+    if (familyId) params.set("familyId", familyId);
+    return "/api/data-versions/series?" + params.toString();
 }
 
-function ensureDataView() {
-    if (!state.dv) state.dv = { key: null, id: null, tab: "overview", detail: null, rows: null, compare: null, compareWith: null, format: null, audience: "" };
-    const series = dataSeries();
-    let group = series.find(item => item.key === state.dv.key);
-    if (!group && state.dv.familyId) group = series.find(item => String(item.familyId) === String(state.dv.familyId));
-    if (!group) group = series[0];
-    state.dv.key = group ? group.key : null;
-    if (group && !group.versions.some(item => String(item.id) === String(state.dv.id))) {
-        state.dv.id = group.latest.id;
-        state.dv.detail = null;
-        state.dv.rows = null;
-        state.dv.compare = null;
-        state.dv.compareWith = null;
+function versionsUrl(series, offset, limit) {
+    return `/api/data-versions/series/${encodeURIComponent(series.familyId)}/${encodeURIComponent(series.listCode)}?offset=${offset}&limit=${limit}`;
+}
+
+/* ---------- Export page: by template, with two tabs ----------
+ *
+ * Export Latest: every approved template; "Export" reads the current data, keeps the version when
+ * nothing changed or creates the next one, then sends or downloads it.
+ * Previous Versions: find a template, see its versions (1.1, 1.2, ...), send or download any of them.
+ * Templates and versions are searched and paged on the server, so hundreds of templates and
+ * thousands of versions stay quick.
+ */
+
+const TEMPLATE_PAGE = 25;
+const VERSIONS_PAGE = 20;
+const SEND_PAGE = 10;
+
+function ensureXp() {
+    if (!state.xp) {
+        state.xp = {
+            tab: "latest",
+            latest: { q: "", format: "", offset: 0, page: null, seq: 0 },
+            prev: { q: "", offset: 0, page: null, seq: 0, selected: null, lists: null, listCode: null, versions: null }
+        };
     }
-    return group;
+    return state.xp;
 }
 
-function versionsHtml() {
-    const group = ensureDataView();
-    const series = dataSeries();
-    const intro = `<details class="dv-explain"><summary>How data versions work</summary>
-        <ul>
-            <li>Every export keeps an exact copy of the rows it produced: a <strong>data version</strong>.</li>
-            <li>When the data is the same as an existing version, that version is <strong>reused</strong>; nothing is stored twice. When any row was added, removed or changed, the next number is given.</li>
-            <li>The first number is the <strong>template version</strong> (its columns and row filters), the second counts <strong>data changes</strong>: 1.0, 1.1, 1.2… and 2.0 once a new template version is approved.</li>
-            <li>Any version can be downloaded as CSV or XML at any time. It comes from the stored copy, so it is exactly what was sent, even after the source data changed.</li>
-        </ul></details>`;
-    if (!group) {
-        return `${head("Data", "Data Versions", "Every export keeps an exact copy of the data it produced.")}${intro}
-            <section class="panel"><div class="empty">No data versions yet. They are created the first time a template is exported.</div></section>`;
-    }
-    const options = series.map(item => `<option value="${esc(item.key)}" ${item.key === group.key ? "selected" : ""}>${esc(item.name)} · ${esc(item.listName)} (${item.versions.length})</option>`).join("");
-    const versions = group.versions;
-    const totalRows = versions.reduce((sum, item) => sum + item.rowCount, 0);
-    const storedRows = versions.reduce((sum, item) => sum + item.storedRows, 0);
-    const shared = totalRows ? Math.round((totalRows - storedRows) * 100 / totalRows) : 0;
-    const served = versions.reduce((sum, item) => sum + 1 + item.reuseCount, 0);
-    const stats = `<section class="stats dv-stats">
-            ${statCard("Latest version", group.latest.label, when(group.latest.createdAt), "green")}
-            ${statCard("Versions", num(versions.length), versions.length === 1 ? "one dataset so far" : "distinct datasets", "")}
-            ${statCard("Exports served", num(served), num(served - versions.length) + " reused an existing version", "")}
-            ${statCard("Storage shared", shared + "%", `${num(storedRows)} rows stored for ${num(totalRows)} in all versions`, "")}
-        </section>`;
-    let lastMajor = null;
-    const timeline = versions.map((item, index) => {
-        const divider = item.major !== lastMajor
-            ? `<div class="dv-major">Template version ${item.major}${index === 0 ? "" : ""}</div>` : "";
-        lastMajor = item.major;
-        const changes = item.previousLabel
-            ? `<span class="dv-delta"><span class="add">+${num(item.insertedRows)}</span> <span class="del">−${num(item.deletedRows)}</span> <span class="chg">~${num(item.changedRows)}</span> vs ${esc(item.previousLabel)}</span>`
-            : '<span class="dv-delta">First version</span>';
-        return `${divider}<button type="button" class="dv-item ${String(item.id) === String(state.dv.id) ? "active" : ""}" data-dv="${item.id}">
-            <span class="dv-label">${esc(item.label)}${index === 0 ? ' <span class="pill pill-on">Latest</span>' : ""}</span>
-            <span class="dv-meta">${when(item.createdAt)} · ${num(item.rowCount)} rows</span>
-            <span class="dv-meta">${changes}</span>
-            <span class="dv-meta">${item.reuseCount ? `Reused ${item.reuseCount}×` : "Used once"} · list version ${esc(item.sourceVersionId)}</span>
-        </button>`;
-    }).join("");
-    const selected = versions.find(item => String(item.id) === String(state.dv.id)) || group.latest;
+function exportHtml() {
+    const xp = ensureXp();
     return `
-        ${head("Data", "Data Versions", "Every export keeps an exact copy of the data it produced. Identical data reuses its version; changed data gets the next number.")}
-        ${intro}
-        <div class="dv-toolbar"><label class="field-label">Template and list<select id="dv-series">${options}</select></label></div>
-        ${stats}
-        <div class="dv-layout">
-            <aside class="dv-timeline" aria-label="Versions">${timeline}</aside>
-            <section class="dv-detail" id="dv-detail">${versionDetailHtml(selected, group)}</section>
-        </div>`;
+        ${head("Delivery", "Export", "Export the latest data of a template, or any of its earlier versions.")}
+        ${state.exportMessage ? `<div class="banner">${state.exportMessage}</div>` : ""}
+        <nav class="xp-tabs" role="tablist">
+            <button type="button" role="tab" class="xp-tab ${xp.tab === "latest" ? "active" : ""}" aria-selected="${xp.tab === "latest"}" data-xp-tab="latest">Export Latest</button>
+            <button type="button" role="tab" class="xp-tab ${xp.tab === "previous" ? "active" : ""}" aria-selected="${xp.tab === "previous"}" data-xp-tab="previous">Previous Versions</button>
+        </nav>
+        <div id="xp-body">${xp.tab === "previous" ? previousHtml() : latestHtml()}</div>`;
 }
 
-function statCard(label, value, note, tone) {
-    return `<article class="stat ${tone}"><div class="stat-label">${esc(label)}</div><div class="stat-value">${esc(value)}</div><div class="stat-note">${esc(note)}</div></article>`;
+function renderXp() {
+    const body = document.getElementById("xp-body");
+    if (body) body.innerHTML = state.xp.tab === "previous" ? previousHtml() : latestHtml();
 }
 
-function versionDetailHtml(snapshot, group) {
-    const view = state.dv;
-    const tabs = [["overview", "Overview"], ["data", "Data"], ["compare", "Compare"], ["exports", "Exports"]];
-    let body;
-    if (view.tab === "data") body = versionRowsHtml(snapshot);
-    else if (view.tab === "compare") body = versionCompareHtml(snapshot, group);
-    else if (view.tab === "exports") body = versionExportsHtml();
-    else body = versionOverviewHtml(snapshot, group);
-    const latest = group.latest.id === snapshot.id;
-    return `<header class="review-head">
-            <div>
-                <p class="kicker">${esc(snapshot.templateName)} · ${esc(snapshot.listName)}</p>
-                <h2>Data version ${esc(snapshot.label)} ${latest ? '<span class="pill pill-on">Latest</span>' : ""}</h2>
-                <p class="muted">Created ${when(snapshot.createdAt)}${snapshot.createdJobId ? ` by export job #${snapshot.createdJobId}` : ""} · ${num(snapshot.rowCount)} rows</p>
-            </div>
-        </header>
-        <nav class="review-tabs" role="tablist">${tabs.map(([id, label]) => `<button type="button" role="tab" class="review-tab ${view.tab === id ? "active" : ""}" aria-selected="${view.tab === id}" data-dv-tab="${id}">${esc(label)}</button>`).join("")}</nav>
-        <div class="review-body">${body}</div>`;
+function templateQuery(view, withVersions, limit) {
+    const params = new URLSearchParams({ offset: String(view.offset), limit: String(limit), withVersions: String(withVersions) });
+    if (view.q) params.set("q", view.q);
+    if (view.format) params.set("format", view.format);
+    return "/api/export-templates?" + params.toString();
 }
 
-function versionOverviewHtml(snapshot, group) {
-    const detail = state.dv.detail;
-    const subscribers = (state.subscribers || []).filter(item => String(item.templateFamilyId) === String(snapshot.familyId));
-    const format = state.dv.format || snapshot.formatType;
-    const audience = state.dv.audience || "";
-    const href = `/api/data-versions/${snapshot.id}/file?format=${encodeURIComponent(format)}${audience ? "&subscriberId=" + encodeURIComponent(audience) : ""}`;
-    const changes = snapshot.previousLabel
-        ? `<strong>+${num(snapshot.insertedRows)}</strong> added, <strong>−${num(snapshot.deletedRows)}</strong> removed, <strong>~${num(snapshot.changedRows)}</strong> changed since ${esc(snapshot.previousLabel)} <button type="button" class="link-btn" data-dv-tab="compare">See the changes</button>`
-        : "The first version of this template and list.";
-    const columns = detail ? detail.columns.map((column, index) => `<li><span class="muted">${index + 1}.</span> <strong>${esc(column.header)}</strong> <span class="mono muted">${esc(column.table)}.${esc(column.column)}</span></li>`).join("") : "<li class='muted'>Loading…</li>";
-    const filters = detail ? (detail.filters.length ? detail.filters.map(text => `<li>${esc(text)}</li>`).join("") : "<li class='muted'>None: every list entry</li>") : "";
-    return `<div class="review-section">
-            <div class="dv-download">
-                <div>
-                    <h3>Download this version</h3>
-                    <p class="muted small-note">Built from the stored copy: exactly the data of ${esc(snapshot.label)}, even after the source changed. The source tables are not read.</p>
-                </div>
-                <div class="dv-download-form">
-                    <label>Format<select id="dv-format">${["CSV", "XML"].map(value => `<option ${value === format ? "selected" : ""}>${value}</option>`).join("")}</select></label>
-                    <label>Rows<select id="dv-audience">
-                        <option value="">All ${num(snapshot.rowCount)} rows</option>
-                        ${subscribers.map(item => `<option value="${item.id}" ${String(item.id) === String(audience) ? "selected" : ""}>As ${esc(item.name)} receives it</option>`).join("")}
-                    </select></label>
-                    <a class="btn-primary" id="dv-download" href="${href}" download>Download</a>
-                </div>
-            </div>
-            <dl class="facts">
-                <div><dt>Changes</dt><dd>${changes}</dd></div>
-                <div><dt>Template</dt><dd>${esc(snapshot.templateName)} version ${snapshot.major} <span class="muted">(${esc(snapshot.formatType)})</span></dd></div>
-                <div><dt>Source</dt><dd>${esc(snapshot.listName)} list, certified version ${esc(snapshot.sourceVersionId)}</dd></div>
-                <div><dt>Used</dt><dd>${1 + snapshot.reuseCount} export${snapshot.reuseCount ? "s" : ""}; last ${when(snapshot.lastUsedAt)}</dd></div>
-                <div><dt>Storage</dt><dd>${num(snapshot.storedRows)} new rows stored; ${num(snapshot.rowCount - snapshot.storedRows)} shared with earlier versions</dd></div>
-                <div><dt>Fingerprint</dt><dd class="mono" title="${esc(snapshot.fingerprint)}">${esc(snapshot.fingerprint.slice(0, 16))}…</dd></div>
-            </dl>
-            <div class="dv-columns">
-                <div><h4>Columns</h4><ul>${columns}</ul></div>
-                <div><h4>Row filters</h4><ul>${filters}</ul></div>
-            </div>
-        </div>`;
+function versionChip(label) {
+    return label ? `<span class="ver-chip">${esc(label)}</span>` : "";
 }
 
-function versionRowsHtml(snapshot) {
-    const rows = state.dv.rows;
-    if (!rows) return '<div class="empty">Loading rows…</div>';
-    if (rows.error) return `<div class="banner banner-error">${esc(rows.error)}</div>`;
-    return `<div class="review-section">
-            <p class="muted small-note">The rows of ${esc(snapshot.label)} as stored, in file order. Read-only.</p>
-            <div class="grid-wrap review-grid"><table class="grid">
-                <thead><tr><th class="rownum">#</th>${rows.columns.map(column => `<th><div class="gh"><span class="gh-title">${esc(column.header)}</span></div><div class="gh-src">${esc(column.table)}.${esc(column.column)}</div></th>`).join("")}</tr></thead>
-                <tbody>${rows.rows.map(row => `<tr><td class="rownum">${num(row.line)}</td>${row.cells.map(cell => cell === null || cell === undefined ? '<td class="nul">(empty)</td>' : `<td title="${esc(cell)}">${esc(cell)}</td>`).join("")}</tr>`).join("")}</tbody>
-            </table></div>
-            <div class="grid-foot">Showing ${num(rows.rows.length)} of ${num(rows.total)} rows ${rows.rows.length < rows.total ? '<button type="button" class="link-btn" data-dv-more-rows>Show 100 more</button>' : ""}</div>
-        </div>`;
-}
+/* --- Tab 1: Export Latest --- */
 
-function versionCompareHtml(snapshot, group) {
-    const others = group.versions.filter(item => item.id !== snapshot.id);
-    if (!others.length) return '<div class="empty">This is the only version, so there is nothing to compare with yet.</div>';
-    const compare = state.dv.compare;
-    const options = others.map(item => `<option value="${item.id}" ${String(item.id) === String(state.dv.compareWith) ? "selected" : ""}>${esc(item.label)} · ${when(item.createdAt)}</option>`).join("");
-    let body = '<div class="empty">Loading the comparison…</div>';
-    if (compare && compare.error) body = `<div class="banner banner-error">${esc(compare.error)}</div>`;
-    else if (compare) {
-        const c = compare.counts;
-        const rows = compare.changes.map(change => `<tr>
-                <td class="mono">${esc(change.recordId)}<div class="muted">${esc(change.bnpId || "")}</div></td>
-                <td><span class="tag tag-${change.kind === "ADDED" ? "new" : change.kind === "REMOVED" ? "bad" : "warn"}">${change.kind === "ADDED" ? "Added" : change.kind === "REMOVED" ? "Removed" : "Changed"}</span></td>
-                <td>${change.kind === "CHANGED" ? change.cells.map(cell => `<div class="cell-change"><strong>${esc(cell.column)}</strong>: <span class="was">${esc(cell.before ?? "(empty)")}</span> → ${esc(cell.after ?? "(empty)")}</div>`).join("")
-                    : `<span class="muted">${change.kind === "ADDED" ? "In " + esc(compare.newerLabel) + " only" : "In " + esc(compare.olderLabel) + " only"}</span>`}</td>
-            </tr>`).join("");
-        body = `<div class="dv-counts">
-                <span class="count add">+${num(c.inserted)} added</span>
-                <span class="count del">−${num(c.deleted)} removed</span>
-                <span class="count chg">~${num(c.changed)} changed</span>
-                <span class="count">${num(c.unchanged)} unchanged</span>
-            </div>
-            ${compare.sameLayout ? "" : '<div class="review-callout warn">These versions come from different template versions. Columns are matched by their name in the file; a column only in one version shows as empty in the other.</div>'}
-            ${rows ? `<table class="detail-table review-table"><thead><tr><th>Record</th><th>Change</th><th>What changed</th></tr></thead><tbody>${rows}</tbody></table>
-                ${compare.more ? '<button type="button" class="link-btn" data-dv-more-changes>Show more changes</button>' : ""}`
-                : '<p class="muted">The two versions hold exactly the same rows.</p>'}`;
-    }
-    return `<div class="review-section">
-            <div class="section-head">
-                <h3>${esc(snapshot.label)} compared with</h3>
-                <label class="compare"><select id="dv-compare">${options}</select></label>
-            </div>
-            ${body}
-        </div>`;
-}
-
-function versionExportsHtml() {
-    const detail = state.dv.detail;
-    if (!detail) return '<div class="empty">Loading…</div>';
-    if (!detail.usage.length) return '<div class="empty">No export has used this version yet.</div>';
-    const rows = detail.usage.map(use => `<tr>
-            <td><a class="file-link" href="#/history" data-history="${use.jobId}">#${use.jobId}</a></td>
-            <td>${when(use.at)}</td>
-            <td>${esc(use.subscriberName)} <span class="fmt-${esc(use.formatType)}">${esc(use.formatType)}</span></td>
-            <td>${use.outcome === "CREATED" ? '<span class="tag tag-new">Created this version</span>' : '<span class="tag">Reused: data unchanged</span>'}</td>
-            <td>${badge(use.status)} <span class="muted">${num(use.records)} records</span></td>
-        </tr>`).join("");
-    return `<div class="review-section">
-            <p class="muted small-note">Every subscriber file built from this version. Retries rebuild from the same version, so they always send the same data.</p>
-            <table class="detail-table review-table"><thead><tr><th>Job</th><th>When</th><th>Subscriber</th><th>Version</th><th>File</th></tr></thead><tbody>${rows}</tbody></table>
-        </div>`;
-}
-
-async function loadVersionDetail() {
-    const id = state.dv.id;
-    if (!id) return;
+async function loadLatest() {
+    const view = state.xp.latest;
+    const seq = ++view.seq;
     try {
-        const detail = await api("/api/data-versions/" + id);
-        if (state.dv.id !== id) return;
-        state.dv.detail = detail;
+        const page = await api(templateQuery(view, false, TEMPLATE_PAGE));
+        if (seq !== view.seq) return;
+        view.page = page;
+    } catch (error) {
+        view.page = { total: 0, offset: 0, templates: [], error: error.message };
+    }
+    const host = document.getElementById("xp-latest-table");
+    if (host) host.innerHTML = latestTableHtml();
+    else renderXp();
+}
+
+function latestHtml() {
+    const view = state.xp.latest;
+    return `<section class="table-card xp-card">
+            <div class="xp-toolbar">
+                <input class="search" id="xp-latest-search" placeholder="Search templates" value="${esc(view.q)}" autocomplete="off" aria-label="Search templates">
+                <select id="xp-latest-format" aria-label="Format">
+                    <option value="">All formats</option>
+                    ${["CSV", "XML"].map(value => `<option ${view.format === value ? "selected" : ""}>${value}</option>`).join("")}
+                </select>
+            </div>
+            <div id="xp-latest-table">${latestTableHtml()}</div>
+        </section>`;
+}
+
+function latestTableHtml() {
+    const page = state.xp.latest.page;
+    if (!page) return '<div class="empty">Loading templates…</div>';
+    if (page.error) return `<div class="banner banner-error">${esc(page.error)}</div>`;
+    if (!page.templates.length) return `<div class="empty">${state.xp.latest.q || state.xp.latest.format ? "No template matches." : "No approved template yet. Create one on Format Templates."}</div>`;
+    const rows = page.templates.map(item => `<tr>
+            <td><strong>${esc(item.name)}</strong><div class="muted small-note">Template version ${item.templateVersion}</div></td>
+            <td class="fmt-${esc(item.formatType)}">${esc(item.formatType)}</td>
+            <td>${item.latestLabel ? `${versionChip(item.latestLabel)} <span class="muted">${when(item.latestAt)}</span>` : '<span class="muted">Not exported yet</span>'}</td>
+            <td>${num(item.subscribers)}</td>
+            <td class="muted">${item.lastExport ? when(item.lastExport) : "—"}</td>
+            <td class="actions"><button type="button" class="btn-primary btn-small" data-xp-export="${item.familyId}">Export</button></td>
+        </tr>`).join("");
+    return `<table>
+            <thead><tr><th>Template</th><th>Format</th><th>Latest version</th><th>Subscribers</th><th>Last exported</th><th></th></tr></thead>
+            <tbody>${rows}</tbody>
+        </table>
+        ${pagerHtml(page, TEMPLATE_PAGE, "latest", "templates")}`;
+}
+
+function pagerHtml(page, size, key, noun) {
+    const from = page.total ? page.offset + 1 : 0;
+    const to = page.offset + page.templates.length;
+    return `<div class="pager xp-pager">
+            <span class="muted">${num(from)}–${num(to)} of ${num(page.total)} ${noun}</span>
+            <button type="button" class="btn-ghost btn-small" data-xp-page="${key}:-1" ${page.offset === 0 ? "disabled" : ""}>‹ Previous</button>
+            <button type="button" class="btn-ghost btn-small" data-xp-page="${key}:1" ${to >= page.total ? "disabled" : ""}>Next ›</button>
+        </div>`;
+}
+
+/* --- Tab 2: Previous Versions --- */
+
+async function loadPrevTemplates() {
+    const view = state.xp.prev;
+    const seq = ++view.seq;
+    try {
+        const page = await api(templateQuery(view, true, TEMPLATE_PAGE));
+        if (seq !== view.seq) return;
+        view.page = page;
+    } catch (error) {
+        view.page = { total: 0, offset: 0, templates: [], error: error.message };
+    }
+    const host = document.getElementById("xp-prev-list");
+    if (host) host.innerHTML = prevListHtml();
+    else renderXp();
+    if (!view.selected && view.page.templates.length) selectPrevTemplate(view.page.templates[0]);
+}
+
+function previousHtml() {
+    const view = state.xp.prev;
+    return `<div class="xp-split">
+            <aside class="xp-side">
+                <input class="search" id="xp-prev-search" placeholder="Search templates" value="${esc(view.q)}" autocomplete="off" aria-label="Search templates">
+                <div id="xp-prev-list">${prevListHtml()}</div>
+            </aside>
+            <section class="table-card xp-card" id="xp-prev-detail">${prevDetailHtml()}</section>
+        </div>`;
+}
+
+function prevListHtml() {
+    const view = state.xp.prev;
+    const page = view.page;
+    if (!page) return '<div class="queue-empty">Loading…</div>';
+    if (page.error) return `<div class="banner banner-error">${esc(page.error)}</div>`;
+    if (!page.templates.length) return `<div class="queue-empty">${view.q ? "No template matches." : "No versions yet. Export a template first."}</div>`;
+    const items = page.templates.map(item => `<button type="button" class="xp-template ${view.selected && view.selected.familyId === item.familyId ? "active" : ""}" data-xp-template="${item.familyId}">
+            <span class="xp-template-name">${esc(item.name)}</span>
+            <span class="muted small-note"><span class="fmt-${esc(item.formatType)}">${esc(item.formatType)}</span> · ${num(item.versionCount)} version${item.versionCount === 1 ? "" : "s"} · latest ${esc(item.latestLabel || "")}</span>
+        </button>`).join("");
+    return items + pagerHtml(page, TEMPLATE_PAGE, "prev", "");
+}
+
+async function selectPrevTemplate(item) {
+    const view = state.xp.prev;
+    view.selected = item;
+    view.lists = null;
+    view.listCode = null;
+    view.versions = null;
+    const list = document.getElementById("xp-prev-list");
+    if (list) list.innerHTML = prevListHtml();
+    renderPrevDetail();
+    try {
+        const series = await api(seriesUrl("", "recent", item.familyId, 0, 50));
+        if (view.selected !== item) return;
+        view.lists = series.series;
+        view.listCode = view.lists.length ? view.lists[0].listCode : null;
+    } catch (error) {
+        view.lists = [];
+    }
+    await loadPrevVersions(false);
+}
+
+async function loadPrevVersions(more) {
+    const view = state.xp.prev;
+    const series = view.selected && view.listCode ? { familyId: view.selected.familyId, listCode: view.listCode } : null;
+    if (!series) return renderPrevDetail();
+    const offset = more && view.versions ? view.versions.items.length : 0;
+    try {
+        const page = await api(versionsUrl(series, offset, VERSIONS_PAGE));
+        if (!view.selected || view.selected.familyId !== series.familyId || view.listCode !== series.listCode) return;
+        view.versions = more && view.versions
+            ? { total: page.total, latestId: page.series.latestId, items: view.versions.items.concat(page.versions) }
+            : { total: page.total, latestId: page.series.latestId, items: page.versions };
+    } catch (error) {
+        view.versions = { total: 0, items: [], error: error.message };
+    }
+    renderPrevDetail();
+}
+
+function renderPrevDetail() {
+    const host = document.getElementById("xp-prev-detail");
+    if (host) host.innerHTML = prevDetailHtml();
+}
+
+function prevDetailHtml() {
+    const view = state.xp.prev;
+    const item = view.selected;
+    if (!item) return '<div class="empty">Choose a template to see its versions.</div>';
+    const lists = view.lists && view.lists.length > 1
+        ? `<label class="compare">List <select id="xp-prev-list-code">${view.lists.map(entry => `<option value="${esc(entry.listCode)}" ${entry.listCode === view.listCode ? "selected" : ""}>${esc(entry.listName)}</option>`).join("")}</select></label>`
+        : (view.lists && view.lists.length ? `<span class="muted">${esc(view.lists[0].listName)} list</span>` : "");
+    let table = '<div class="empty">Loading versions…</div>';
+    if (view.versions && view.versions.error) table = `<div class="banner banner-error">${esc(view.versions.error)}</div>`;
+    else if (view.versions && !view.versions.items.length) table = '<div class="empty">This template has no versions yet.</div>';
+    else if (view.versions) {
+        const rows = view.versions.items.map(version => {
+            const changes = version.previousLabel
+                ? `<span class="dv-delta"><span class="add">+${num(version.insertedRows)}</span> <span class="del">−${num(version.deletedRows)}</span> <span class="chg">~${num(version.changedRows)}</span> vs ${esc(version.previousLabel)}</span>`
+                : '<span class="muted">First version</span>';
+            return `<tr>
+                <td>${versionChip(version.label)}${version.id === view.versions.latestId ? ' <span class="pill pill-on">Latest</span>' : ""}</td>
+                <td>${when(version.createdAt)}</td>
+                <td>${num(version.rowCount)}</td>
+                <td>${changes}</td>
+                <td class="actions">
+                    <a class="btn-ghost btn-small" href="/api/data-versions/${version.id}/file?format=CSV" download>CSV</a>
+                    <a class="btn-ghost btn-small" href="/api/data-versions/${version.id}/file?format=XML" download>XML</a>
+                    <button type="button" class="btn-primary btn-small" data-xp-send="${version.id}">Send</button>
+                </td>
+            </tr>`;
+        }).join("");
+        const more = view.versions.items.length < view.versions.total
+            ? `<button type="button" class="btn-ghost btn-small" data-xp-older>Show older versions (${num(view.versions.total - view.versions.items.length)} more)</button>` : "";
+        table = `<table>
+                <thead><tr><th>Version</th><th>Created</th><th>Rows</th><th>Changes</th><th></th></tr></thead>
+                <tbody>${rows}</tbody>
+            </table>
+            <div class="pager xp-pager"><span class="muted">${num(view.versions.items.length)} of ${num(view.versions.total)} versions</span>${more}</div>`;
+    }
+    return `<div class="xp-detail-head">
+            <div><h2>${esc(item.name)}</h2><span class="muted"><span class="fmt-${esc(item.formatType)}">${esc(item.formatType)}</span> · template version ${item.templateVersion} · ${num(item.subscribers)} subscriber${item.subscribers === 1 ? "" : "s"}</span></div>
+            ${lists}
+        </div>
+        ${table}`;
+}
+
+/* --- The dialog: export latest, then send or download; or send a previous version --- */
+
+function dialogHtml() {
+    const d = state.xpDialog;
+    if (!d) return "";
+    let body = "";
+    if (d.step === "checking") {
+        body = `<div class="xp-checking"><span class="spinner" aria-hidden="true"></span> Checking ${esc(d.name)} for data changes…</div>`;
+    } else if (d.step === "error") {
+        body = `<div class="banner banner-error">${esc(d.error)}</div>`;
+    } else {
+        const s = d.snapshot;
+        const outcome = d.kind === "latest"
+            ? (d.created && !s.previousLabel
+                ? `<div class="review-callout good"><strong>First export of this template.</strong> Version ${esc(s.label)} was created.</div>`
+                : d.created
+                ? `<div class="review-callout good"><strong>The data changed.</strong> New version ${esc(s.label)} was created (+${num(s.insertedRows)} added, −${num(s.deletedRows)} removed, ~${num(s.changedRows)} changed since ${esc(s.previousLabel)}).</div>`
+                : `<div class="review-callout"><strong>No change in the data.</strong> The existing version ${esc(s.label)} is exported again.</div>`)
+            : "";
+        body = `${outcome}
+            <div class="xp-version-card">
+                <span class="ver-chip big">${esc(s.label)}</span>
+                <span>${num(s.rowCount)} rows · created ${when(s.createdAt)}</span>
+            </div>
+            <div class="xp-download">
+                <span>Download</span>
+                <a class="btn-ghost btn-small" href="/api/data-versions/${s.id}/file?format=CSV" download>CSV</a>
+                <a class="btn-ghost btn-small" href="/api/data-versions/${s.id}/file?format=XML" download>XML</a>
+            </div>
+            ${sendSectionHtml()}`;
+    }
+    return `<div class="modal-back" data-xp-close>
+            <div class="modal xp-dialog" role="dialog" aria-label="${esc(d.title)}">
+                <div class="xp-dialog-head"><h2>${esc(d.title)}</h2><button type="button" class="pop-x" data-xp-close aria-label="Close">×</button></div>
+                ${body}
+            </div>
+        </div>`;
+}
+
+function sendSectionHtml() {
+    const d = state.xpDialog;
+    const send = d.send;
+    if (!send) return "";
+    if (send.loading) return '<div class="empty">Loading subscribers…</div>';
+    if (send.error) return `<div class="banner banner-error">${esc(send.error)}</div>`;
+    const rows = send.rows;
+    const formats = send.formatList;
+    const onTemplate = rows.filter(row => row.onTemplate);
+    const matching = rows.filter(row => !send.q || row.name.toLowerCase().includes(send.q.toLowerCase()));
+    const page = matching.slice(send.page * SEND_PAGE, (send.page + 1) * SEND_PAGE);
+    const pages = Math.max(1, Math.ceil(matching.length / SEND_PAGE));
+    const list = page.map(row => {
+        const picked = sendFormatOf(row);
+        const on = send.chosen.has(row.subscriberId);
+        const options = [...new Set([...formats, row.formatType])].map(format =>
+            `<option value="${esc(format)}" ${format === picked ? "selected" : ""}>${esc(format)}${format === row.formatType ? " (own)" : ""}</option>`).join("");
+        return `<div class="xp-sub ${on ? "selected" : ""}">
+            <input type="checkbox" id="xp-sub-${row.subscriberId}" data-xp-sub="${row.subscriberId}" ${on ? "checked" : ""}>
+            <label class="xp-sub-name" for="xp-sub-${row.subscriberId}">${esc(row.name)}</label>
+            <span class="muted">${esc(row.scope)} · ${esc(row.exportMode)} · ${row.onTemplate ? '<span class="tag tag-new">This template</span>' : "Other template"}</span>
+            <span class="xp-sub-format">
+                <select data-xp-row-format="${row.subscriberId}" aria-label="File format for ${esc(row.name)}" class="${picked !== row.formatType ? "changed" : ""}">${options}</select>
+                ${picked !== row.formatType ? `<span class="was">usually ${esc(row.formatType)}</span>` : ""}
+            </span>
+        </div>`;
+    }).join("");
+    const allChosen = rows.length && send.chosen.size === rows.length;
+    const chosenRows = rows.filter(row => send.chosen.has(row.subscriberId));
+    const byFormat = {};
+    chosenRows.forEach(row => { const f = sendFormatOf(row); byFormat[f] = (byFormat[f] || 0) + 1; });
+    const summary = Object.keys(byFormat).sort().map(f => `${num(byFormat[f])} ${esc(f)}`).join(" · ");
+    const changed = chosenRows.filter(row => sendFormatOf(row) !== row.formatType).length;
+    return `<div class="xp-send">
+            <div class="xp-send-head">
+                <strong>Send to subscribers</strong>
+                <span class="muted">${num(send.chosen.size)} of ${num(rows.length)} selected</span>
+            </div>
+            <div class="xp-quick">
+                <button type="button" class="btn-ghost btn-small ${allChosen ? "on" : ""}" data-xp-sub-all="all">Select all (${num(rows.length)})</button>
+                <button type="button" class="btn-ghost btn-small" data-xp-sub-all="template" ${onTemplate.length ? "" : "disabled"}>Only this template's (${num(onTemplate.length)})</button>
+                <button type="button" class="btn-ghost btn-small" data-xp-sub-all="none" ${send.chosen.size ? "" : "disabled"}>Clear</button>
+            </div>
+            <div class="xp-send-options">
+                <label class="xp-format">Set the format of the ${num(send.chosen.size)} selected
+                    <select id="xp-format" aria-label="Set the format of the selected subscribers" ${send.chosen.size ? "" : "disabled"}>
+                        <option value="" selected>Choose…</option>
+                        <option value="__own">Each one's own format</option>
+                        ${formats.map(format => `<option value="${esc(format)}">${esc(format)} for all selected</option>`).join("")}
+                    </select>
+                </label>
+                <label class="xp-format">Find a subscriber
+                    <input class="search" id="xp-sub-search" placeholder="Name" value="${esc(send.q)}" autocomplete="off" aria-label="Find a subscriber">
+                </label>
+            </div>
+            <div class="xp-subs">${list || '<div class="muted xp-add-none">No subscriber matches.</div>'}</div>
+            ${pages > 1 ? `<div class="pager"><span class="muted">Page ${send.page + 1} of ${pages} · ${num(matching.length)} subscribers</span>
+                <button type="button" class="btn-ghost btn-small" data-xp-sub-page="-1" ${send.page === 0 ? "disabled" : ""}>‹</button>
+                <button type="button" class="btn-ghost btn-small" data-xp-sub-page="1" ${send.page + 1 >= pages ? "disabled" : ""}>›</button></div>` : ""}
+            ${chosenRows.length ? `<div class="muted xp-send-summary">Files: ${summary}${changed ? ` · ${num(changed)} in a format other than their own` : ""}</div>` : ""}
+            <div class="modal-actions">
+                <button type="button" class="btn-ghost" data-xp-close>Cancel</button>
+                <button type="button" class="btn-primary" data-xp-confirm ${send.chosen.size ? "" : "disabled"}>Send ${esc(d.snapshot.label)} to ${num(send.chosen.size)} subscriber${send.chosen.size === 1 ? "" : "s"}</button>
+            </div>
+        </div>`;
+}
+
+/** The format a subscriber's file will be sent in: the one picked in the dialog, or its own. */
+function sendFormatOf(row) {
+    return state.xpDialog.send.formats[row.subscriberId] || row.formatType;
+}
+
+function renderDialog() {
+    const root = document.getElementById("modal-root");
+    // Keep the cursor where it was when the dialog redraws (search boxes).
+    const focused = document.activeElement && root.contains(document.activeElement) ? document.activeElement.id : null;
+    const caret = focused && document.activeElement.selectionStart;
+    root.innerHTML = dialogHtml();
+    const again = focused && document.getElementById(focused);
+    if (again) {
+        again.focus();
+        if (typeof caret === "number" && again.setSelectionRange) again.setSelectionRange(caret, caret);
+    }
+}
+
+function closeDialog() {
+    state.xpDialog = null;
+    document.getElementById("modal-root").innerHTML = "";
+}
+
+async function openExportLatest(familyId) {
+    const item = state.xp.latest.page.templates.find(entry => entry.familyId === familyId);
+    state.xpDialog = { kind: "latest", step: "checking", name: item.name, title: "Export " + item.name };
+    renderDialog();
+    try {
+        const result = await api(`/api/export-templates/${familyId}/latest`, { method: "POST" });
+        if (!state.xpDialog) return;
+        Object.assign(state.xpDialog, { step: "ready", snapshot: result.snapshot, created: result.created });
+        renderDialog();
+        loadLatest();
+        await loadSendRows(null);
+    } catch (error) {
+        if (!state.xpDialog) return;
+        Object.assign(state.xpDialog, { step: "error", error: error.message });
+        renderDialog();
+    }
+}
+
+async function openSendVersion(snapshotId, subscriberId) {
+    const item = state.xp.prev.versions ? state.xp.prev.versions.items.find(entry => entry.id === snapshotId) : null;
+    let snapshot = item;
+    if (!snapshot) {
+        try {
+            snapshot = (await api("/api/data-versions/" + snapshotId)).snapshot;
+        } catch (error) {
+            toast(error.message, "error");
+            return;
+        }
+    }
+    state.xpDialog = { kind: "previous", step: "ready", snapshot, title: `Send ${snapshot.templateName} version ${snapshot.label}` };
+    renderDialog();
+    await loadSendRows(subscriberId);
+}
+
+/**
+ * Lists every active subscriber: those on the version's template first (ticked), then all others.
+ * Loaded a page of 100 at a time from the server.
+ */
+async function loadSendRows(onlySubscriber) {
+    const d = state.xpDialog;
+    d.send = { loading: true };
+    renderDialog();
+    try {
+        if (!state.formatList) state.formatList = await api("/api/formats");
+        const all = [];
+        for (let offset = 0; ; offset += 100) {
+            const page = await api(`/api/subscribers/search?limit=100&offset=${offset}`);
+            all.push(...page.subscribers);
+            if (all.length >= page.total || !page.subscribers.length) break;
+        }
+        if (state.xpDialog !== d) return;
+        const rows = all.map(item => ({
+            subscriberId: item.id, name: item.name, formatType: item.formatType, scope: item.scope, exportMode: item.exportMode,
+            onTemplate: String(item.templateFamilyId) === String(d.snapshot.familyId)
+        })).sort((a, b) => (b.onTemplate - a.onTemplate) || a.name.localeCompare(b.name));
+        const chosen = onlySubscriber
+            ? new Set(rows.some(row => row.subscriberId === onlySubscriber) ? [onlySubscriber] : [])
+            : new Set(rows.filter(row => row.onTemplate).map(row => row.subscriberId));
+        d.send = { rows, chosen, q: "", page: 0, formats: {}, formatList: state.formatList };
+    } catch (error) {
+        if (state.xpDialog !== d) return;
+        d.send = { error: error.message };
+    }
+    renderDialog();
+}
+
+/** Counts what each chosen subscriber receives, then sends. */
+async function confirmSend(button) {
+    const d = state.xpDialog;
+    const send = d.send;
+    button.disabled = true;
+    try {
+        const chosen = [...send.chosen];
+        const formats = {};
+        send.rows.filter(row => send.chosen.has(row.subscriberId)).forEach(row => { formats[row.subscriberId] = sendFormatOf(row); });
+        const preview = await api("/api/exports/resend/preview", {
+            method: "POST", body: { snapshotId: d.snapshot.id, subscriberIds: chosen, formats }
+        });
+        const job = await api("/api/exports/resend", {
+            method: "POST",
+            body: { snapshotId: d.snapshot.id, subscriberIds: chosen, reviewToken: preview.reviewToken, formats }
+        });
+        const records = preview.subscribers.reduce((sum, row) => sum + row.records, 0);
+        const held = preview.subscribers.reduce((sum, row) => sum + row.quarantined, 0);
+        state.exportMessage = `Job #${job.id} is sending ${esc(d.snapshot.templateName)} version ${esc(d.snapshot.label)} to ${num(chosen.length)} subscriber${chosen.length === 1 ? "" : "s"} (${num(records)} records${held ? `, ${num(held)} held for review` : ""}). <a href="#/history">View history</a>`;
+        toast("Job #" + job.id + " started", "success");
+        closeDialog();
+        render();
     } catch (error) {
         toast(error.message, "error");
+        button.disabled = false;
     }
-    renderVersionDetail();
 }
 
-async function loadVersionRows(more) {
-    const id = state.dv.id;
-    const offset = more && state.dv.rows ? state.dv.rows.rows.length : 0;
-    try {
-        const page = await api(`/api/data-versions/${id}/rows?offset=${offset}&limit=100`);
-        if (state.dv.id !== id) return;
-        state.dv.rows = more ? Object.assign(state.dv.rows, { rows: state.dv.rows.rows.concat(page.rows) }) : page;
-    } catch (error) {
-        state.dv.rows = { error: error.message };
+/** From History: open the version's template under Previous Versions and the send dialog for one subscriber. */
+async function openResend(snapshotId, subscriberId) {
+    const xp = ensureXp();
+    xp.tab = "previous";
+    state.exportMessage = null;
+    xp.pendingSend = { snapshotId: Number(snapshotId), subscriberId: subscriberId ? Number(subscriberId) : null };
+    if (location.hash === "#/export") navigate();
+    else location.hash = "#/export";
+}
+
+/** Called after the page is drawn: loads only what the open tab shows. */
+async function startExportPage() {
+    const xp = ensureXp();
+    if (xp.tab === "latest") {
+        if (!xp.latest.page) loadLatest();
+        return;
     }
-    renderVersionDetail();
-}
-
-async function loadVersionCompare(more) {
-    const id = state.dv.id;
-    const group = dataSeries().find(item => item.key === state.dv.key);
-    if (!group) return;
-    if (!state.dv.compareWith) {
-        const current = group.versions.find(item => item.id === id);
-        const fallback = group.versions.find(item => item.id !== id);
-        state.dv.compareWith = current && current.previousSnapshotId && group.versions.some(item => item.id === current.previousSnapshotId)
-            ? current.previousSnapshotId : (fallback ? fallback.id : null);
+    if (xp.pendingSend) {
+        const pending = xp.pendingSend;
+        xp.pendingSend = null;
+        try {
+            const s = (await api("/api/data-versions/" + pending.snapshotId)).snapshot;
+            const page = await api(`/api/export-templates?withVersions=true&q=${encodeURIComponent(s.templateName)}&limit=50`);
+            xp.prev.page = page;
+            const item = page.templates.find(entry => entry.familyId === s.familyId);
+            if (item) await selectPrevTemplate(item);
+            renderXp();
+            await openSendVersion(pending.snapshotId, pending.subscriberId);
+        } catch (error) {
+            toast(error.message, "error");
+        }
+        return;
     }
-    if (!state.dv.compareWith) return renderVersionDetail();
-    const other = state.dv.compareWith;
-    const newerFirst = id > other;
-    const offset = more && state.dv.compare ? state.dv.compare.changes.length : 0;
-    try {
-        const result = await api(`/api/data-versions/${newerFirst ? id : other}/compare/${newerFirst ? other : id}?offset=${offset}&limit=50`);
-        if (state.dv.id !== id || state.dv.compareWith !== other) return;
-        state.dv.compare = more ? Object.assign(state.dv.compare, { changes: state.dv.compare.changes.concat(result.changes), more: result.more }) : result;
-    } catch (error) {
-        state.dv.compare = { error: error.message };
-    }
-    renderVersionDetail();
+    if (!xp.prev.page) loadPrevTemplates();
 }
 
-function renderVersionDetail() {
-    const host = document.getElementById("dv-detail");
-    const group = dataSeries().find(item => item.key === state.dv.key);
-    const snapshot = group && group.versions.find(item => item.id === state.dv.id);
-    if (host && snapshot) host.innerHTML = versionDetailHtml(snapshot, group);
-}
+/* --- events --- */
 
-function loadVersionTab() {
-    if (state.dv.tab === "data" && !state.dv.rows) loadVersionRows(false);
-    if (state.dv.tab === "compare" && !state.dv.compare) loadVersionCompare(false);
-    if ((state.dv.tab === "overview" || state.dv.tab === "exports") && !state.dv.detail) loadVersionDetail();
-}
-
-function onVersionsClick(event) {
+let xpTimer;
+function onSendClick(event) {
     const target = event.target;
-    const item = target.closest("[data-dv]");
-    if (item) {
-        state.dv.id = Number(item.dataset.dv);
-        state.dv.detail = null;
-        state.dv.rows = null;
-        state.dv.compare = null;
-        state.dv.compareWith = null;
-        render();
-        loadVersionTab();
+    if ((target.matches && target.matches(".modal-back[data-xp-close]")) || target.closest("button[data-xp-close]")) {
+        closeDialog();
         return true;
     }
-    const tab = target.closest("[data-dv-tab]");
+    const tab = target.closest("[data-xp-tab]");
     if (tab) {
-        state.dv.tab = tab.dataset.dvTab;
-        renderVersionDetail();
-        loadVersionTab();
+        ensureXp().tab = tab.dataset.xpTab;
+        state.exportMessage = null;
+        render();
+        startExportPage();
         return true;
     }
-    if (target.closest("[data-dv-more-rows]")) {
-        loadVersionRows(true);
+    const exportButton = target.closest("[data-xp-export]");
+    if (exportButton) {
+        openExportLatest(Number(exportButton.dataset.xpExport));
         return true;
     }
-    if (target.closest("[data-dv-more-changes]")) {
-        loadVersionCompare(true);
+    const page = target.closest("[data-xp-page]");
+    if (page) {
+        const [key, step] = page.dataset.xpPage.split(":");
+        const view = state.xp[key];
+        view.offset = Math.max(0, view.offset + Number(step) * TEMPLATE_PAGE);
+        if (key === "latest") loadLatest();
+        else loadPrevTemplates();
+        return true;
+    }
+    const template = target.closest("[data-xp-template]");
+    if (template) {
+        const item = state.xp.prev.page.templates.find(entry => String(entry.familyId) === template.dataset.xpTemplate);
+        if (item) selectPrevTemplate(item);
+        return true;
+    }
+    if (target.closest("[data-xp-older]")) {
+        loadPrevVersions(true);
+        return true;
+    }
+    const send = target.closest("[data-xp-send]");
+    if (send) {
+        openSendVersion(Number(send.dataset.xpSend), null);
+        return true;
+    }
+    if (target.matches && target.matches("input[data-xp-sub]")) {
+        const id = Number(target.dataset.xpSub);
+        const chosen = state.xpDialog.send.chosen;
+        if (target.checked) chosen.add(id);
+        else chosen.delete(id);
+        renderDialog();
+        return true;
+    }
+    const all = target.closest("[data-xp-sub-all]");
+    if (all) {
+        const send = state.xpDialog.send;
+        const which = all.dataset.xpSubAll;
+        send.chosen = new Set(send.rows.filter(row => which === "all" || (which === "template" && row.onTemplate)).map(row => row.subscriberId));
+        renderDialog();
+        return true;
+    }
+    const subPage = target.closest("[data-xp-sub-page]");
+    if (subPage) {
+        state.xpDialog.send.page += Number(subPage.dataset.xpSubPage);
+        renderDialog();
+        return true;
+    }
+    const confirmButton = target.closest("[data-xp-confirm]");
+    if (confirmButton) {
+        confirmSend(confirmButton);
+        return true;
+    }
+    const resend = target.closest("[data-resend-snapshot]");
+    if (resend) {
+        openResend(resend.dataset.resendSnapshot, resend.dataset.resendTo || null);
         return true;
     }
     return false;
 }
 
-function onVersionsInput(event) {
+function onSendInput(event) {
     const target = event.target;
-    if (target.id === "dv-series") {
-        state.dv.key = target.value;
-        state.dv.id = null;
-        state.dv.familyId = null;
-        render();
-        loadVersionTab();
+    if (target.id === "xp-latest-search" || target.id === "xp-prev-search") {
+        const view = target.id === "xp-latest-search" ? state.xp.latest : state.xp.prev;
+        view.q = target.value.trim();
+        view.offset = 0;
+        clearTimeout(xpTimer);
+        xpTimer = setTimeout(() => (target.id === "xp-latest-search" ? loadLatest() : loadPrevTemplates()), 300);
         return true;
     }
-    if (target.id === "dv-compare") {
-        state.dv.compareWith = Number(target.value);
-        state.dv.compare = null;
-        renderVersionDetail();
-        loadVersionCompare(false);
+    if (target.id === "xp-latest-format") {
+        state.xp.latest.format = target.value;
+        state.xp.latest.offset = 0;
+        loadLatest();
         return true;
     }
-    if (target.id === "dv-format" || target.id === "dv-audience") {
-        if (target.id === "dv-format") state.dv.format = target.value;
-        else state.dv.audience = target.value;
-        const link = document.getElementById("dv-download");
-        if (link) {
-            link.href = `/api/data-versions/${state.dv.id}/file?format=${encodeURIComponent(state.dv.format || document.getElementById("dv-format").value)}${state.dv.audience ? "&subscriberId=" + encodeURIComponent(state.dv.audience) : ""}`;
+    if (target.id === "xp-prev-list-code") {
+        state.xp.prev.listCode = target.value;
+        state.xp.prev.versions = null;
+        renderPrevDetail();
+        loadPrevVersions(false);
+        return true;
+    }
+    if (target.id === "xp-format") {
+        const send = state.xpDialog.send;
+        if (!target.value) return true;
+        send.rows.filter(row => send.chosen.has(row.subscriberId)).forEach(row => {
+            if (target.value === "__own" || target.value === row.formatType) delete send.formats[row.subscriberId];
+            else send.formats[row.subscriberId] = target.value;
+        });
+        renderDialog();
+        return true;
+    }
+    if (target.dataset && target.dataset.xpRowFormat) {
+        const send = state.xpDialog.send;
+        const id = Number(target.dataset.xpRowFormat);
+        const row = send.rows.find(item => item.subscriberId === id);
+        if (target.value === row.formatType) delete send.formats[id];
+        else send.formats[id] = target.value;
+        send.chosen.add(id); // choosing a format for a subscriber means sending to it
+        renderDialog();
+        return true;
+    }
+    if (target.id === "xp-sub-search") {
+        const send = state.xpDialog.send;
+        send.q = target.value;
+        send.page = 0;
+        const caret = target.selectionStart;
+        renderDialog();
+        const again = document.getElementById("xp-sub-search");
+        if (again) {
+            again.focus();
+            again.setSelectionRange(caret, caret);
         }
         return true;
     }
     return false;
-}
-
-/** Opens the Data Versions page on a template (and optionally ready to download for a subscriber). */
-function openDataVersions(familyId, subscriberId) {
-    state.dv = { key: null, familyId: familyId, id: null, tab: "overview", detail: null, rows: null, compare: null, compareWith: null, format: null, audience: subscriberId ? String(subscriberId) : "" };
-    location.hash = "#/versions";
 }

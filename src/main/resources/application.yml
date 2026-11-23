@@ -20,9 +20,15 @@ spring:
     url: jdbc:h2:mem:regliss;DB_CLOSE_DELAY=-1;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE;DEFAULT_NULL_ORDERING=HIGH
     username: sa
     password: ""
+  # The module never lets Hibernate create tables: db/postgres/ver-export-schema.sql is the schema, on H2 as on
+  # PostgreSQL. On H2 the demo source catalog (ver_version) is created too.
+  sql:
+    init:
+      mode: always
+      schema-locations: file:db/h2/demo-source-tables.sql,file:db/postgres/ver-export-schema.sql
   jpa:
     hibernate:
-      ddl-auto: create-drop
+      ddl-auto: none
     open-in-view: false
   jackson:
     serialization:

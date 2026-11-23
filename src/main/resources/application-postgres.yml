@@ -16,10 +16,15 @@ spring:
       pool-name: regliss-postgres
       maximum-pool-size: 10
       connection-timeout: 10000
+  # The tables are created once, by hand: run db/postgres/ver-export-schema.sql (every table ver_export_*) in psql
+  # or pgAdmin. The application never creates or alters a table here; it only reads and writes rows.
+  sql:
+    init:
+      mode: never
   jpa:
     hibernate:
-      # Creates any missing ver_export_ table and keeps data between restarts. Never drops tables.
-      ddl-auto: update
+      # Hibernate never creates or alters tables here, including the REGLISS-owned ver_version it reads.
+      ddl-auto: ${REGLISS_DDL_AUTO:none}
 
 export:
   mock:
@@ -29,3 +34,9 @@ export:
     # Keep sends simulated while testing; set to false to POST files to real CFT endpoints.
     mock: true
   demo-data: true
+  # Dumps put in db/dumps are imported into this database when the application starts (see db/dumps/README.md).
+  import:
+    enabled: ${REGLISS_IMPORT_ENABLED:true}
+    directory: ${REGLISS_IMPORT_DIR:db/dumps}
+    # Folder with psql and pg_restore; empty = the PATH, then C:\Program Files\PostgreSQL\<newest>\bin.
+    bin-dir: ${PG_BIN:}

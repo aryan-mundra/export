@@ -112,7 +112,7 @@ class DataVersionTest {
         JobDetailResponse first = export();
         assertEquals("COMPLETED", first.status());
         DataSnapshot v10 = csvVersion(first);
-        assertEquals("1.0", v10.getLabel());
+        assertEquals("1.1", v10.getLabel());
         assertEquals(400, v10.getRowCount());
         assertEquals(400, v10.getStoredRows());
         assertEquals("CREATED", row(first, "Actimize").snapshotOutcome());
@@ -127,11 +127,11 @@ class DataVersionTest {
         assertEquals(2, snapshots.count());
         assertEquals(1, snapshots.findById(v10.getId()).orElseThrow().getReuseCount());
 
-        // One gs_ value changes: version 1.1, which stores only the changed row.
+        // One gs_ value changes: version 1.2, which stores only the changed row.
         jdbc.update("UPDATE gs_party SET full_name = 'Renamed Party' WHERE bnp_id = 'BNP42000005'");
         JobDetailResponse third = export();
         DataSnapshot v11 = csvVersion(third);
-        assertEquals("1.1", v11.getLabel());
+        assertEquals("1.2", v11.getLabel());
         assertEquals("CREATED", row(third, "Actimize").snapshotOutcome());
         assertEquals(1, v11.getStoredRows(), "only the changed row is stored again");
         assertEquals(1L, v11.getChangedRows());
@@ -166,16 +166,16 @@ class DataVersionTest {
         assertEquals(thirdFile, Files.readString(Path.of(row(retried, "Actimize").filePath())), "the retry sends the same rows");
         assertFalse(download(v11.getId(), "CSV").contains("Renamed Again"));
 
-        // The data goes back to how it was: the stored 1.0 is reused, no duplicate is made.
+        // The data goes back to how it was: the stored 1.1 is reused, no duplicate is made.
         jdbc.update("UPDATE gs_party SET full_name = 'Party 42000005' WHERE bnp_id = 'BNP42000005'");
         JobDetailResponse fourth = export();
         assertEquals(v10.getId(), csvVersion(fourth).getId());
         assertEquals("REUSED", row(fourth, "Actimize").snapshotOutcome());
 
-        // A list entry leaves the list: 1.2 with one deleted record.
+        // A list entry leaves the list: 1.3 with one deleted record.
         jdbc.update("DELETE FROM ver_version_member WHERE version_id = 42 AND record_id = 42000010");
         DataSnapshot v12 = csvVersion(export());
-        assertEquals("1.2", v12.getLabel());
+        assertEquals("1.3", v12.getLabel());
         assertEquals(399, v12.getRowCount());
         assertEquals(0, v12.getStoredRows(), "every remaining row is already stored");
         assertEquals(1L, v12.getDeletedRows());
@@ -197,9 +197,9 @@ class DataVersionTest {
         pool.shutdown();
         assertEquals(ra.snapshot().getId(), rb.snapshot().getId());
         assertTrue(ra.created() ^ rb.created(), "exactly one of the two creates the version");
-        assertEquals("1.3", ra.snapshot().getLabel());
+        assertEquals("1.4", ra.snapshot().getLabel());
 
-        // A new template version starts a new number: 2.0.
+        // A new template version starts a new number: 2.1.
         String saved = mockMvc.perform(post("/api/format-templates").with(user("maker").roles("MAKER"))
                         .contentType("application/json")
                         .content("""
@@ -211,16 +211,37 @@ class DataVersionTest {
         mockMvc.perform(post("/api/format-templates/" + JsonPath.read(saved, "$.id") + "/approve").with(user("approver").roles("APPROVER")))
                 .andExpect(status().isOk());
         DataSnapshot v20 = csvVersion(export());
-        assertEquals("2.0", v20.getLabel());
+        assertEquals("2.1", v20.getLabel());
         assertNotEquals(v10.getTemplateId(), v20.getTemplateId());
 
         // Every version is listed, and each keeps its own row count.
         mockMvc.perform(get("/api/data-versions").param("familyId", String.valueOf(v10.getFamilyId())).with(user("maker").roles("MAKER")))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$[*].label", org.hamcrest.Matchers.containsInAnyOrder("2.0", "1.3", "1.2", "1.1", "1.0")));
+                .andExpect(jsonPath("$[*].label", org.hamcrest.Matchers.containsInAnyOrder("2.1", "1.4", "1.3", "1.2", "1.1")));
         mockMvc.perform(get("/api/data-versions/" + v10.getId() + "/rows").param("limit", "2").with(user("maker").roles("MAKER")))
                 .andExpect(jsonPath("$.total").value(400))
                 .andExpect(jsonPath("$.rows[0].cells[0]").value("BNP42000001"));
+        // The catalog: one row per template and list, searched and paged, without reading any version.
+        mockMvc.perform(get("/api/data-versions/series").with(user("maker").roles("MAKER")))
+                .andExpect(jsonPath("$.total").value(2))
+                .andExpect(jsonPath("$.series[0].templateName").value("CSV Export"))
+                .andExpect(jsonPath("$.series[0].versions").value(5))
+                .andExpect(jsonPath("$.series[0].latestLabel").value("2.1"))
+                .andExpect(jsonPath("$.series[0].columnsJson").doesNotExist());
+        mockMvc.perform(get("/api/data-versions/series").param("q", "xml exp").with(user("maker").roles("MAKER")))
+                .andExpect(jsonPath("$.total").value(1))
+                .andExpect(jsonPath("$.series[0].templateName").value("XML Export"));
+        String path = "/api/data-versions/series/" + v10.getFamilyId() + "/SANCTIONS";
+        mockMvc.perform(get(path).param("limit", "2").with(user("maker").roles("MAKER")))
+                .andExpect(jsonPath("$.total").value(5))
+                .andExpect(jsonPath("$.versions[*].label", org.hamcrest.Matchers.contains("2.1", "1.4")))
+                .andExpect(jsonPath("$.versions[0].columnsJson").doesNotExist());
+        mockMvc.perform(get(path).param("offset", "2").param("limit", "2").with(user("maker").roles("MAKER")))
+                .andExpect(jsonPath("$.versions[*].label", org.hamcrest.Matchers.contains("1.3", "1.2")));
+        mockMvc.perform(get("/api/data-versions/" + v10.getId()).with(user("maker").roles("MAKER")))
+                .andExpect(jsonPath("$.usageTotal").value(statuses.countBySnapshotId(v10.getId())))
+                .andExpect(jsonPath("$.columns[0].header").value("bnp_id"));
+
         Map<String, Object> usage = JsonPath.read(mockMvc.perform(get("/api/data-versions/" + v10.getId()).with(user("maker").roles("MAKER")))
                 .andReturn().getResponse().getContentAsString(), "$.usage[0]");
         assertFalse(usage.isEmpty());

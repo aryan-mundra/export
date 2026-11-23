@@ -55,6 +55,8 @@ public class ExportController {
     private static final Set<String> MODES = Set.of("FULL", "DELTA");
 
     private final ExportOrchestrator orchestrator;
+    private final com.bnpp.export.service.ListCatalogService listCatalog;
+    private final com.bnpp.export.service.TemplateExportService templateExports;
     private final SubscriberRepository subscriberRepository;
     private final QuarantineRepository quarantineRepository;
     private final DeliveryRepository deliveryRepository;
@@ -64,6 +66,8 @@ public class ExportController {
     private final FormatTemplateService formatTemplateService;
 
     public ExportController(ExportOrchestrator orchestrator,
+                            com.bnpp.export.service.ListCatalogService listCatalog,
+                            com.bnpp.export.service.TemplateExportService templateExports,
                             SubscriberRepository subscriberRepository,
                             QuarantineRepository quarantineRepository,
                             DeliveryRepository deliveryRepository,
@@ -72,6 +76,8 @@ public class ExportController {
                             AuditService auditService,
                             FormatTemplateService formatTemplateService) {
         this.orchestrator = orchestrator;
+        this.listCatalog = listCatalog;
+        this.templateExports = templateExports;
         this.subscriberRepository = subscriberRepository;
         this.quarantineRepository = quarantineRepository;
         this.deliveryRepository = deliveryRepository;
@@ -207,13 +213,13 @@ public class ExportController {
     @PostMapping("/exports/preview")
     public ExportPreview preview(@Valid @RequestBody TriggerExportRequest request) {
         checkDates(request);
-        return orchestrator.preview(request.versionId(), request.fromDate(), request.toDate());
+        return orchestrator.preview(request.versionId(), request.fromDate(), request.toDate(), request.subscriberIds());
     }
 
     @PostMapping("/exports")
     public ExportJob trigger(@Valid @RequestBody TriggerExportRequest request) {
         checkDates(request);
-        ExportPreview preview = orchestrator.preview(request.versionId(), request.fromDate(), request.toDate());
+        ExportPreview preview = orchestrator.preview(request.versionId(), request.fromDate(), request.toDate(), request.subscriberIds());
         if (request.reviewToken() == null || !request.reviewToken().equals(preview.reviewToken())) {
             throw new ResponseStatusException(CONFLICT, "The review is out of date. Review the export again.");
         }
@@ -221,7 +227,62 @@ public class ExportController {
                 request.versionId(),
                 CurrentUser.displayName(),
                 request.fromDate(),
-                request.toDate());
+                request.toDate(),
+                request.subscriberIds());
+    }
+
+    /** Approved templates with their latest data version and subscribers, searched and paged. */
+    @GetMapping("/export-templates")
+    public com.bnpp.export.service.TemplateExportService.TemplatePage exportTemplates(@RequestParam(required = false) String q,
+                                                                                   @RequestParam(required = false) String format,
+                                                                                   @RequestParam(defaultValue = "false") boolean withVersions,
+                                                                                   @RequestParam(defaultValue = "0") int offset,
+                                                                                   @RequestParam(defaultValue = "25") int limit) {
+        return templateExports.list(q, format, withVersions, offset, limit);
+    }
+
+    /** Reads the template's current data: the existing version if nothing changed, otherwise the next version. */
+    @PostMapping("/export-templates/{familyId}/latest")
+    public com.bnpp.export.service.TemplateExportService.LatestResult exportLatest(@PathVariable Long familyId) {
+        return templateExports.exportLatest(familyId);
+    }
+
+    /** Lists that can be exported (newest certified version of each), searched and paged. */
+    @GetMapping("/lists")
+    public com.bnpp.export.service.ListCatalogService.ListPage lists(@RequestParam(required = false) String q,
+                                                                    @RequestParam(defaultValue = "recent") String sort,
+                                                                    @RequestParam(defaultValue = "0") int offset,
+                                                                    @RequestParam(defaultValue = "20") int limit) {
+        return listCatalog.lists(q, sort, offset, limit);
+    }
+
+    /** Active subscribers, searched and paged, optionally of one format or one template. */
+    @GetMapping("/subscribers/search")
+    public com.bnpp.export.service.ListCatalogService.SubscriberPage searchSubscribers(@RequestParam(required = false) String q,
+                                                                                      @RequestParam(required = false) String format,
+                                                                                      @RequestParam(required = false) Long templateFamilyId,
+                                                                                      @RequestParam(defaultValue = "0") int offset,
+                                                                                      @RequestParam(defaultValue = "25") int limit) {
+        return listCatalog.subscribers(q, format, templateFamilyId, offset, limit);
+    }
+
+    /** Review of sending a stored data version again: what each chosen subscriber would receive. */
+    @PostMapping("/exports/resend/preview")
+    public ExportOrchestrator.ResendPreview previewResend(@Valid @RequestBody com.bnpp.export.dto.ResendRequest request) {
+        return orchestrator.previewResend(request.snapshotId(), request.subscriberIds(), request.formatType(), request.formats());
+    }
+
+    /** Sends a stored data version again, from the stored copy. Needs the token of a matching review. */
+    @PostMapping("/exports/resend")
+    public ExportJob resend(@Valid @RequestBody com.bnpp.export.dto.ResendRequest request) {
+        return orchestrator.triggerResend(request.snapshotId(), request.subscriberIds(), request.reviewToken(), request.formatType(),
+                request.formats());
+    }
+
+    /** The file formats the module can write. A new format appears here, and in the send dialog, once its writer exists. */
+    @GetMapping("/formats")
+    public List<String> formats() {
+        return orchestrator.formatTypes();
     }
 
     @PostMapping("/jobs/{jobId}/subscribers/{statusId}/accept")

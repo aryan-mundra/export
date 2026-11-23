@@ -28,7 +28,13 @@ public record DashboardResponse(
             int failedSubscribers,
             int heldSubscribers,
             int skippedSubscribers,
-            LocalDateTime createdAt
+            LocalDateTime createdAt,
+            /** EXPORT or RESEND; for a resend, the data version that was sent. */
+            String mode,
+            String snapshotTemplate,
+            String snapshotLabel,
+            /** The subscribers a run was limited to (comma-separated ids), or null for every active subscriber. */
+            String subscriberIds
     ) {
     }
 }

@@ -13,8 +13,8 @@ The `postgres` profile:
 
 - **Reads** certified versions from `ver_version`, list entries from `ver_version_member`, and every `gs_*` table in the
   schema (for the Format Templates page and the exports).
-- **Writes** its own `ver_export_*` tables in the same database. It creates them on first start (`ddl-auto: update`),
-  keeps them between restarts, and never drops them.
+- **Writes** rows into its own `ver_export_*` tables in the same database. You create those tables once by hand with
+  `db/postgres/ver-export-schema.sql`; the application never creates, alters or drops a table.
 
 **`BNP_ID` is the key.** Every list entry has a `BNP_ID`, and every `gs_*` table has a `bnp_id` column: a `gs_*` row
 belongs to the list entry with the same `BNP_ID`. PostgreSQL folds unquoted names to lower case, so tables and columns
@@ -95,6 +95,14 @@ docker exec regliss-postgres psql -U regliss -d regliss -f /tmp/regliss-mock.sql
 ```
 
 Check it loaded: `SELECT COUNT(*) FROM ver_version_member;` returns 400. The script can be run again at any time.
+
+Then create the application's own tables, once (the application never creates tables on PostgreSQL):
+
+```powershell
+psql -h localhost -U regliss -d regliss -f db/postgres/ver-export-schema.sql
+```
+
+Or open `db/postgres/ver-export-schema.sql` in pgAdmin's Query Tool and run it.
 
 ## 3. Start the module on PostgreSQL
 

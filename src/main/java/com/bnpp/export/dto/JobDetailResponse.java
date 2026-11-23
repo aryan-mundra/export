@@ -24,7 +24,10 @@ public record JobDetailResponse(
         String errorMessage,
         LocalDateTime createdAt,
         List<SubscriberStatusResponse> subscribers,
-        List<AuditEntry> audits
+        List<AuditEntry> audits,
+        String mode,
+        String snapshotTemplate,
+        String snapshotLabel
 ) {
     public record SubscriberStatusResponse(
             Long id,

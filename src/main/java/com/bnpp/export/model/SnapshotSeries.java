@@ -5,22 +5,28 @@ import jakarta.persistence.Entity;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
-import jakarta.persistence.IdClass;
 import jakarta.persistence.Index;
 import jakarta.persistence.Table;
 import jakarta.persistence.UniqueConstraint;
 import lombok.Data;
-import org.hibernate.annotations.JdbcTypeCode;
-import org.hibernate.type.SqlTypes;
 
-import java.io.Serializable;
-import java.time.LocalDate;
+import java.time.LocalDateTime;
 
-/** One row per line of data versions (template and list), locked while a version is numbered. */
+/**
+ * One template and list pair: the catalog row of its data versions.
+ *
+ * It is locked while a new version is numbered, and it carries the pair's summary (latest version,
+ * counts, last use), kept up to date in the same transaction. Screens list and search these rows
+ * instead of scanning every version, so the catalog stays fast with thousands of lists.
+ */
 @Data
 @Entity
 @Table(name = "ver_export_snapshot_series",
-        uniqueConstraints = @UniqueConstraint(name = "uq_snapshot_series", columnNames = {"family_id", "list_code"}))
+        uniqueConstraints = @UniqueConstraint(name = "uq_snapshot_series", columnNames = {"family_id", "list_code"}),
+        indexes = {
+                @Index(name = "ix_snapshot_series_used", columnList = "last_used_at"),
+                @Index(name = "ix_snapshot_series_name", columnList = "template_name, list_name")
+        })
 public class SnapshotSeries {
 
     @Id
@@ -32,4 +38,36 @@ public class SnapshotSeries {
 
     @Column(name = "list_code", nullable = false)
     private String listCode;
+
+    @Column(name = "template_name")
+    private String templateName;
+
+    @Column(name = "list_name")
+    private String listName;
+
+    @Column(name = "version_count")
+    private Integer versionCount;
+
+    @Column(name = "latest_snapshot_id")
+    private Long latestSnapshotId;
+
+    @Column(name = "latest_label")
+    private String latestLabel;
+
+    @Column(name = "latest_at")
+    private LocalDateTime latestAt;
+
+    /** Exports that produced or reused one of its versions. */
+    @Column(name = "exports_served")
+    private Long exportsServed;
+
+    @Column(name = "total_rows")
+    private Long totalRows;
+
+    /** Rows actually stored for all its versions; the rest are shared between versions. */
+    @Column(name = "stored_rows")
+    private Long storedRows;
+
+    @Column(name = "last_used_at")
+    private LocalDateTime lastUsedAt;
 }

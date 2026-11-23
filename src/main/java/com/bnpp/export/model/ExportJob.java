@@ -36,6 +36,23 @@ public class ExportJob {
 
     private Integer formatTemplateVersion;
 
+    /** EXPORT: reads the current data. RESEND: sends a stored data version again, without reading the source. */
+    private String mode;
+
+    /** For a resend: the data version sent, and to whom (subscriber ids, comma-separated). */
+    private Long snapshotId;
+
+    private String snapshotLabel;
+
+    private String snapshotTemplate;
+
+    /** For a resend: CSV or XML for every file, or null for each subscriber's own format. */
+    private String formatOverride;
+
+    /** The subscribers it was limited to: "id" or, for a resend, "id:FORMAT", comma-separated. */
+    @org.hibernate.annotations.JdbcTypeCode(org.hibernate.type.SqlTypes.LONGVARCHAR)
+    private String subscriberIds;
+
     private String triggeredBy;
 
     @Column(nullable = false)

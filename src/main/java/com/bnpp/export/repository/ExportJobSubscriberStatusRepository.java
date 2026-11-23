@@ -17,4 +17,8 @@ public interface ExportJobSubscriberStatusRepository extends JpaRepository<Expor
     boolean existsBySubscriberId(Long subscriberId);
 
     List<ExportJobSubscriberStatus> findBySnapshotIdOrderByIdDesc(Long snapshotId);
+
+    List<ExportJobSubscriberStatus> findBySnapshotIdOrderByIdDesc(Long snapshotId, org.springframework.data.domain.Pageable page);
+
+    long countBySnapshotId(Long snapshotId);
 }

@@ -127,6 +127,85 @@ public class SnapshotService {
     public record Resolution(DataSnapshot snapshot, boolean created) {
     }
 
+    // ------------------------------------------------------------------ catalog
+
+    /** One template and list with the summary of its data versions. */
+    public record SeriesSummary(Long familyId, String listCode, String templateName, String listName, int versions,
+                                Long latestId, String latestLabel, LocalDateTime latestAt, long exportsServed,
+                                long totalRows, long storedRows, LocalDateTime lastUsedAt) {
+    }
+
+    public record SeriesPage(long total, int offset, List<SeriesSummary> series) {
+    }
+
+    /**
+     * A page of templates and lists that have data versions, from the catalog table (one row each),
+     * searched by template name, list name or list code. No version is read.
+     *
+     * @param sort "recent" (last used first) or "name"
+     */
+    public SeriesPage series(String query, Long familyId, String sort, int offset, int limit) {
+        StringBuilder where = new StringBuilder(" FROM ver_export_snapshot_series WHERE version_count > 0");
+        List<Object> args = new ArrayList<>();
+        if (familyId != null) {
+            where.append(" AND family_id = ?");
+            args.add(familyId);
+        }
+        String text = query == null ? "" : query.trim().toUpperCase();
+        if (!text.isEmpty()) {
+            where.append(" AND (UPPER(template_name) LIKE ? ESCAPE '\\' OR UPPER(list_name) LIKE ? ESCAPE '\\' OR UPPER(list_code) LIKE ? ESCAPE '\\')");
+            String like = "%" + RowFilterService.likeEscape(text) + "%";
+            args.add(like);
+            args.add(like);
+            args.add(like);
+        }
+        Long total = jdbc.queryForObject("SELECT COUNT(*)" + where, Long.class, args.toArray());
+        String order = "name".equalsIgnoreCase(sort)
+                ? " ORDER BY template_name, list_name, id"
+                : " ORDER BY last_used_at DESC NULLS LAST, id DESC";
+        List<Object> pageArgs = new ArrayList<>(args);
+        pageArgs.add(Math.max(0, offset));
+        pageArgs.add(Math.min(200, Math.max(1, limit)));
+        List<SeriesSummary> rows = jdbc.query("SELECT family_id, list_code, template_name, list_name, version_count, latest_snapshot_id, "
+                        + "latest_label, latest_at, exports_served, total_rows, stored_rows, last_used_at" + where + order
+                        + " OFFSET ? ROWS FETCH NEXT ? ROWS ONLY",
+                (rs, index) -> new SeriesSummary(rs.getLong(1), rs.getString(2), rs.getString(3), rs.getString(4), rs.getInt(5),
+                        rs.getLong(6), rs.getString(7), toLocal(rs.getTimestamp(8)), rs.getLong(9), rs.getLong(10), rs.getLong(11),
+                        toLocal(rs.getTimestamp(12))),
+                pageArgs.toArray());
+        return new SeriesPage(total == null ? 0 : total, Math.max(0, offset), rows);
+    }
+
+    public SeriesSummary seriesOf(Long familyId, String listCode) {
+        List<SeriesSummary> found = jdbc.query("SELECT family_id, list_code, template_name, list_name, version_count, latest_snapshot_id, "
+                        + "latest_label, latest_at, exports_served, total_rows, stored_rows, last_used_at FROM ver_export_snapshot_series "
+                        + "WHERE family_id = ? AND list_code = ?",
+                (rs, index) -> new SeriesSummary(rs.getLong(1), rs.getString(2), rs.getString(3), rs.getString(4), rs.getInt(5),
+                        rs.getLong(6), rs.getString(7), toLocal(rs.getTimestamp(8)), rs.getLong(9), rs.getLong(10), rs.getLong(11),
+                        toLocal(rs.getTimestamp(12))),
+                familyId, listCode);
+        if (found.isEmpty()) {
+            throw new ResponseStatusException(NOT_FOUND, "No data versions for this template and list");
+        }
+        return found.get(0);
+    }
+
+    public record VersionPage(SeriesSummary series, long total, int offset, List<DataSnapshot> versions) {
+    }
+
+    /** The versions of one template and list, newest first, a page at a time (headers only, no rows). */
+    public VersionPage versions(Long familyId, String listCode, int offset, int limit) {
+        int size = Math.min(100, Math.max(1, limit));
+        int start = Math.max(0, offset);
+        org.springframework.data.domain.Page<DataSnapshot> page = snapshots.findByFamilyIdAndListCodeOrderByIdDesc(
+                familyId, listCode, org.springframework.data.domain.PageRequest.of(start / size, size));
+        return new VersionPage(seriesOf(familyId, listCode), page.getTotalElements(), start, page.getContent());
+    }
+
+    private static LocalDateTime toLocal(java.sql.Timestamp timestamp) {
+        return timestamp == null ? null : timestamp.toLocalDateTime();
+    }
+
     public DataSnapshot get(Long id) {
         return snapshots.findById(id).orElseThrow(() -> new ResponseStatusException(NOT_FOUND, "Data version not found"));
     }
@@ -200,6 +279,8 @@ public class SnapshotService {
             if (same != null) {
                 same.setReuseCount(same.getReuseCount() + 1);
                 same.setLastUsedAt(LocalDateTime.now());
+                jdbc.update("UPDATE ver_export_snapshot_series SET exports_served = COALESCE(exports_served, 0) + 1, last_used_at = ? "
+                        + "WHERE family_id = ? AND list_code = ?", same.getLastUsedAt(), familyId, listCode);
                 return new Resolution(snapshots.save(same), false);
             }
             Integer minor = snapshots.maxMinor(familyId, listCode, template.getVersionNumber());
@@ -213,7 +294,8 @@ public class SnapshotService {
             snapshot.setTemplateName(template.getName());
             snapshot.setFormatType(template.getFormatType());
             snapshot.setMajor(template.getVersionNumber());
-            snapshot.setMinor(minor == null ? 0 : minor + 1);
+            // The first data version of template version N is N.1, then N.2, N.3 ...
+            snapshot.setMinor(minor == null ? 1 : minor + 1);
             snapshot.setLabel(snapshot.getMajor() + "." + snapshot.getMinor());
             snapshot.setSourceVersionId(version.getVersionId());
             snapshot.setFingerprint(fingerprint);
@@ -232,7 +314,15 @@ public class SnapshotService {
                 snapshot.setDeletedRows(counts.deleted());
                 snapshot.setChangedRows(counts.changed());
             }
-            return new Resolution(snapshots.save(snapshot), true);
+            snapshot = snapshots.save(snapshot);
+            // The catalog row: what lists show without reading any version.
+            jdbc.update("UPDATE ver_export_snapshot_series SET template_name = ?, list_name = ?, "
+                            + "version_count = COALESCE(version_count, 0) + 1, latest_snapshot_id = ?, latest_label = ?, latest_at = ?, "
+                            + "exports_served = COALESCE(exports_served, 0) + 1, total_rows = COALESCE(total_rows, 0) + ?, "
+                            + "stored_rows = COALESCE(stored_rows, 0) + ?, last_used_at = ? WHERE family_id = ? AND list_code = ?",
+                    snapshot.getTemplateName(), snapshot.getListName(), snapshot.getId(), snapshot.getLabel(), snapshot.getCreatedAt(),
+                    snapshot.getRowCount(), snapshot.getStoredRows(), snapshot.getCreatedAt(), familyId, listCode);
+            return new Resolution(snapshot, true);
         });
         DataSnapshot snapshot = Objects.requireNonNull(resolution).snapshot();
         if (resolution.created()) {

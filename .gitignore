@@ -7,3 +7,7 @@ data/
 .project
 .settings/
 .DS_Store
+
+# Database dumps hold bank data: never commit them. Only the README in db/dumps is tracked.
+db/dumps/*
+!db/dumps/README.md

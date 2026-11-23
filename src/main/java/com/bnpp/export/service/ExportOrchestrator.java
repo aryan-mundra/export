@@ -128,10 +128,15 @@ public class ExportOrchestrator {
     }
 
     public ExportPreview preview(Long versionId, LocalDate fromDate, LocalDate toDate) {
+        return preview(versionId, fromDate, toDate, null);
+    }
+
+    /** The review of an export, for every active subscriber or only the chosen ones. */
+    public ExportPreview preview(Long versionId, LocalDate fromDate, LocalDate toDate, List<Long> subscriberIds) {
         CertifiedVersion version = requireVersion(versionId);
         List<String> columns = decisionColumns();
         List<ExportPreview.SubscriberPreview> rows = new ArrayList<>();
-        for (SubscriberProfile subscriber : subscriberRepository.findByActiveTrueOrderByIdAsc()) {
+        for (SubscriberProfile subscriber : chosenSubscribers(subscriberIds)) {
             rows.add(previewSubscriber(version, subscriber, fromDate, toDate, columns));
         }
         return new ExportPreview(
@@ -147,8 +152,31 @@ public class ExportOrchestrator {
     }
 
     public ExportJob triggerExport(Long versionId, String triggeredBy, LocalDate fromDate, LocalDate toDate) {
+        return triggerExport(versionId, triggeredBy, fromDate, toDate, null);
+    }
+
+    /**
+     * Every active subscriber when none are given; otherwise the chosen ones, which must exist and be
+     * active. Order follows the subscriber ids, so reviews and runs list them the same way.
+     */
+    private List<SubscriberProfile> chosenSubscribers(List<Long> subscriberIds) {
+        if (subscriberIds == null || subscriberIds.isEmpty()) {
+            return subscriberRepository.findByActiveTrueOrderByIdAsc();
+        }
+        List<SubscriberProfile> chosen = new ArrayList<>();
+        for (Long id : new java.util.TreeSet<>(subscriberIds)) {
+            SubscriberProfile subscriber = requireSubscriber(id);
+            if (!subscriber.isActive()) {
+                throw new ResponseStatusException(BAD_REQUEST, subscriber.getName() + " is not active");
+            }
+            chosen.add(subscriber);
+        }
+        return chosen;
+    }
+
+    public ExportJob triggerExport(Long versionId, String triggeredBy, LocalDate fromDate, LocalDate toDate, List<Long> subscriberIds) {
         CertifiedVersion version = requireVersion(versionId);
-        List<SubscriberProfile> subscribers = subscriberRepository.findByActiveTrueOrderByIdAsc();
+        List<SubscriberProfile> subscribers = chosenSubscribers(subscriberIds);
         ExportJob job = new ExportJob();
         job.setVersionId(versionId);
         job.setFromDate(fromDate);
@@ -156,6 +184,10 @@ public class ExportOrchestrator {
         job.setListCode(version.getListCode());
         job.setListName(version.getListName());
         job.setTriggeredBy(StringUtils.defaultIfBlank(triggeredBy, CurrentUser.displayName()));
+        job.setMode("EXPORT");
+        if (subscriberIds != null && !subscriberIds.isEmpty()) {
+            job.setSubscriberIds(String.join(",", subscribers.stream().map(item -> String.valueOf(item.getId())).toList()));
+        }
         job.setStatus("PENDING");
         job.setTotalSubscribers(subscribers.size());
         job.setCompletedSubscribers(0);
@@ -171,17 +203,187 @@ public class ExportOrchestrator {
         return job;
     }
 
+    /** One subscriber in the review of a resend. */
+    public record ResendRow(Long subscriberId, String name, String formatType, String scope, String exportMode,
+                            long records, long quarantined, String outcome) {
+    }
+
+    public record ResendPreview(Long snapshotId, String label, String templateName, String listName, long rowCount,
+                                String reviewToken, List<ResendRow> subscribers) {
+    }
+
+    /**
+     * What resending a stored data version would send to each chosen subscriber: its rows narrowed to
+     * the subscriber's scope, business line and region, as an export does. Counted from the stored
+     * rows; the source is not read. Any active subscriber can receive it; with no subscribers given,
+     * every active subscriber on the version's template.
+     *
+     * @param formatType one format for every file of this send, or null for each subscriber's own format
+     * @param perSubscriber a format per subscriber id, overriding {@code formatType} for that subscriber
+     */
+    public ResendPreview previewResend(Long snapshotId, List<Long> subscriberIds) {
+        return previewResend(snapshotId, subscriberIds, null, null);
+    }
+
+    public ResendPreview previewResend(Long snapshotId, List<Long> subscriberIds, String formatType) {
+        return previewResend(snapshotId, subscriberIds, formatType, null);
+    }
+
+    public ResendPreview previewResend(Long snapshotId, List<Long> subscriberIds, String formatType, Map<Long, String> perSubscriber) {
+        DataSnapshot snapshot = snapshotService.get(snapshotId);
+        String format = sendFormat(formatType);
+        Map<Long, String> chosenFormats = new java.util.HashMap<>();
+        if (perSubscriber != null) {
+            perSubscriber.forEach((id, value) -> {
+                String one = sendFormat(value);
+                if (id != null && one != null) {
+                    chosenFormats.put(id, one);
+                }
+            });
+        }
+        if (subscriberIds == null || subscriberIds.isEmpty()) {
+            // Every active subscriber on the version's template.
+            subscriberIds = subscriberRepository.findByActiveTrueOrderByIdAsc().stream()
+                    .filter(item -> snapshot.getFamilyId().equals(item.getTemplateFamilyId()))
+                    .map(SubscriberProfile::getId)
+                    .toList();
+            if (subscriberIds.isEmpty()) {
+                throw new ResponseStatusException(BAD_REQUEST, "No active subscriber uses this template");
+            }
+        }
+        List<FormatField> fields = formatTemplateService.fields(snapshot.getTemplateId());
+        List<String> columns = decisionColumns();
+        List<ResendRow> rows = new ArrayList<>();
+        for (Long id : new java.util.LinkedHashSet<>(subscriberIds)) {
+            SubscriberProfile subscriber = requireSubscriber(id);
+            if (!subscriber.isActive()) {
+                throw new ResponseStatusException(BAD_REQUEST, subscriber.getName() + " is not active");
+            }
+            long[] counts = new long[2];
+            snapshotService.stream(snapshot, new SnapshotService.Selection(subscriber.getScope(), subscriber.getExportMode(), null, null),
+                    fields, record -> {
+                        if (profileMatch(subscriber, record)) {
+                            counts[qualityChecker.validateRecord(record, columns) == null ? 0 : 1]++;
+                        }
+                    });
+            String outcome = counts[1] > 0 ? "Held until omissions are accepted"
+                    : counts[0] == 0 ? "Nothing to send for this subscriber" : "Ready to send";
+            String rowFormat = chosenFormats.getOrDefault(subscriber.getId(), format != null ? format : subscriber.getFormatType());
+            rows.add(new ResendRow(subscriber.getId(), subscriber.getName(), rowFormat, subscriber.getScope(),
+                    subscriber.getExportMode(), counts[0], counts[1], outcome));
+        }
+        StringBuilder raw = new StringBuilder("resend|" + snapshot.getId() + "|" + snapshot.getFingerprint() + "|" + format);
+        rows.forEach(row -> raw.append('|').append(row.subscriberId()).append(':').append(row.formatType()).append(':')
+                .append(row.scope()).append(':').append(row.exportMode()).append(':').append(row.records()).append(':').append(row.quarantined()));
+        return new ResendPreview(snapshot.getId(), snapshot.getLabel(), snapshot.getTemplateName(), snapshot.getListName(),
+                snapshot.getRowCount(), sha256(raw.toString()), rows);
+    }
+
+    /** The file formats the module can write, in alphabetical order. */
+    public List<String> formatTypes() {
+        return formats.keySet().stream().sorted().toList();
+    }
+
+    /** One of the module's formats, or null for each subscriber's own format. */
+    private String sendFormat(String formatType) {
+        if (StringUtils.isBlank(formatType)) {
+            return null;
+        }
+        String format = formatType.trim().toUpperCase(Locale.ROOT);
+        if (!formats.containsKey(format)) {
+            throw new ResponseStatusException(BAD_REQUEST, "Format must be one of " + String.join(", ", formats.keySet()));
+        }
+        return format;
+    }
+
+    /** Sends a stored data version again to the chosen subscribers, after a matching review. */
+    public ExportJob triggerResend(Long snapshotId, List<Long> subscriberIds, String reviewToken) {
+        return triggerResend(snapshotId, subscriberIds, reviewToken, null, null);
+    }
+
+    public ExportJob triggerResend(Long snapshotId, List<Long> subscriberIds, String reviewToken, String formatType) {
+        return triggerResend(snapshotId, subscriberIds, reviewToken, formatType, null);
+    }
+
+    public ExportJob triggerResend(Long snapshotId, List<Long> subscriberIds, String reviewToken, String formatType,
+                                   Map<Long, String> perSubscriber) {
+        ResendPreview preview = previewResend(snapshotId, subscriberIds, formatType, perSubscriber);
+        if (reviewToken == null || !reviewToken.equals(preview.reviewToken())) {
+            throw new ResponseStatusException(CONFLICT, "The review is out of date. Review the resend again.");
+        }
+        DataSnapshot snapshot = snapshotService.get(snapshotId);
+        CertifiedVersion version = requireVersion(snapshot.getSourceVersionId());
+        ExportJob job = new ExportJob();
+        job.setVersionId(version.getVersionId());
+        job.setListCode(version.getListCode());
+        job.setListName(version.getListName());
+        job.setMode("RESEND");
+        job.setSnapshotId(snapshot.getId());
+        job.setSnapshotLabel(snapshot.getLabel());
+        job.setSnapshotTemplate(snapshot.getTemplateName());
+        // Each chosen subscriber with the format of its file: "id:FORMAT".
+        job.setSubscriberIds(String.join(",", preview.subscribers().stream().map(row -> row.subscriberId() + ":" + row.formatType()).toList()));
+        job.setTriggeredBy(CurrentUser.displayName());
+        job.setStatus("PENDING");
+        job.setTotalSubscribers(preview.subscribers().size());
+        job = exportJobRepository.save(job);
+        audit(job.getId(), null, "EXPORT_QUEUED", "Resend of " + snapshot.getTemplateName() + " data version " + snapshot.getLabel()
+                + " (" + snapshot.getListName() + ") to "
+                + String.join(", ", preview.subscribers().stream().map(row -> row.name() + " (" + row.formatType() + ")").toList()));
+        self.runExport(job.getId());
+        return job;
+    }
+
+    /** The subscribers a job sends to: those chosen for a resend, otherwise every active subscriber. */
+    private List<SubscriberProfile> subscribersFor(ExportJob job) {
+        if (StringUtils.isBlank(job.getSubscriberIds())) {
+            return subscriberRepository.findByActiveTrueOrderByIdAsc();
+        }
+        List<SubscriberProfile> chosen = new ArrayList<>();
+        for (String entry : job.getSubscriberIds().split(",")) {
+            subscriberRepository.findById(Long.valueOf(entry.split(":")[0].trim())).ifPresent(chosen::add);
+        }
+        return chosen;
+    }
+
+    /**
+     * The format of a subscriber's file in this job: the one chosen for it when the job was sent ("id:FORMAT"
+     * in the job's subscriber list), else the job's one format for everyone, else the subscriber's own.
+     */
+    private String formatFor(ExportJob job, SubscriberProfile subscriber) {
+        if (StringUtils.isNotBlank(job.getSubscriberIds())) {
+            for (String entry : job.getSubscriberIds().split(",")) {
+                String[] parts = entry.trim().split(":");
+                if (parts.length == 2 && parts[0].equals(String.valueOf(subscriber.getId())) && !parts[1].isBlank()) {
+                    return parts[1].trim();
+                }
+            }
+        }
+        return job.getFormatOverride() != null ? job.getFormatOverride() : subscriber.getFormatType();
+    }
+
+    private static String sha256(String text) {
+        try {
+            return java.util.HexFormat.of().formatHex(java.security.MessageDigest.getInstance("SHA-256")
+                    .digest(text.getBytes(StandardCharsets.UTF_8)));
+        } catch (java.security.NoSuchAlgorithmException ex) {
+            throw new IllegalStateException(ex);
+        }
+    }
+
     @Async
     public void runExport(Long jobId) {
         try {
             ExportJob job = exportJobRepository.findById(jobId)
                     .orElseThrow(() -> new IllegalStateException("Export job " + jobId + " was not found"));
-            List<SubscriberProfile> subscribers = subscriberRepository.findByActiveTrueOrderByIdAsc();
+            List<SubscriberProfile> subscribers = subscribersFor(job);
             job.setStatus("IN_PROGRESS");
             job.setStartedAt(LocalDateTime.now());
             job.setTotalSubscribers(subscribers.size());
             exportJobRepository.save(job);
-            audit(jobId, null, "EXPORT_STARTED", "Processing " + job.getListName() + " version " + job.getVersionId());
+            audit(jobId, null, "EXPORT_STARTED", "RESEND".equals(job.getMode())
+                    ? "Resending " + job.getSnapshotTemplate() + " data version " + job.getSnapshotLabel()
+                    : "Processing " + job.getListName() + " version " + job.getVersionId());
 
             if (subscribers.isEmpty()) {
                 finish(job.getId(), "COMPLETED", "No active subscribers");
@@ -491,9 +693,9 @@ public class ExportOrchestrator {
         } else if (counts.valid() == 0 && datesApplied) {
             outcome = "Empty delta window. Nothing will be sent";
         } else if ("DELTA".equalsIgnoreCase(subscriber.getExportMode())) {
-            outcome = datesApplied ? "Delta file for the date window" : "Delta file. Every change is included";
+            outcome = datesApplied ? "Delta file for the date window" : "Delta file: every changed record";
         } else {
-            outcome = "Full file. The date window does not apply";
+            outcome = "Full file";
         }
         return previewRow(subscriber, true, datesApplied, toInt(counts.valid()), toInt(counts.rejected()), outcome);
     }
@@ -528,7 +730,7 @@ public class ExportOrchestrator {
         status.setExportJobId(job.getId());
         status.setSubscriberId(subscriber.getId());
         status.setSubscriberName(subscriber.getName());
-        status.setFormatType(subscriber.getFormatType());
+        status.setFormatType(formatFor(job, subscriber));
         status.setStatus("IN_PROGRESS");
         status.setStartedAt(LocalDateTime.now());
         status.setErrorMessage(null);
@@ -560,9 +762,11 @@ public class ExportOrchestrator {
             }
 
             requireVersion(job.getVersionId());
-            ExportFormat format = formats.get(subscriber.getFormatType().toUpperCase(Locale.ROOT));
+            // A send of a stored version may choose each subscriber's format; otherwise each subscriber's own.
+            String formatType = formatFor(job, subscriber);
+            ExportFormat format = formats.get(formatType.toUpperCase(Locale.ROOT));
             if (format == null) {
-                throw new IllegalArgumentException("Unsupported format " + subscriber.getFormatType());
+                throw new IllegalArgumentException("Unsupported format " + formatType);
             }
             DataSnapshot snapshot = snapshotFor(job, status, subscriber);
             Streamed streamed = streamFile(job, subscriber, status, format, snapshot);
@@ -669,6 +873,19 @@ public class ExportOrchestrator {
      * once per subscriber. Otherwise the current data is read and matched against stored versions.
      */
     private DataSnapshot snapshotFor(ExportJob job, ExportJobSubscriberStatus status, SubscriberProfile subscriber) {
+        if (status.getSnapshotId() == null && job.getSnapshotId() != null) {
+            // A resend: the chosen stored version, never the current data.
+            DataSnapshot snapshot = snapshotService.get(job.getSnapshotId());
+            status.setSnapshotId(snapshot.getId());
+            status.setSnapshotLabel(snapshot.getLabel());
+            status.setSnapshotOutcome("RESENT");
+            status.setFormatTemplateId(snapshot.getTemplateId());
+            status.setFormatTemplateVersion(snapshot.getMajor());
+            statusRepository.save(status);
+            audit(job.getId(), subscriber.getId(), "DATA_VERSION_RESENT",
+                    snapshot.getTemplateName() + " data version " + snapshot.getLabel() + " sent again from the stored copy");
+            return snapshot;
+        }
         if (status.getSnapshotId() != null) {
             DataSnapshot snapshot = snapshotService.get(status.getSnapshotId());
             status.setFormatTemplateId(snapshot.getTemplateId());
@@ -1040,7 +1257,11 @@ public class ExportOrchestrator {
                 job.getFailedSubscribers(),
                 job.getHeldSubscribers(),
                 job.getSkippedSubscribers(),
-                job.getCreatedAt());
+                job.getCreatedAt(),
+                job.getMode() == null ? "EXPORT" : job.getMode(),
+                job.getSnapshotTemplate(),
+                job.getSnapshotLabel(),
+                job.getSubscriberIds());
     }
 
     private JobDetailResponse detail(ExportJob job) {
@@ -1094,7 +1315,10 @@ public class ExportOrchestrator {
                 job.getErrorMessage(),
                 job.getCreatedAt(),
                 subscribers,
-                audits);
+                audits,
+                job.getMode() == null ? "EXPORT" : job.getMode(),
+                job.getSnapshotTemplate(),
+                job.getSnapshotLabel());
     }
 
     private String trim(String value) {

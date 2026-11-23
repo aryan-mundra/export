@@ -50,7 +50,9 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
         "spring.datasource.username=regliss",
         "spring.datasource.password=regliss",
         "spring.sql.init.mode=always",
-        "spring.sql.init.schema-locations=file:db/postgres/regliss-mock.sql",
+        "spring.sql.init.schema-locations=file:db/postgres/regliss-mock.sql,file:db/postgres/ver-export-schema.sql",
+        // Hibernate must find every column it uses in the hand-written schema.
+        "spring.jpa.hibernate.ddl-auto=validate",
         "spring.sql.init.encoding=UTF-8",
         "export.storage.directory=target/row-filter-postgres"
 })

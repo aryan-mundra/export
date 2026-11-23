@@ -72,27 +72,49 @@ public class SnapshotController {
         this.formats = formatList.stream().collect(Collectors.toMap(format -> format.formatType().toUpperCase(Locale.ROOT), format -> format));
     }
 
-    /** Every data version, newest first. */
+    /** The newest data versions (at most 200), optionally of one template. Screens use the paged endpoints below. */
     @GetMapping
     public List<DataSnapshot> list(@RequestParam(required = false) Long familyId) {
-        return familyId == null ? repository.findAllByOrderByIdDesc() : repository.findByFamilyIdOrderByIdDesc(familyId);
+        return familyId == null ? repository.findTop200ByOrderByIdDesc() : repository.findTop200ByFamilyIdOrderByIdDesc(familyId);
+    }
+
+    /** Templates and lists that have data versions: one catalog row each, searched and paged. No version is read. */
+    @GetMapping("/series")
+    public SnapshotService.SeriesPage series(@RequestParam(required = false) String q,
+                                             @RequestParam(required = false) Long familyId,
+                                             @RequestParam(defaultValue = "recent") String sort,
+                                             @RequestParam(defaultValue = "0") int offset,
+                                             @RequestParam(defaultValue = "50") int limit) {
+        return snapshots.series(q, familyId, sort, offset, limit);
+    }
+
+    /** The versions of one template and list, newest first, a page at a time. */
+    @GetMapping("/series/{familyId}/{listCode}")
+    public SnapshotService.VersionPage versions(@PathVariable Long familyId,
+                                                @PathVariable String listCode,
+                                                @RequestParam(defaultValue = "0") int offset,
+                                                @RequestParam(defaultValue = "25") int limit) {
+        return snapshots.versions(familyId, listCode, offset, limit);
     }
 
     public record Usage(Long jobId, Long statusId, String subscriberName, String formatType, String outcome, String status,
                         int records, String fileName, LocalDateTime at) {
     }
 
-    public record Detail(DataSnapshot snapshot, List<Map<String, String>> columns, List<String> filters, List<Usage> usage) {
+    /** @param usage the 50 most recent files built from this version; usageTotal counts all of them */
+    public record Detail(DataSnapshot snapshot, List<Map<String, String>> columns, List<String> filters, List<Usage> usage,
+                         long usageTotal) {
     }
 
     /** A version with its column layout, the row filters of the template version that built it, and where it was used. */
     @GetMapping("/{id}")
     public Detail detail(@PathVariable Long id) {
         DataSnapshot snapshot = snapshots.get(id);
-        List<Usage> usage = statuses.findBySnapshotIdOrderByIdDesc(id).stream()
+        List<Usage> usage = statuses.findBySnapshotIdOrderByIdDesc(id, org.springframework.data.domain.PageRequest.of(0, 50)).stream()
                 .map(this::usage)
                 .toList();
-        return new Detail(snapshot, snapshots.columns(snapshot), templates.filterSummaries(snapshot.getTemplateId()), usage);
+        return new Detail(snapshot, snapshots.columns(snapshot), templates.filterSummaries(snapshot.getTemplateId()), usage,
+                statuses.countBySnapshotId(id));
     }
 
     private Usage usage(ExportJobSubscriberStatus status) {
