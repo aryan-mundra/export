@@ -19,9 +19,9 @@ The full walk-through, with pgAdmin and IntelliJ on Windows, is in
 1. In pgAdmin, on **PostgreSQL 17**: create the database `shinedata`.
 2. In a Query Tool opened from `shinedata`: open `db/postgres/ver-export-schema.sql` and run it (F5).
 3. Copy the dump file into this folder.
-4. Start the application (no profile needed), sign in, and click **PostgreSQL** under **Database** in the sidebar.
-   Enter the connection (localhost, 5432, shinedata, your user and password) and click **Connect and restart**. The
-   connection is saved in `data/database.properties` (git-ignored) and used on every start.
+4. Check `config/database.properties` (host, port, database, username, password); it holds the local connection.
+5. Start the application (no profile needed), sign in, and click **PostgreSQL** under **Database** in the sidebar,
+   then **Switch to PostgreSQL**.
 
 The log shows `Importing … into "shinedata"`, then `Imported … in N s`. Large dumps take a few minutes. Then open
 http://localhost:8082.

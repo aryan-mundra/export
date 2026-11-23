@@ -1197,24 +1197,33 @@ function explainDatabase(mode) {
                     </div>
                 </form>
             </div>`;
-    } else {
-        const password = system.postgresPasswordSaved ? "Saved. Leave empty to keep it" : "Password";
+    } else if (!system.postgresConfigured) {
         root.innerHTML = `
             <div class="modal-back" data-db-close>
-                <form class="modal db-modal" id="db-form">
-                    <h2>Connect to PostgreSQL</h2>
-                    <p class="muted">The module restarts on this database in about 20 seconds (longer the first time, while a dump in db/dumps is imported). You then sign in again.</p>
-                    <div class="db-grid">
-                        <label>Host<input name="host" value="${esc(system.postgresHost || "localhost")}" required autocomplete="off"></label>
-                        <label>Port<input name="port" type="number" min="1" max="65535" value="${esc(String(system.postgresPort || 5432))}" required></label>
-                        <label class="span-2">Database<input name="database" value="${esc(system.postgresDatabase || "shinedata")}" required autocomplete="off"></label>
-                        <label>User<input name="username" value="${esc(system.postgresUsername || "postgres")}" required autocomplete="off"></label>
-                        <label>Password<input name="password" type="password" placeholder="${esc(password)}" autocomplete="new-password"></label>
+                <div class="modal" id="db-form">
+                    <h2>Set up the PostgreSQL connection</h2>
+                    <p class="muted">The connection is read from a file in the project folder, so no password is typed here:</p>
+                    <ol class="db-steps">
+                        <li>Open <code>config/database.properties</code> in the project folder.</li>
+                        <li>Fill in host, port, database, username and password.</li>
+                        <li>Click <strong>PostgreSQL</strong> again.</li>
+                    </ol>
+                    <div class="modal-actions">
+                        <button type="button" class="btn-primary" data-db-close>OK</button>
                     </div>
-                    <p class="muted small-note">Saved on this computer only (data/database.properties, never committed). The database needs the module's tables: run db/postgres/ver-export-schema.sql on it once in pgAdmin.</p>
+                </div>
+            </div>`;
+    } else {
+        root.innerHTML = `
+            <div class="modal-back" data-db-close>
+                <form class="modal" id="db-form">
+                    <h2>Switch to PostgreSQL?</h2>
+                    <p>Database <strong>${esc(system.postgresDatabase)}</strong> on <strong>${esc(system.postgresHost)}:${esc(String(system.postgresPort))}</strong>, user <strong>${esc(system.postgresUsername)}</strong>.</p>
+                    <p class="muted">The module restarts on it in about 20 seconds (longer the first time, while a dump in db/dumps is imported). You then sign in again.</p>
+                    <p class="muted small-note">From config/database.properties. To connect elsewhere, edit that file.</p>
                     <div class="modal-actions">
                         <button type="button" class="btn-ghost" data-db-close>Cancel</button>
-                        <button type="submit" class="btn-primary">Connect and restart</button>
+                        <button type="submit" class="btn-primary">Switch to PostgreSQL</button>
                     </div>
                 </form>
             </div>`;
@@ -1223,21 +1232,17 @@ function explainDatabase(mode) {
         if (event.target === element) root.innerHTML = "";
     }));
     const form = document.getElementById("db-form");
-    const first = form.querySelector("input[name=password]") || form.querySelector("button[type=submit]");
+    const first = form.querySelector("button[type=submit]") || form.querySelector("button");
     if (first) first.focus();
+    if (form.tagName !== "FORM") {
+        form.querySelectorAll("[data-db-close]").forEach(button => button.addEventListener("click", () => { root.innerHTML = ""; }));
+        return;
+    }
     form.addEventListener("submit", async event => {
         event.preventDefault();
         const button = form.querySelector("button[type=submit]");
         button.disabled = true;
-        const data = new FormData(form);
-        const body = mode === "h2" ? { mode } : {
-            mode,
-            host: data.get("host"),
-            port: Number(data.get("port")) || 5432,
-            database: data.get("database"),
-            username: data.get("username"),
-            password: data.get("password") || ""
-        };
+        const body = { mode };
         button.textContent = mode === "h2" ? "Switching…" : "Checking the connection…";
         try {
             const result = await api("/api/system/database", { method: "POST", body });
@@ -1253,7 +1258,7 @@ function explainDatabase(mode) {
         } catch (error) {
             toast(error.message, "error");
             button.disabled = false;
-            button.textContent = mode === "h2" ? "Switch to H2" : "Connect and restart";
+            button.textContent = mode === "h2" ? "Switch to H2" : "Switch to PostgreSQL";
         }
     });
 }

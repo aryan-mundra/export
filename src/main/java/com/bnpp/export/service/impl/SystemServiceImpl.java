@@ -56,7 +56,7 @@ public class SystemServiceImpl implements SystemService {
         DatabaseSettings saved = DatabaseSettings.load();
         return new SystemInfoResponse(mock, mock ? DatabaseSettings.H2 : DatabaseSettings.POSTGRES, mock ? "H2" : "PostgreSQL",
                 switchEnabled && ExportApplication.canRestart(), saved.host(), saved.port(), saved.database(), saved.username(),
-                StringUtils.isNotEmpty(saved.password()), mock ? saved.lastError() : null);
+                saved.hasConnection(), mock ? saved.lastError() : null);
     }
 
     @Override
@@ -74,7 +74,15 @@ public class SystemServiceImpl implements SystemService {
         if (DatabaseSettings.H2.equals(mode)) {
             chosen = saved.withMode(DatabaseSettings.H2, null);
         } else if (DatabaseSettings.POSTGRES.equals(mode)) {
-            chosen = postgres(request, saved);
+            if (!saved.hasConnection()) {
+                throw new BadRequestException("The PostgreSQL connection is not set. Fill in host, port, database, username and password "
+                        + "in config/database.properties in the project folder, and click PostgreSQL again.");
+            }
+            if (!HOST.matcher(saved.host()).matches() || !DATABASE.matcher(saved.database()).matches()
+                    || saved.port() < 1 || saved.port() > 65535) {
+                throw new BadRequestException("config/database.properties has an invalid host, port or database name.");
+            }
+            chosen = saved.withMode(DatabaseSettings.POSTGRES, null);
             check(chosen);
         } else {
             throw new BadRequestException("Choose h2 or postgres");
@@ -85,29 +93,6 @@ public class SystemServiceImpl implements SystemService {
         ExportApplication.restart();
         String label = DatabaseSettings.POSTGRES.equals(chosen.mode()) ? "PostgreSQL" : "H2";
         return new DatabaseSwitchResponse(true, chosen.mode(), "Restarting on " + label + ". Sign in again in a few seconds.");
-    }
-
-    /** The PostgreSQL connection from the dialog; an empty password keeps the saved one. */
-    private static DatabaseSettings postgres(DatabaseSwitchRequest request, DatabaseSettings saved) {
-        String host = StringUtils.trimToEmpty(request.host());
-        String database = StringUtils.trimToEmpty(request.database());
-        String username = StringUtils.trimToEmpty(request.username());
-        int port = request.port() == null ? 5432 : request.port();
-        if (!HOST.matcher(host).matches()) {
-            throw new BadRequestException("Enter the server's host name, for example localhost");
-        }
-        if (port < 1 || port > 65535) {
-            throw new BadRequestException("Enter a port between 1 and 65535, usually 5432");
-        }
-        if (!DATABASE.matcher(database).matches()) {
-            throw new BadRequestException("Enter the database name, for example shinedata (letters, digits, _ and -)");
-        }
-        if (username.isEmpty()) {
-            throw new BadRequestException("Enter the user name, for example postgres");
-        }
-        String password = StringUtils.isEmpty(request.password()) && username.equals(saved.username())
-                && host.equals(saved.host()) && database.equals(saved.database()) ? saved.password() : request.password();
-        return new DatabaseSettings(DatabaseSettings.POSTGRES, host, port, database, username, password == null ? "" : password, null);
     }
 
     /** Connects with the chosen settings and checks the module's tables are there, so the restart can succeed. */
@@ -138,7 +123,7 @@ public class SystemServiceImpl implements SystemService {
         String message = StringUtils.defaultString(ex.getMessage());
         String lower = message.toLowerCase(Locale.ROOT);
         if (lower.contains("password authentication failed")) {
-            return "Wrong password for user " + settings.username() + ".";
+            return "Wrong password for user " + settings.username() + ". Check password in config/database.properties.";
         }
         if (lower.contains("does not exist") && lower.contains("database")) {
             return "There is no database " + settings.database() + " on this server. Create it in pgAdmin, or check the name.";

@@ -83,37 +83,37 @@ new password with `ALTER ROLE regliss PASSWORD 'choose-a-password';`.
 Copy the dump file (for example `shine-dump-shinedata-202611230033.sql`) into `db/dumps` in the project folder, next to
 its `README.md`, not in a sub-folder. Dumps are never committed (they hold bank data): copy them by hand on each laptop.
 
-### 5. Start the module and switch to PostgreSQL
+### 5. Check the connection in `config/database.properties`
+
+The project folder's `config/database.properties` holds the connection the Database switch uses. It is committed with the
+development laptop's local values; change them if your server differs:
+
+```
+host=localhost
+port=5432
+database=reglissData
+username=postgres
+password=postgres
+```
+
+The screen never asks for the password. Because this file is committed, only ever put a local test password in it.
+
+### 6. Start the module and switch to PostgreSQL
 
 1. Start it the plain way, with no profile and no environment variables: in IntelliJ, open
    `src/main/java/com/bnpp/export/ExportApplication.java` and click ▶ (leave **Program arguments** and **Environment
    variables** empty); or in PowerShell, `mvn spring-boot:run` (add `"-Djava.version=17"` with Java 17). It starts on H2.
 2. Open http://localhost:8082 and sign in as `maker` / `Regliss-maker`.
-3. In the sidebar, under **Database**, click **PostgreSQL**. Fill in the connection (host `localhost`, port `5432`,
-   database `shinedata`, user `postgres` or `regliss`, and the password) and click **Connect and restart**.
+3. In the sidebar, under **Database**, click **PostgreSQL**. The dialog shows the database, host, port and user from the
+   file; click **Switch to PostgreSQL**.
 4. The module checks the connection and that the `ver_export_*` tables are there. If something is wrong (password,
    database name, port, missing tables) it says so and nothing changes. Otherwise it restarts on PostgreSQL: the
    dump in `db/dumps` is imported (several minutes for a large one; watch the Run window), then the page shows the
    sign-in screen. Sign in again.
 
-The module remembers the choice and starts on PostgreSQL from then on. Click **H2** to go back; H2's data stays as it
-was while the module keeps running. If PostgreSQL does not start after a switch, the module comes back on H2 and shows
-why. The switch is refused while an export is running.
-
-**Where the connection is kept:** `data/database.properties` in the project folder, written by the dialog:
-
-```
-mode=postgres
-postgres.host=localhost
-postgres.port=5432
-postgres.database=shinedata
-postgres.username=postgres
-postgres.password=...
-```
-
-It is local to the laptop (`data/` is git-ignored, so it is never committed) and holds the password in plain text, like
-any local configuration file: keep the project folder private. To forget the connection, delete the file; the module
-then starts on H2.
+The module remembers the choice (in `data/database.properties`, also git-ignored) and starts on PostgreSQL from then on.
+Click **H2** to go back; H2's data stays as it was while the module keeps running. If PostgreSQL does not start after a
+switch, the module comes back on H2 and shows why. The switch is refused while an export is running.
 
 **Fixed profile instead of the switch** (servers, scripts): start with `--spring.profiles.active=postgres` and the
 environment variables `REGLISS_DB_URL`, `REGLISS_DB_USER`, `REGLISS_DB_PASSWORD` (and `PG_BIN` when several
@@ -123,7 +123,7 @@ then turned off. Set `export.database-switch.enabled=false` to turn the switch o
 When two PostgreSQL versions are installed, the import uses the newest one's `psql` (PostgreSQL 17 here); set `PG_BIN`
 to choose another.
 
-### 6. Check
+### 7. Check
 
 - **pgAdmin:** **shinedata → Schemas → public → Tables → Refresh** lists the dump's tables (including `ver_version`,
   `ver_version_member` and the `gs_*` tables) next to the `ver_export_*` ones. `ver_export_dump_import` has one row for

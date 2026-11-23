@@ -1874,3 +1874,5 @@ tr.xp-version-row:hover { background: #f7fbf8; }
 .db-spinner { width: 34px; height: 34px; border-radius: 50%; border: 3px solid var(--green-soft); border-top-color: var(--green); animation: db-spin .9s linear infinite; }
 @keyframes db-spin { to { transform: rotate(360deg); } }
 @media (max-width: 560px) { .db-grid { grid-template-columns: 1fr; } .db-grid .span-2 { grid-column: auto; } }
+.db-steps { margin: 0; padding-left: 20px; display: grid; gap: 6px; font-size: 14px; }
+.db-steps code { font-size: 12.5px; }

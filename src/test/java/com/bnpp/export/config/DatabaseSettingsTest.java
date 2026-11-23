@@ -15,24 +15,36 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-/** The database chosen with the Database switch: kept in a local file, and turned into start-up arguments. */
+/**
+ * The PostgreSQL connection comes from config/database.properties; the Database switch's choice is kept in
+ * data/database.properties; together they become the start-up arguments.
+ */
 class DatabaseSettingsTest {
 
     @TempDir
     Path folder;
 
+    private Path connection;
+
     @BeforeEach
-    void useTempFile() {
-        System.setProperty("export.database.settings", folder.resolve("database.properties").toString());
+    void useTempFiles() {
+        connection = folder.resolve("config-database.properties");
+        System.setProperty("export.database.config", connection.toString());
+        System.setProperty("export.database.settings", folder.resolve("data-database.properties").toString());
     }
 
     @AfterEach
     void restore() {
+        System.clearProperty("export.database.config");
         System.clearProperty("export.database.settings");
     }
 
+    private void writeConnection(String text) throws Exception {
+        Files.writeString(connection, text);
+    }
+
     @Test
-    void nothingSavedMeansH2WithNoExtraArguments() {
+    void noFilesMeansH2WithNoConnectionAndNoExtraArguments() {
         DatabaseSettings settings = DatabaseSettings.load();
         assertEquals("h2", settings.mode());
         assertFalse(settings.hasConnection());
@@ -40,39 +52,53 @@ class DatabaseSettingsTest {
     }
 
     @Test
-    void postgresIsSavedAndStartsWithItsConnection() throws Exception {
-        new DatabaseSettings("postgres", "localhost", 5433, "shinedata", "regliss", "s3cret;=x", null).save();
-        assertTrue(Files.readString(DatabaseSettings.file()).contains("mode=postgres"));
+    void theConnectionComesFromTheConfigFileAndTheChoiceFromTheDataFile() throws Exception {
+        writeConnection("host=localhost\nport=5433\ndatabase=reglissData\nusername=postgres\npassword=s3cret;=x\n");
+        DatabaseSettings onH2 = DatabaseSettings.load();
+        assertTrue(onH2.hasConnection());
+        assertEquals("h2", onH2.mode());
+        assertEquals(0, onH2.arguments(new String[0]).length, "H2 until PostgreSQL is chosen");
 
-        DatabaseSettings loaded = DatabaseSettings.load();
-        assertEquals("postgres", loaded.mode());
-        assertEquals("jdbc:postgresql://localhost:5433/shinedata", loaded.jdbcUrl());
-        assertEquals("s3cret;=x", loaded.password());
+        onH2.withMode("postgres", null).save();
+        String saved = Files.readString(DatabaseSettings.choiceFile());
+        assertTrue(saved.contains("mode=postgres"));
+        assertFalse(saved.contains("s3cret"), "the password is never copied out of the config file");
+
+        DatabaseSettings onPostgres = DatabaseSettings.load();
+        assertEquals("jdbc:postgresql://localhost:5433/reglissData", onPostgres.jdbcUrl());
         assertEquals(List.of(
                         "--spring.profiles.active=postgres",
-                        "--spring.datasource.url=jdbc:postgresql://localhost:5433/shinedata",
-                        "--spring.datasource.username=regliss",
+                        "--spring.datasource.url=jdbc:postgresql://localhost:5433/reglissData",
+                        "--spring.datasource.username=postgres",
                         "--spring.datasource.password=s3cret;=x"),
-                List.of(loaded.arguments(new String[0])));
+                List.of(onPostgres.arguments(new String[0])));
     }
 
     @Test
-    void anExplicitProfileWinsOverTheSavedChoice() {
-        new DatabaseSettings("postgres", "localhost", 5432, "shinedata", "postgres", "pw", null).save();
+    void postgresWithoutAFilledInConfigFileStartsOnH2() throws Exception {
+        writeConnection("host=localhost\nport=5432\ndatabase=\nusername=postgres\n");
+        DatabaseSettings settings = DatabaseSettings.load().withMode("postgres", null);
+        assertFalse(settings.hasConnection());
+        assertEquals(0, settings.arguments(new String[0]).length);
+    }
+
+    @Test
+    void anExplicitProfileWinsOverTheSavedChoice() throws Exception {
+        writeConnection("host=localhost\ndatabase=reglissData\nusername=postgres\npassword=pw\n");
+        DatabaseSettings.load().withMode("postgres", null).save();
         String[] args = {"--spring.profiles.active=mock"};
         assertArrayEquals(args, DatabaseSettings.load().arguments(args));
         assertTrue(DatabaseSettings.profileChosenExplicitly(args));
     }
 
     @Test
-    void aFailedSwitchGoesBackToH2AndKeepsTheReasonAndConnection() {
-        new DatabaseSettings("postgres", "db.local", 5432, "shinedata", "postgres", "pw", null)
-                .withMode("h2", "PostgreSQL did not start: boom").save();
+    void aFailedSwitchGoesBackToH2AndKeepsTheReason() throws Exception {
+        writeConnection("host=db.local\ndatabase=reglissData\nusername=postgres\npassword=pw\n");
+        DatabaseSettings.load().withMode("h2", "PostgreSQL did not start: boom").save();
         DatabaseSettings loaded = DatabaseSettings.load();
         assertEquals("h2", loaded.mode());
         assertEquals("PostgreSQL did not start: boom", loaded.lastError());
         assertEquals("db.local", loaded.host());
-        assertEquals(0, loaded.arguments(new String[0]).length);
         assertNull(loaded.withMode("h2", null).lastError());
     }
 }
