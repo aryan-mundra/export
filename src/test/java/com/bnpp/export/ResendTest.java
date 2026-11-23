@@ -131,6 +131,27 @@ class ResendTest {
         assertEquals("CSV", row(mixed, "SUN").formatType());
         assertTrue(row(mixed, "SUN").filePath().endsWith(".csv"));
 
+        // One subscriber can receive more than one format in the same send: a CSV file and an XML file.
+        String bothBody = "\"snapshotId\":" + v10 + ",\"subscriberIds\":[" + sun + "],\"formats\":{\"" + sun + "\":\"CSV,XML\"}";
+        String bothReview = mockMvc.perform(post("/api/exports/resend/preview").with(user("maker").roles("MAKER"))
+                        .contentType("application/json").content("{" + bothBody + "}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.subscribers.length()").value(2))
+                .andExpect(jsonPath("$.subscribers[0].name").value("SUN"))
+                .andExpect(jsonPath("$.subscribers[0].formatType").value("CSV"))
+                .andExpect(jsonPath("$.subscribers[1].formatType").value("XML"))
+                .andReturn().getResponse().getContentAsString();
+        String bothJob = mockMvc.perform(post("/api/exports/resend").with(user("maker").roles("MAKER"))
+                        .contentType("application/json")
+                        .content("{" + bothBody + ",\"reviewToken\":\"" + JsonPath.read(bothReview, "$.reviewToken") + "\"}"))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+        var sunFiles = await(((Number) JsonPath.read(bothJob, "$.id")).longValue()).subscribers().stream()
+                .filter(item -> "SUN".equals(item.subscriberName())).toList();
+        assertEquals(2, sunFiles.size());
+        assertTrue(sunFiles.stream().anyMatch(item -> "CSV".equals(item.formatType()) && item.filePath().endsWith(".csv")));
+        assertTrue(sunFiles.stream().anyMatch(item -> "XML".equals(item.formatType()) && item.filePath().endsWith(".xml")));
+
         String review = mockMvc.perform(post("/api/exports/resend/preview").with(user("maker").roles("MAKER"))
                         .contentType("application/json")
                         .content("{\"snapshotId\":" + v10 + ",\"subscriberIds\":[" + compliance + "," + actimize + "]}"))

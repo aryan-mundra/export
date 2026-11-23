@@ -189,7 +189,7 @@ public class SnapshotService {
                         toLocal(rs.getTimestamp(12))),
                 familyId, listCode);
         if (found.isEmpty()) {
-            throw new ResponseStatusException(NOT_FOUND, "No data versions for this template and list");
+            throw new ResponseStatusException(NOT_FOUND, "No data versions for this list and source list");
         }
         return found.get(0);
     }
@@ -225,7 +225,7 @@ public class SnapshotService {
                 .orElseThrow(() -> new IllegalStateException("Certified version " + certifiedVersionId + " was not found"));
         List<FormatField> fields = templates.fields(template.getId());
         if (fields.isEmpty()) {
-            throw new IllegalStateException("Template " + template.getName() + " v" + template.getVersionNumber() + " has no columns");
+            throw new IllegalStateException("List " + template.getName() + " v" + template.getVersionNumber() + " has no columns");
         }
         String columnsJson = toJson(columns(fields));
         RowFilterService.Condition condition = rowFilters.condition(templates.filters(template.getId()), "e");
@@ -651,7 +651,7 @@ public class SnapshotService {
         DataSnapshot newer = get(newerId);
         DataSnapshot older = get(olderId);
         if (!newer.getFamilyId().equals(older.getFamilyId()) || !newer.getListCode().equals(older.getListCode())) {
-            throw new ResponseStatusException(BAD_REQUEST, "Only data versions of the same template and list can be compared");
+            throw new ResponseStatusException(BAD_REQUEST, "Only data versions of the same list and source list can be compared");
         }
         String n = table(newer);
         String o = table(older);

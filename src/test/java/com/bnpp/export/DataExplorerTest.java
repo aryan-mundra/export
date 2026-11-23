@@ -112,7 +112,7 @@ class DataExplorerTest {
         // Bad filters are refused with a reason a user can act on.
         mockMvc.perform(explore("[{\"sourceTable\":\"GS_PARTY\",\"sourceColumn\":\"NATIONALITY\",\"op\":\"in\",\"values\":[\"FR\"]}]", ""))
                 .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.message").value("A filter on GS_PARTY.NATIONALITY needs that column on the template"));
+                .andExpect(jsonPath("$.message").value("A filter on GS_PARTY.NATIONALITY needs that column on the list"));
         mockMvc.perform(explore("[{\"sourceTable\":\"GS_PARTY\",\"sourceColumn\":\"RISK_SCORE\",\"op\":\"contains\",\"values\":[\"5\"]}]", ""))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.message", containsString("is not a filter for the number column")));

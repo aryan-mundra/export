@@ -133,7 +133,7 @@ public class TemplateExportService {
      */
     public LatestResult exportLatest(Long familyId) {
         FormatTemplate template = templates.findFirstByFamilyIdAndActiveTrueOrderByVersionNumberDesc(familyId)
-                .orElseThrow(() -> new ResponseStatusException(BAD_REQUEST, "This template has no approved version to export"));
+                .orElseThrow(() -> new ResponseStatusException(BAD_REQUEST, "This list has no approved version to export"));
         CertifiedVersion version = versions.findAllByOrderByVersionIdAsc().stream()
                 .filter(candidate -> candidate.isOperatorVisible() && "CERTIFIED".equals(candidate.getStatus()))
                 .max(Comparator.comparing((CertifiedVersion candidate) -> candidate.getContentAsOf() == null

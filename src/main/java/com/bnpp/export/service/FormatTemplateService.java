@@ -200,10 +200,10 @@ public class FormatTemplateService {
      */
     public String checkChoice(Long familyId) {
         if (familyId == null) {
-            throw new ResponseStatusException(BAD_REQUEST, "Choose a template for this subscriber");
+            throw new ResponseStatusException(BAD_REQUEST, "Choose a list for this subscriber");
         }
         FormatTemplate latest = templateRepository.findFirstByFamilyIdOrderByVersionNumberDesc(familyId)
-                .orElseThrow(() -> new ResponseStatusException(BAD_REQUEST, "Unknown template"));
+                .orElseThrow(() -> new ResponseStatusException(BAD_REQUEST, "Unknown list"));
         if (inUse(familyId).isEmpty()) {
             throw new ResponseStatusException(BAD_REQUEST, "\"" + latest.getName()
                     + "\" has no approved version yet. It can be chosen once an approver approves it.");
@@ -272,10 +272,10 @@ public class FormatTemplateService {
     /** A version an approver may decide on now: waiting for review, and not submitted by them. */
     private FormatTemplate forDecision(Long id) {
         if (!CurrentUser.approver()) {
-            throw new ResponseStatusException(FORBIDDEN, "Only an approver can review a template");
+            throw new ResponseStatusException(FORBIDDEN, "Only an approver can review a list");
         }
         FormatTemplate template = templateRepository.findById(id)
-                .orElseThrow(() -> new ResponseStatusException(NOT_FOUND, "Template not found"));
+                .orElseThrow(() -> new ResponseStatusException(NOT_FOUND, "List not found"));
         if ("SUPERSEDED".equals(template.getStatus())) {
             int newest = templateRepository.findFirstByFamilyIdOrderByVersionNumberDesc(template.getFamilyId())
                     .map(FormatTemplate::getVersionNumber).orElse(template.getVersionNumber());
@@ -470,7 +470,7 @@ public class FormatTemplateService {
             }
             String label = table == null ? source : table + "." + source;
             if (!seen.add(label.toLowerCase(Locale.ROOT))) {
-                throw new ResponseStatusException(BAD_REQUEST, "Column " + label + " is already on the template");
+                throw new ResponseStatusException(BAD_REQUEST, "Column " + label + " is already on the list");
             }
             if (!headers.add(header.toLowerCase(Locale.ROOT))) {
                 throw new ResponseStatusException(BAD_REQUEST, "Header " + header + " is used twice. Give each export column its own name.");

@@ -75,7 +75,7 @@ public class RowFilterService {
                             && candidate.getSourceTable().equalsIgnoreCase(table)
                             && candidate.getSourceColumn().equalsIgnoreCase(column))
                     .findFirst()
-                    .orElseThrow(() -> bad("A filter on " + table + "." + column + " needs that column on the template"));
+                    .orElseThrow(() -> bad("A filter on " + table + "." + column + " needs that column on the list"));
             String label = field.getSourceTable() + "." + field.getSourceColumn();
             if (!seen.add(label.toLowerCase(Locale.ROOT))) {
                 throw bad("Only one filter per column: " + label + " has two");

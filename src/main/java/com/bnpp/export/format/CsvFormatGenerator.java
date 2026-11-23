@@ -39,7 +39,7 @@ public class CsvFormatGenerator implements ExportFormat {
     public RecordWriter open(Path target, Long versionId, String subscriberName, Long templateId) throws IOException {
         List<FormatField> fields = formatTemplateService.fields(templateId);
         if (fields.isEmpty()) {
-            throw new IllegalStateException("No approved CSV template for this subscriber. Choose one on the Subscribers page.");
+            throw new IllegalStateException("No approved list for this subscriber. Choose one on the Subscribers page.");
         }
         List<FormatField> columns = fields;
         String[] headers = columns.stream().map(FormatField::getHeaderName).toArray(String[]::new);

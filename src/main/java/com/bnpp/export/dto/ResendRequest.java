@@ -12,7 +12,10 @@ public record ResendRequest(
         String reviewToken,
         /** One format for every file of this send; empty for each subscriber's own format. */
         String formatType,
-        /** A format per subscriber id; overrides formatType for that subscriber. */
+        /**
+         * Formats per subscriber id, overriding formatType. One format, or several separated by a comma
+         * ({@code CSV,XML}), sends one file in each format.
+         */
         Map<Long, String> formats
 ) {
     public ResendRequest(Long snapshotId, List<Long> subscriberIds, String reviewToken, String formatType) {

@@ -129,7 +129,7 @@ public class ExportController {
     private String summary(SubscriberProfile profile) {
         return profile.getName() + ": " + profile.getFormatType() + " " + profile.getScope() + " " + profile.getExportMode()
                 + ", endpoint " + (profile.getCftEndpoint() == null ? "none" : profile.getCftEndpoint() + " (" + profile.getEndpointStatus() + ")")
-                + ", template " + java.util.Objects.toString(formatTemplateService.templateName(profile.getTemplateFamilyId()), "none")
+                + ", list " + java.util.Objects.toString(formatTemplateService.templateName(profile.getTemplateFamilyId()), "none")
                 + (profile.isActive() ? ", active" : ", inactive");
     }
 

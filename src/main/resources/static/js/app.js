@@ -47,7 +47,9 @@ function pageFromHash() {
 }
 
 async function navigate() {
-    state.page = pageFromHash();
+    const next = pageFromHash();
+    if (next !== "export") state.xpDialog = null;
+    state.page = next;
     if (typeof closeEditor === "function") closeEditor();
     document.querySelectorAll(".nav a").forEach(link => {
         const current = link.dataset.page === state.page;
@@ -61,7 +63,7 @@ async function navigate() {
     try {
         await refresh();
         render();
-        if (state.page === "export") startExportPage();
+        if (state.page === "export" && (!state.xpDialog || (state.xp && state.xp.pendingSend))) startExportPage();
         void main.offsetWidth;
         main.classList.add("is-entering");
         schedulePoll();
@@ -336,7 +338,7 @@ function subscribersHtml() {
                 <button class="btn-primary" type="submit">+ Add</button>
             </form>
             <table>
-                <thead><tr><th>ID</th><th>Name</th><th>Format</th><th>Mode</th><th>Scope</th><th>Business line</th><th>Region</th><th>Delivery</th><th>Template</th><th>Last file</th><th>Active</th><th></th></tr></thead>
+                <thead><tr><th>ID</th><th>Name</th><th>Format</th><th>Mode</th><th>Scope</th><th>Business line</th><th>Region</th><th>Delivery</th><th>List</th><th>Last file</th><th>Active</th><th></th></tr></thead>
                 <tbody>${rows}</tbody>
             </table>
             ${state.subscribers.length ? "" : '<div class="empty">No subscribers found.</div>'}
@@ -473,7 +475,7 @@ function templatesHtml() {
                     ${state.templateStep === "data" && draft.fields.length
                         ? '<button type="button" class="btn-ghost" data-step="columns">← Back to columns</button>'
                         : `<button type="button" class="btn-ghost" data-step="data" ${draft.fields.length ? "" : "disabled"}>Preview data and filter rows →</button>`}
-                    <button class="btn-primary" type="submit" ${draft.fields.length ? "" : "disabled"}>${current ? "Save new version" : "Save template"}</button>
+                    <button class="btn-primary" type="submit" ${draft.fields.length ? "" : "disabled"}>${current ? "Save new version" : "Save list"}</button>
                 </div>
             </form>
             ${current ? `<details class="template-history"><summary>History of ${esc(current.name)}</summary>${templateHistoryHtml(current.id, null)}</details>` : ""}
@@ -483,7 +485,7 @@ function templatesHtml() {
                 <thead><tr><th>Name</th><th>Version</th><th>Status</th><th>Used by</th><th>Headers</th><th>Rows</th></tr></thead>
                 <tbody>${saved}</tbody>
             </table>
-            ${state.templates.length ? "" : '<div class="empty">No format templates yet.</div>'}
+            ${state.templates.length ? "" : '<div class="empty">No lists yet.</div>'}
         </section>`;
 }
 
@@ -496,7 +498,7 @@ function builderSummary(draft) {
 function stepperHtml(draft) {
     const onData = state.templateStep === "data" && draft.fields.length;
     const filters = draft.filters.length;
-    return `<div class="stepper" role="tablist" aria-label="Template steps">
+    return `<div class="stepper" role="tablist" aria-label="List steps">
         <button type="button" role="tab" class="step ${onData ? "" : "active"}" aria-selected="${onData ? "false" : "true"}" data-step="columns">
             <span class="step-no">1</span><span><strong>Columns</strong><small>${num(draft.fields.length)} picked</small></span>
         </button>
@@ -1392,7 +1394,7 @@ function explorerInnerHtml() {
         : "";
     let hint;
     if (filters.length > 1) hint = "A row goes in the file only if it matches every filter.";
-    else if (filters.length) hint = "Only rows that match go in the file. The filter is saved with the template.";
+    else if (filters.length) hint = "Only rows that match go in the file. The filter is saved with the list.";
     else hint = "No filters: every list entry goes in the file. Use the funnel on a column to keep only some rows.";
     return `
         <div class="explorer-bar">
@@ -1943,9 +1945,9 @@ function approvalsHtml() {
         </article>`;
     }).join("");
     return `
-        ${head("Review", "Approvals", "Templates waiting for your approval.")}
+        ${head("Review", "Approvals", "Lists waiting for your approval.")}
         ${endpointApprovals()}
-        ${pending.length ? `<div class="approval-list">${cards}</div>` : '<section class="panel"><div class="empty">No templates are waiting for approval.</div></section>'}`;
+        ${pending.length ? `<div class="approval-list">${cards}</div>` : '<section class="panel"><div class="empty">No lists are waiting for approval.</div></section>'}`;
 }
 
 /** Every step of a template's life, oldest first, from its versions (shown to makers on Create a List). */
@@ -2132,9 +2134,10 @@ function ensureXp() {
 }
 
 function exportHtml() {
+    if (state.xpDialog) return dialogHtml();
     const xp = ensureXp();
     return `
-        ${head("Delivery", "Export", "Export the latest data of a template, or any of its earlier versions.")}
+        ${head("Delivery", "Export", "Export the latest data of a list, or any of its earlier versions.")}
         ${state.exportMessage ? `<div class="banner">${state.exportMessage}</div>` : ""}
         <nav class="xp-tabs" role="tablist">
             <button type="button" role="tab" class="xp-tab ${xp.tab === "latest" ? "active" : ""}" aria-selected="${xp.tab === "latest"}" data-xp-tab="latest">Export Latest</button>
@@ -2179,7 +2182,7 @@ function latestHtml() {
     const view = state.xp.latest;
     return `<section class="table-card xp-card">
             <div class="xp-toolbar">
-                <input class="search" id="xp-latest-search" placeholder="Search templates" value="${esc(view.q)}" autocomplete="off" aria-label="Search templates">
+                <input class="search" id="xp-latest-search" placeholder="Search lists" value="${esc(view.q)}" autocomplete="off" aria-label="Search lists">
             </div>
             <div id="xp-latest-table">${latestTableHtml()}</div>
         </section>`;
@@ -2187,21 +2190,21 @@ function latestHtml() {
 
 function latestTableHtml() {
     const page = state.xp.latest.page;
-    if (!page) return '<div class="empty">Loading templates…</div>';
+    if (!page) return '<div class="empty">Loading lists…</div>';
     if (page.error) return `<div class="banner banner-error">${esc(page.error)}</div>`;
-    if (!page.templates.length) return `<div class="empty">${state.xp.latest.q ? "No template matches." : "No approved template yet. Create one under Create a List."}</div>`;
+    if (!page.templates.length) return `<div class="empty">${state.xp.latest.q ? "No list matches." : "No approved list yet. Create one under List."}</div>`;
     const rows = page.templates.map(item => `<tr>
-            <td><strong>${esc(item.name)}</strong><div class="muted small-note">Template version ${item.templateVersion}</div></td>
+            <td><strong>${esc(item.name)}</strong><div class="muted small-note">List version ${item.templateVersion}</div></td>
             <td>${item.latestLabel ? `${versionChip(item.latestLabel)} <span class="muted">${when(item.latestAt)}</span>` : '<span class="muted">Not exported yet</span>'}</td>
             <td>${num(item.subscribers)}</td>
             <td class="muted">${item.lastExport ? when(item.lastExport) : "—"}</td>
             <td class="actions"><button type="button" class="btn-primary btn-small" data-xp-export="${item.familyId}">Export</button></td>
         </tr>`).join("");
     return `<table>
-            <thead><tr><th>Template</th><th>Latest version</th><th>Subscribers</th><th>Last exported</th><th></th></tr></thead>
+            <thead><tr><th>List</th><th>Latest version</th><th>Subscribers</th><th>Last exported</th><th></th></tr></thead>
             <tbody>${rows}</tbody>
         </table>
-        ${pagerHtml(page, TEMPLATE_PAGE, "latest", "templates")}`;
+        ${pagerHtml(page, TEMPLATE_PAGE, "latest", "lists")}`;
 }
 
 function pagerHtml(page, size, key, noun) {
@@ -2228,19 +2231,30 @@ async function loadPrevTemplates() {
     }
     const host = document.getElementById("xp-prev-list");
     if (host) host.innerHTML = prevListHtml();
-    else renderXp();
-    if (!view.selected && view.page.templates.length) selectPrevTemplate(view.page.templates[0]);
+    else if (!view.selected) renderXp();
 }
 
 function previousHtml() {
     const view = state.xp.prev;
-    return `<div class="xp-split">
-            <aside class="xp-side">
-                <input class="search" id="xp-prev-search" placeholder="Search templates" value="${esc(view.q)}" autocomplete="off" aria-label="Search templates">
-                <div id="xp-prev-list">${prevListHtml()}</div>
-            </aside>
-            <section class="table-card xp-card" id="xp-prev-detail">${prevDetailHtml()}</section>
-        </div>`;
+    if (view.selected) return prevVersionsPageHtml();
+    return `<section class="table-card xp-card">
+            <div class="xp-toolbar">
+                <input class="search" id="xp-prev-search" placeholder="Search lists" value="${esc(view.q)}" autocomplete="off" aria-label="Search lists">
+            </div>
+            <div id="xp-prev-list">${prevListHtml()}</div>
+        </section>`;
+}
+
+function prevVersionsPageHtml() {
+    const item = state.xp.prev.selected;
+    return `<div class="xp-versions-head">
+            <button type="button" class="btn-ghost" data-xp-back-lists>Back to lists</button>
+            <div>
+                <h2>${esc(item.name)}</h2>
+                <span class="muted">Select the version to send or download.</span>
+            </div>
+        </div>
+        <section class="table-card xp-card" id="xp-prev-detail">${prevDetailHtml()}</section>`;
 }
 
 function prevListHtml() {
@@ -2248,23 +2262,28 @@ function prevListHtml() {
     const page = view.page;
     if (!page) return '<div class="queue-empty">Loading…</div>';
     if (page.error) return `<div class="banner banner-error">${esc(page.error)}</div>`;
-    if (!page.templates.length) return `<div class="queue-empty">${view.q ? "No template matches." : "No versions yet. Export a template first."}</div>`;
-    const items = page.templates.map(item => `<button type="button" class="xp-template ${view.selected && view.selected.familyId === item.familyId ? "active" : ""}" data-xp-template="${item.familyId}">
-            <span class="xp-template-name">${esc(item.name)}</span>
-            <span class="muted small-note">${num(item.versionCount)} version${item.versionCount === 1 ? "" : "s"} · latest ${esc(item.latestLabel || "")}</span>
-        </button>`).join("");
-    return items + pagerHtml(page, TEMPLATE_PAGE, "prev", "");
+    if (!page.templates.length) return `<div class="empty">${view.q ? "No list matches." : "No versions yet. Export a list first."}</div>`;
+    const rows = page.templates.map(item => `<tr class="xp-version-row" data-xp-template="${item.familyId}">
+            <td><strong>${esc(item.name)}</strong></td>
+            <td>${num(item.versionCount)} version${item.versionCount === 1 ? "" : "s"}</td>
+            <td>${item.latestLabel ? versionChip(item.latestLabel) : '<span class="muted">—</span>'}</td>
+            <td class="actions"><button type="button" class="btn-primary btn-small" data-xp-template="${item.familyId}">Versions</button></td>
+        </tr>`).join("");
+    return `<table>
+            <thead><tr><th>List</th><th>Versions</th><th>Latest</th><th></th></tr></thead>
+            <tbody>${rows}</tbody>
+        </table>
+        ${pagerHtml(page, TEMPLATE_PAGE, "prev", "lists")}`;
 }
 
 async function selectPrevTemplate(item) {
     const view = state.xp.prev;
     view.selected = item;
+    view.pickedId = null;
     view.lists = null;
     view.listCode = null;
     view.versions = null;
-    const list = document.getElementById("xp-prev-list");
-    if (list) list.innerHTML = prevListHtml();
-    renderPrevDetail();
+    if (!state.xpDialog) renderXp();
     try {
         const series = await api(seriesUrl("", "recent", item.familyId, 0, 50));
         if (view.selected !== item) return;
@@ -2301,59 +2320,73 @@ function renderPrevDetail() {
 function prevDetailHtml() {
     const view = state.xp.prev;
     const item = view.selected;
-    if (!item) return '<div class="empty">Choose a template to see its versions.</div>';
+    if (!item) return '<div class="empty">Choose a list to see its versions.</div>';
     const lists = view.lists && view.lists.length > 1
         ? `<label class="compare">List <select id="xp-prev-list-code">${view.lists.map(entry => `<option value="${esc(entry.listCode)}" ${entry.listCode === view.listCode ? "selected" : ""}>${esc(entry.listName)}</option>`).join("")}</select></label>`
         : (view.lists && view.lists.length ? `<span class="muted">${esc(view.lists[0].listName)} list</span>` : "");
     let table = '<div class="empty">Loading versions…</div>';
     if (view.versions && view.versions.error) table = `<div class="banner banner-error">${esc(view.versions.error)}</div>`;
-    else if (view.versions && !view.versions.items.length) table = '<div class="empty">This template has no versions yet.</div>';
+    else if (view.versions && !view.versions.items.length) table = '<div class="empty">This list has no versions yet.</div>';
     else if (view.versions) {
+        const picked = view.versions.items.find(version => version.id === view.pickedId);
         const rows = view.versions.items.map(version => {
+            const on = version.id === view.pickedId;
             const changes = version.previousLabel
                 ? `<span class="dv-delta"><span class="add">+${num(version.insertedRows)}</span> <span class="del">−${num(version.deletedRows)}</span> <span class="chg">~${num(version.changedRows)}</span> vs ${esc(version.previousLabel)}</span>`
                 : '<span class="muted">First version</span>';
-            return `<tr>
+            return `<tr class="xp-version-row${on ? " selected" : ""}" data-xp-pick="${version.id}">
+                <td><input type="radio" name="xp-version" ${on ? "checked" : ""} tabindex="-1" aria-label="Select version ${esc(version.label)}"></td>
                 <td>${versionChip(version.label)}${version.id === view.versions.latestId ? ' <span class="pill pill-on">Latest</span>' : ""}${version.tableName ? `<div class="muted small-note xp-table-name" title="Database table holding this version">${esc(version.tableName)}</div>` : ""}</td>
                 <td>${when(version.createdAt)}</td>
                 <td>${num(version.rowCount)}</td>
                 <td>${changes}</td>
-                <td class="actions">
-                    ${formatChoices().map(f => `<a class="btn-ghost btn-small" href="/api/data-versions/${version.id}/file?format=${encodeURIComponent(f)}" download>${esc(f)}</a>`).join("")}
-                    <button type="button" class="btn-primary btn-small" data-xp-send="${version.id}">Send</button>
-                </td>
             </tr>`;
         }).join("");
         const more = view.versions.items.length < view.versions.total
             ? `<button type="button" class="btn-ghost btn-small" data-xp-older>Show older versions (${num(view.versions.total - view.versions.items.length)} more)</button>` : "";
+        const bar = picked
+            ? `<div class="xp-version-bar">
+                <span>Version ${versionChip(picked.label)} selected${picked.tableName ? ` · <code>${esc(picked.tableName)}</code>` : ""}</span>
+                ${formatChoices().map(f => `<a class="btn-ghost btn-small" href="/api/data-versions/${picked.id}/file?format=${encodeURIComponent(f)}" download>${esc(f)}</a>`).join("")}
+                <button type="button" class="btn-primary" data-xp-send="${picked.id}">Send this version</button>
+               </div>`
+            : `<div class="xp-version-bar"><span class="muted">Select a version.</span></div>`;
         table = `<table>
-                <thead><tr><th>Version</th><th>Created</th><th>Rows</th><th>Changes</th><th></th></tr></thead>
+                <thead><tr><th></th><th>Version</th><th>Created</th><th>Rows</th><th>Changes</th></tr></thead>
                 <tbody>${rows}</tbody>
             </table>
-            <div class="pager xp-pager"><span class="muted">${num(view.versions.items.length)} of ${num(view.versions.total)} versions</span>${more}</div>`;
+            <div class="pager xp-pager"><span class="muted">${num(view.versions.items.length)} of ${num(view.versions.total)} versions</span>${more}</div>
+            ${bar}`;
     }
     return `<div class="xp-detail-head">
-            <div><h2>${esc(item.name)}</h2><span class="muted">Template version ${item.templateVersion} · ${num(item.subscribers)} subscriber${item.subscribers === 1 ? "" : "s"}</span></div>
+            <div><h2>${esc(item.name)}</h2><span class="muted">List version ${item.templateVersion} · ${num(item.subscribers)} subscriber${item.subscribers === 1 ? "" : "s"}</span></div>
             ${lists}
         </div>
         ${table}`;
 }
 
-/* --- The dialog: export latest, then send or download; or send a previous version --- */
+/* --- Export latest, or send a previous version: a normal page, not a popup --- */
 
 function dialogHtml() {
     const d = state.xpDialog;
     if (!d) return "";
+    const previous = d.kind === "previous";
+    const backLabel = previous ? "Back to versions" : "Back to lists";
+    let lede = "Send this version to subscribers, or download it.";
+    if (d.step === "checking") lede = previous ? "Opening this stored version." : "Reading the current data and preparing a version.";
+    if (d.step === "error") lede = "This export could not be prepared.";
     let body = "";
     if (d.step === "checking") {
-        body = `<div class="xp-checking"><span class="spinner" aria-hidden="true"></span> Checking ${esc(d.name)} for data changes…</div>`;
+        body = previous
+            ? `<div class="xp-checking"><span class="spinner" aria-hidden="true"></span> Opening this version…</div>`
+            : `<div class="xp-checking"><span class="spinner" aria-hidden="true"></span> Checking ${esc(d.name || "this list")} for data changes…</div>`;
     } else if (d.step === "error") {
         body = `<div class="banner banner-error">${esc(d.error)}</div>`;
     } else {
         const s = d.snapshot;
         const outcome = d.kind === "latest"
             ? (d.created && !s.previousLabel
-                ? `<div class="review-callout good"><strong>First export of this template.</strong> Version ${esc(s.label)} was created.</div>`
+                ? `<div class="review-callout good"><strong>First export of this list.</strong> Version ${esc(s.label)} was created.</div>`
                 : d.created
                 ? `<div class="review-callout good"><strong>The data changed.</strong> New version ${esc(s.label)} was created (+${num(s.insertedRows)} added, −${num(s.deletedRows)} removed, ~${num(s.changedRows)} changed since ${esc(s.previousLabel)}).</div>`
                 : `<div class="review-callout"><strong>No change in the data.</strong> The existing version ${esc(s.label)} is exported again.</div>`)
@@ -2369,12 +2402,8 @@ function dialogHtml() {
             </div>
             ${sendSectionHtml()}`;
     }
-    return `<div class="modal-back" data-xp-close>
-            <div class="modal xp-dialog" role="dialog" aria-label="${esc(d.title)}">
-                <div class="xp-dialog-head"><h2>${esc(d.title)}</h2><button type="button" class="pop-x" data-xp-close aria-label="Close">×</button></div>
-                ${body}
-            </div>
-        </div>`;
+    return `${head(previous ? "Previous versions" : "Export latest", esc(d.title), lede, `<button type="button" class="btn-ghost xp-back" data-xp-close>${backLabel}</button>`)}
+        <section class="panel xp-page">${body}</section>`;
 }
 
 function sendSectionHtml() {
@@ -2390,41 +2419,52 @@ function sendSectionHtml() {
     const page = matching.slice(send.page * SEND_PAGE, (send.page + 1) * SEND_PAGE);
     const pages = Math.max(1, Math.ceil(matching.length / SEND_PAGE));
     const list = page.map(row => {
-        const picked = sendFormatOf(row);
+        const picked = sendFormatsOf(row);
         const on = send.chosen.has(row.subscriberId);
-        const options = [...new Set([...formats, row.formatType])].map(format =>
-            `<option value="${esc(format)}" ${format === picked ? "selected" : ""}>${esc(format)}${format === row.formatType ? " (own)" : ""}</option>`).join("");
+        const boxes = formats.map(format => {
+            const ticked = picked.includes(format);
+            return `<label class="xp-fmt fmt-${esc(format)}${ticked ? " on" : ""}">
+                <input type="checkbox" data-xp-row-format="${row.subscriberId}" value="${esc(format)}" ${ticked ? "checked" : ""} aria-label="${esc(format)} for ${esc(row.name)}">
+                ${esc(format)}
+            </label>`;
+        }).join("");
+        const own = picked.length === 1 && picked[0] === row.formatType;
         return `<div class="xp-sub ${on ? "selected" : ""}">
             <input type="checkbox" id="xp-sub-${row.subscriberId}" data-xp-sub="${row.subscriberId}" ${on ? "checked" : ""}>
             <label class="xp-sub-name" for="xp-sub-${row.subscriberId}">${esc(row.name)}</label>
-            <span class="muted">${esc(row.scope)} · ${esc(row.exportMode)} · ${row.onTemplate ? '<span class="tag tag-new">This template</span>' : "Other template"}</span>
+            <span class="muted">${esc(row.scope)} · ${esc(row.exportMode)} · ${row.onTemplate ? '<span class="tag tag-new">This list</span>' : "Other list"}</span>
             <span class="xp-sub-format">
-                <select data-xp-row-format="${row.subscriberId}" aria-label="File format for ${esc(row.name)}" class="${picked !== row.formatType ? "changed" : ""}">${options}</select>
-                ${picked !== row.formatType ? `<span class="was">usually ${esc(row.formatType)}</span>` : ""}
+                ${boxes}
+                ${own ? "" : `<span class="was">usually <span class="fmt-${esc(row.formatType)}">${esc(row.formatType)}</span></span>`}
             </span>
         </div>`;
     }).join("");
     const allChosen = rows.length && send.chosen.size === rows.length;
     const chosenRows = rows.filter(row => send.chosen.has(row.subscriberId));
     const byFormat = {};
-    chosenRows.forEach(row => { const f = sendFormatOf(row); byFormat[f] = (byFormat[f] || 0) + 1; });
+    let fileCount = 0;
+    chosenRows.forEach(row => sendFormatsOf(row).forEach(format => { byFormat[format] = (byFormat[format] || 0) + 1; fileCount++; }));
     const summary = Object.keys(byFormat).sort().map(f => `${num(byFormat[f])} ${esc(f)}`).join(" · ");
-    const changed = chosenRows.filter(row => sendFormatOf(row) !== row.formatType).length;
+    const changed = chosenRows.filter(row => {
+        const picked = sendFormatsOf(row);
+        return picked.length !== 1 || picked[0] !== row.formatType;
+    }).length;
     return `<div class="xp-send">
             <div class="xp-send-head">
                 <strong>Send to subscribers</strong>
                 <span class="muted">${num(send.chosen.size)} of ${num(rows.length)} selected</span>
             </div>
+            <p class="xp-format-note">Each subscriber starts with the format from Subscribers. Tick more formats to send those as well, for this send only.</p>
             <div class="xp-quick">
                 <button type="button" class="btn-ghost btn-small ${allChosen ? "on" : ""}" data-xp-sub-all="all">Select all (${num(rows.length)})</button>
-                <button type="button" class="btn-ghost btn-small" data-xp-sub-all="template" ${onTemplate.length ? "" : "disabled"}>Only this template's (${num(onTemplate.length)})</button>
+                <button type="button" class="btn-ghost btn-small" data-xp-sub-all="template" ${onTemplate.length ? "" : "disabled"}>Only this list's (${num(onTemplate.length)})</button>
                 <button type="button" class="btn-ghost btn-small" data-xp-sub-all="none" ${send.chosen.size ? "" : "disabled"}>Clear</button>
             </div>
             <div class="xp-send-options">
                 <label class="xp-format">Set the format of the ${num(send.chosen.size)} selected
                     <select id="xp-format" aria-label="Set the format of the selected subscribers" ${send.chosen.size ? "" : "disabled"}>
                         <option value="" selected>Choose…</option>
-                        <option value="__own">Each one's own format</option>
+                        <option value="__own">Each subscriber's format</option>
                         ${formats.map(format => `<option value="${esc(format)}">${esc(format)} for all selected</option>`).join("")}
                     </select>
                 </label>
@@ -2436,25 +2476,27 @@ function sendSectionHtml() {
             ${pages > 1 ? `<div class="pager"><span class="muted">Page ${send.page + 1} of ${pages} · ${num(matching.length)} subscribers</span>
                 <button type="button" class="btn-ghost btn-small" data-xp-sub-page="-1" ${send.page === 0 ? "disabled" : ""}>‹</button>
                 <button type="button" class="btn-ghost btn-small" data-xp-sub-page="1" ${send.page + 1 >= pages ? "disabled" : ""}>›</button></div>` : ""}
-            ${chosenRows.length ? `<div class="muted xp-send-summary">Files: ${summary}${changed ? ` · ${num(changed)} in a format other than their own` : ""}</div>` : ""}
+            ${chosenRows.length ? `<div class="muted xp-send-summary">Files: ${summary}${fileCount !== send.chosen.size ? ` · ${num(fileCount)} files` : ""}${changed ? ` · ${num(changed)} different from the subscriber's format` : ""}</div>` : ""}
             <div class="modal-actions">
-                <button type="button" class="btn-ghost" data-xp-close>Cancel</button>
-                <button type="button" class="btn-primary" data-xp-confirm ${send.chosen.size ? "" : "disabled"}>Send ${esc(d.snapshot.label)} to ${num(send.chosen.size)} subscriber${send.chosen.size === 1 ? "" : "s"}</button>
+                <button type="button" class="btn-ghost" data-xp-close>${d.kind === "previous" ? "Back to versions" : "Back to lists"}</button>
+                <button type="button" class="btn-primary" data-xp-confirm ${send.chosen.size ? "" : "disabled"}>Send ${esc(d.snapshot.label)} to ${num(send.chosen.size)} subscriber${send.chosen.size === 1 ? "" : "s"}${fileCount !== send.chosen.size ? ` (${num(fileCount)} files)` : ""}</button>
             </div>
         </div>`;
 }
 
-/** The format a subscriber's file will be sent in: the one picked in the dialog, or its own. */
-function sendFormatOf(row) {
-    return state.xpDialog.send.formats[row.subscriberId] || row.formatType;
+/** The formats a subscriber will be sent: the ones ticked on this page, or their format from Subscribers. */
+function sendFormatsOf(row) {
+    const picked = state.xpDialog.send.formats[row.subscriberId];
+    if (Array.isArray(picked) && picked.length) return picked;
+    return [row.formatType];
 }
 
 function renderDialog() {
-    const root = document.getElementById("modal-root");
-    // Keep the cursor where it was when the dialog redraws (search boxes).
-    const focused = document.activeElement && root.contains(document.activeElement) ? document.activeElement.id : null;
+    const main = document.getElementById("main");
+    // Keep the cursor where it was when the page redraws (search boxes).
+    const focused = document.activeElement && main.contains(document.activeElement) ? document.activeElement.id : null;
     const caret = focused && document.activeElement.selectionStart;
-    root.innerHTML = dialogHtml();
+    main.innerHTML = dialogHtml();
     const again = focused && document.getElementById(focused);
     if (again) {
         again.focus();
@@ -2464,7 +2506,12 @@ function renderDialog() {
 
 function closeDialog() {
     state.xpDialog = null;
-    document.getElementById("modal-root").innerHTML = "";
+    const root = document.getElementById("modal-root");
+    if (root) root.innerHTML = "";
+    if (state.page === "export") {
+        render();
+        startExportPage();
+    }
 }
 
 async function openExportLatest(familyId) {
@@ -2541,7 +2588,7 @@ async function confirmSend(button) {
     try {
         const chosen = [...send.chosen];
         const formats = {};
-        send.rows.filter(row => send.chosen.has(row.subscriberId)).forEach(row => { formats[row.subscriberId] = sendFormatOf(row); });
+        send.rows.filter(row => send.chosen.has(row.subscriberId)).forEach(row => { formats[row.subscriberId] = sendFormatsOf(row).join(","); });
         const preview = await api("/api/exports/resend/preview", {
             method: "POST", body: { snapshotId: d.snapshot.id, subscriberIds: chosen, formats }
         });
@@ -2554,19 +2601,19 @@ async function confirmSend(button) {
         state.exportMessage = `Job #${job.id} is sending ${esc(d.snapshot.templateName)} version ${esc(d.snapshot.label)} to ${num(chosen.length)} subscriber${chosen.length === 1 ? "" : "s"} (${num(records)} records${held ? `, ${num(held)} held for review` : ""}). <a href="#/history">View history</a>`;
         toast("Job #" + job.id + " started", "success");
         closeDialog();
-        render();
     } catch (error) {
         toast(error.message, "error");
         button.disabled = false;
     }
 }
 
-/** From History: open the version's template under Previous Versions and the send dialog for one subscriber. */
+/** From History: open the version's template under Previous Versions and the send page for one subscriber. */
 async function openResend(snapshotId, subscriberId) {
     const xp = ensureXp();
     xp.tab = "previous";
     state.exportMessage = null;
     xp.pendingSend = { snapshotId: Number(snapshotId), subscriberId: subscriberId ? Number(subscriberId) : null };
+    state.xpDialog = { kind: "previous", step: "checking", name: "this version", title: "Send version" };
     if (location.hash === "#/export") navigate();
     else location.hash = "#/export";
 }
@@ -2602,7 +2649,13 @@ async function startExportPage() {
 let xpTimer;
 function onSendClick(event) {
     const target = event.target;
-    if ((target.matches && target.matches(".modal-back[data-xp-close]")) || target.closest("button[data-xp-close]")) {
+    const exportNav = target.closest && target.closest('.nav a[data-page="export"]');
+    if (exportNav && state.xpDialog && state.page === "export") {
+        event.preventDefault();
+        closeDialog();
+        return true;
+    }
+    if (target.closest && target.closest("button[data-xp-close]")) {
         closeDialog();
         return true;
     }
@@ -2626,6 +2679,21 @@ function onSendClick(event) {
         view.offset = Math.max(0, view.offset + Number(step) * TEMPLATE_PAGE);
         if (key === "latest") loadLatest();
         else loadPrevTemplates();
+        return true;
+    }
+    if (target.closest("[data-xp-back-lists]")) {
+        const view = ensureXp().prev;
+        view.selected = null;
+        view.pickedId = null;
+        view.versions = null;
+        renderXp();
+        if (!view.page) loadPrevTemplates();
+        return true;
+    }
+    const pick = target.closest("[data-xp-pick]");
+    if (pick && !target.closest("a, button")) {
+        state.xp.prev.pickedId = Number(pick.dataset.xpPick);
+        renderPrevDetail();
         return true;
     }
     const template = target.closest("[data-xp-template]");
@@ -2690,6 +2758,7 @@ function onSendInput(event) {
     }
     if (target.id === "xp-prev-list-code") {
         state.xp.prev.listCode = target.value;
+        state.xp.prev.pickedId = null;
         state.xp.prev.versions = null;
         renderPrevDetail();
         loadPrevVersions(false);
@@ -2700,7 +2769,7 @@ function onSendInput(event) {
         if (!target.value) return true;
         send.rows.filter(row => send.chosen.has(row.subscriberId)).forEach(row => {
             if (target.value === "__own" || target.value === row.formatType) delete send.formats[row.subscriberId];
-            else send.formats[row.subscriberId] = target.value;
+            else send.formats[row.subscriberId] = [target.value];
         });
         renderDialog();
         return true;
@@ -2709,9 +2778,18 @@ function onSendInput(event) {
         const send = state.xpDialog.send;
         const id = Number(target.dataset.xpRowFormat);
         const row = send.rows.find(item => item.subscriberId === id);
-        if (target.value === row.formatType) delete send.formats[id];
-        else send.formats[id] = target.value;
-        send.chosen.add(id); // choosing a format for a subscriber means sending to it
+        const current = new Set(sendFormatsOf(row));
+        if (target.checked) current.add(target.value);
+        else current.delete(target.value);
+        if (!current.size) {
+            delete send.formats[id];
+            send.chosen.delete(id);
+        } else {
+            const ownOnly = current.size === 1 && current.has(row.formatType);
+            if (ownOnly) delete send.formats[id];
+            else send.formats[id] = [...current];
+            send.chosen.add(id);
+        }
         renderDialog();
         return true;
     }

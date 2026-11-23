@@ -178,7 +178,7 @@ public class DataExplorerService {
         List<FormatFilter> filters = rowFilters.validate(request.filters(), fields);
         Integer index = request.column();
         if (index == null || index < 0 || index >= fields.size()) {
-            throw new ResponseStatusException(BAD_REQUEST, "Choose a column of the template");
+            throw new ResponseStatusException(BAD_REQUEST, "Choose a column of the list");
         }
         FormatField field = fields.get(index);
         List<SourceCatalogService.SourceTable> tables = catalog.tables();

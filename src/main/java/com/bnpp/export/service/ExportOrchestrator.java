@@ -219,7 +219,7 @@ public class ExportOrchestrator {
      * every active subscriber on the version's template.
      *
      * @param formatType one format for every file of this send, or null for each subscriber's own format
-     * @param perSubscriber a format per subscriber id, overriding {@code formatType} for that subscriber
+     * @param perSubscriber formats per subscriber id (one, or several separated by a comma), overriding {@code formatType}
      */
     public ResendPreview previewResend(Long snapshotId, List<Long> subscriberIds) {
         return previewResend(snapshotId, subscriberIds, null, null);
@@ -232,12 +232,12 @@ public class ExportOrchestrator {
     public ResendPreview previewResend(Long snapshotId, List<Long> subscriberIds, String formatType, Map<Long, String> perSubscriber) {
         DataSnapshot snapshot = snapshotService.get(snapshotId);
         String format = sendFormat(formatType);
-        Map<Long, String> chosenFormats = new java.util.HashMap<>();
+        Map<Long, List<String>> chosenFormats = new java.util.HashMap<>();
         if (perSubscriber != null) {
             perSubscriber.forEach((id, value) -> {
-                String one = sendFormat(value);
-                if (id != null && one != null) {
-                    chosenFormats.put(id, one);
+                List<String> many = sendFormats(value);
+                if (id != null && !many.isEmpty()) {
+                    chosenFormats.put(id, many);
                 }
             });
         }
@@ -248,7 +248,7 @@ public class ExportOrchestrator {
                     .map(SubscriberProfile::getId)
                     .toList();
             if (subscriberIds.isEmpty()) {
-                throw new ResponseStatusException(BAD_REQUEST, "No active subscriber uses this template");
+                throw new ResponseStatusException(BAD_REQUEST, "No active subscriber uses this list");
             }
         }
         List<FormatField> fields = formatTemplateService.fields(snapshot.getTemplateId());
@@ -268,9 +268,10 @@ public class ExportOrchestrator {
                     });
             String outcome = counts[1] > 0 ? "Held until omissions are accepted"
                     : counts[0] == 0 ? "Nothing to send for this subscriber" : "Ready to send";
-            String rowFormat = chosenFormats.getOrDefault(subscriber.getId(), format != null ? format : subscriber.getFormatType());
-            rows.add(new ResendRow(subscriber.getId(), subscriber.getName(), rowFormat, subscriber.getScope(),
-                    subscriber.getExportMode(), counts[0], counts[1], outcome));
+            for (String rowFormat : formatsFor(subscriber, format, chosenFormats)) {
+                rows.add(new ResendRow(subscriber.getId(), subscriber.getName(), rowFormat, subscriber.getScope(),
+                        subscriber.getExportMode(), counts[0], counts[1], outcome));
+            }
         }
         StringBuilder raw = new StringBuilder("resend|" + snapshot.getId() + "|" + snapshot.getFingerprint() + "|" + format);
         rows.forEach(row -> raw.append('|').append(row.subscriberId()).append(':').append(row.formatType()).append(':')
@@ -294,6 +295,33 @@ public class ExportOrchestrator {
             throw new ResponseStatusException(BAD_REQUEST, "Format must be one of " + String.join(", ", formats.keySet()));
         }
         return format;
+    }
+
+    /** One or more formats written as {@code CSV} or {@code CSV,XML}. Blank means none were chosen. */
+    private List<String> sendFormats(String value) {
+        if (StringUtils.isBlank(value)) {
+            return List.of();
+        }
+        java.util.LinkedHashSet<String> chosen = new java.util.LinkedHashSet<>();
+        for (String part : value.split(",")) {
+            String format = sendFormat(part);
+            if (format != null) {
+                chosen.add(format);
+            }
+        }
+        return List.copyOf(chosen);
+    }
+
+    /** The files one subscriber receives: the formats chosen for them, else the send's format, else their own. */
+    private List<String> formatsFor(SubscriberProfile subscriber, String format, Map<Long, List<String>> chosen) {
+        List<String> listed = chosen.get(subscriber.getId());
+        if (listed != null && !listed.isEmpty()) {
+            return listed;
+        }
+        if (format != null) {
+            return List.of(format);
+        }
+        return List.of(subscriber.getFormatType());
     }
 
     /** Sends a stored data version again to the chosen subscribers, after a matching review. */
@@ -321,7 +349,7 @@ public class ExportOrchestrator {
         job.setSnapshotId(snapshot.getId());
         job.setSnapshotLabel(snapshot.getLabel());
         job.setSnapshotTemplate(snapshot.getTemplateName());
-        // Each chosen subscriber with the format of its file: "id:FORMAT".
+        // One entry per file: "id:FORMAT". The same subscriber is listed again for each extra format.
         job.setSubscriberIds(String.join(",", preview.subscribers().stream().map(row -> row.subscriberId() + ":" + row.formatType()).toList()));
         job.setTriggeredBy(CurrentUser.displayName());
         job.setStatus("PENDING");
@@ -334,14 +362,31 @@ public class ExportOrchestrator {
         return job;
     }
 
-    /** The subscribers a job sends to: those chosen for a resend, otherwise every active subscriber. */
-    private List<SubscriberProfile> subscribersFor(ExportJob job) {
+    /** One file of a job: a subscriber and the format that file is written in. */
+    private record Delivery(SubscriberProfile subscriber, String format) {
+    }
+
+    /**
+     * The files a job builds. A resend lists {@code id:FORMAT} once per file, so one subscriber can
+     * appear more than once. An ordinary export lists subscriber ids, each in their own format.
+     */
+    private List<Delivery> deliveriesFor(ExportJob job) {
         if (StringUtils.isBlank(job.getSubscriberIds())) {
-            return subscriberRepository.findByActiveTrueOrderByIdAsc();
+            return subscriberRepository.findByActiveTrueOrderByIdAsc().stream()
+                    .map(subscriber -> new Delivery(subscriber, formatFor(job, subscriber)))
+                    .toList();
         }
-        List<SubscriberProfile> chosen = new ArrayList<>();
+        List<Delivery> chosen = new ArrayList<>();
         for (String entry : job.getSubscriberIds().split(",")) {
-            subscriberRepository.findById(Long.valueOf(entry.split(":")[0].trim())).ifPresent(chosen::add);
+            String trimmed = entry.trim();
+            if (trimmed.isEmpty()) {
+                continue;
+            }
+            String[] parts = trimmed.split(":", 2);
+            subscriberRepository.findById(Long.valueOf(parts[0].trim())).ifPresent(subscriber -> {
+                String format = parts.length == 2 && !parts[1].isBlank() ? parts[1].trim() : formatFor(job, subscriber);
+                chosen.add(new Delivery(subscriber, format));
+            });
         }
         return chosen;
     }
@@ -376,21 +421,21 @@ public class ExportOrchestrator {
         try {
             ExportJob job = exportJobRepository.findById(jobId)
                     .orElseThrow(() -> new IllegalStateException("Export job " + jobId + " was not found"));
-            List<SubscriberProfile> subscribers = subscribersFor(job);
+            List<Delivery> deliveries = deliveriesFor(job);
             job.setStatus("IN_PROGRESS");
             job.setStartedAt(LocalDateTime.now());
-            job.setTotalSubscribers(subscribers.size());
+            job.setTotalSubscribers(deliveries.size());
             exportJobRepository.save(job);
             audit(jobId, null, "EXPORT_STARTED", "RESEND".equals(job.getMode())
                     ? "Resending " + job.getSnapshotTemplate() + " data version " + job.getSnapshotLabel()
                     : "Processing " + job.getListName() + " version " + job.getVersionId());
 
-            if (subscribers.isEmpty()) {
+            if (deliveries.isEmpty()) {
                 finish(job.getId(), "COMPLETED", "No active subscribers");
                 return;
             }
-            for (SubscriberProfile subscriber : subscribers) {
-                processSubscriber(job, subscriber, null);
+            for (Delivery delivery : deliveries) {
+                processSubscriber(job, delivery.subscriber(), null, delivery.format());
             }
             settle(job.getId());
         } catch (RuntimeException | Error ex) {
@@ -726,11 +771,20 @@ public class ExportOrchestrator {
     }
 
     private void processSubscriber(ExportJob job, SubscriberProfile subscriber, ExportJobSubscriberStatus existing) {
+        processSubscriber(job, subscriber, existing, null);
+    }
+
+    private void processSubscriber(ExportJob job, SubscriberProfile subscriber, ExportJobSubscriberStatus existing, String formatType) {
+        if (StringUtils.isBlank(formatType)) {
+            formatType = existing != null && StringUtils.isNotBlank(existing.getFormatType())
+                    ? existing.getFormatType()
+                    : formatFor(job, subscriber);
+        }
         ExportJobSubscriberStatus status = existing == null ? new ExportJobSubscriberStatus() : existing;
         status.setExportJobId(job.getId());
         status.setSubscriberId(subscriber.getId());
         status.setSubscriberName(subscriber.getName());
-        status.setFormatType(formatFor(job, subscriber));
+        status.setFormatType(formatType);
         status.setStatus("IN_PROGRESS");
         status.setStartedAt(LocalDateTime.now());
         status.setErrorMessage(null);
@@ -747,7 +801,7 @@ public class ExportOrchestrator {
             status.setFileSizeBytes(0);
         }
         audit(job.getId(), subscriber.getId(), "SUBSCRIBER_STARTED",
-                subscriber.getName() + " " + subscriber.getFormatType() + " " + subscriber.getScope() + " " + subscriber.getExportMode());
+                subscriber.getName() + " " + formatType + " " + subscriber.getScope() + " " + subscriber.getExportMode());
 
         try {
             if (!onList(subscriber, job.getListCode())) {
@@ -762,8 +816,6 @@ public class ExportOrchestrator {
             }
 
             requireVersion(job.getVersionId());
-            // A send of a stored version may choose each subscriber's format; otherwise each subscriber's own.
-            String formatType = formatFor(job, subscriber);
             ExportFormat format = formats.get(formatType.toUpperCase(Locale.ROOT));
             if (format == null) {
                 throw new IllegalArgumentException("Unsupported format " + formatType);
@@ -918,8 +970,8 @@ public class ExportOrchestrator {
 
     private static String noTemplate(SubscriberProfile subscriber) {
         return subscriber.getTemplateFamilyId() == null
-                ? subscriber.getName() + " has no template. Choose one on the Subscribers page."
-                : "The template of " + subscriber.getName() + " has no approved version yet.";
+                ? subscriber.getName() + " has no list. Choose one on the Subscribers page."
+                : "The list of " + subscriber.getName() + " has no approved version yet.";
     }
 
     /**
