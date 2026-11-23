@@ -441,7 +441,7 @@ function templatesHtml() {
         waiting = `<div class="review-callout bad"><strong>Version ${current.latest.versionNumber} was rejected</strong> by ${esc(current.latest.reviewedByName || "an approver")}: “${esc(current.latest.reviewComment || "")}”<br>${current.inUse ? `Version ${current.inUse.versionNumber} stays in use.` : ""} Saving starts a new version for approval.</div>`;
     }
     return `
-        ${head("Formats", "Format Templates", "The file holds exactly the gs_ columns you pick, one row per entry of the list version you export. Each subscriber chooses its template on the Subscribers page.")}
+        ${head("Formats", "Create a List", "The file holds exactly the gs_ columns you pick, one row per entry of the list version you export. Each subscriber chooses its template on the Subscribers page.")}
         <section class="export-card template-card">
             <h2>${current ? "Edit " + esc(current.name) : "New template"}</h2>
             <p class="muted">${current
@@ -1961,7 +1961,7 @@ function approvalsHtml() {
         ${pending.length ? `<div class="approval-list">${cards}</div>` : '<section class="panel"><div class="empty">No templates are waiting for approval.</div></section>'}`;
 }
 
-/** Every step of a template's life, oldest first, from its versions (shown to makers on Format Templates). */
+/** Every step of a template's life, oldest first, from its versions (shown to makers on Create a List). */
 function historyEvents(familyId) {
     const events = [];
     const versions = familyVersions(familyId);
@@ -2207,7 +2207,7 @@ function latestTableHtml() {
     const page = state.xp.latest.page;
     if (!page) return '<div class="empty">Loading templates…</div>';
     if (page.error) return `<div class="banner banner-error">${esc(page.error)}</div>`;
-    if (!page.templates.length) return `<div class="empty">${state.xp.latest.q || state.xp.latest.format ? "No template matches." : "No approved template yet. Create one on Format Templates."}</div>`;
+    if (!page.templates.length) return `<div class="empty">${state.xp.latest.q || state.xp.latest.format ? "No template matches." : "No approved template yet. Create one under Create a List."}</div>`;
     const rows = page.templates.map(item => `<tr>
             <td><strong>${esc(item.name)}</strong><div class="muted small-note">Template version ${item.templateVersion}</div></td>
             <td class="fmt-${esc(item.formatType)}">${esc(item.formatType)}</td>

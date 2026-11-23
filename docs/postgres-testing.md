@@ -12,7 +12,7 @@ The sidebar's **Database** switch shows which one is running.
 The `postgres` profile:
 
 - **Reads** certified versions from `ver_version`, list entries from `ver_version_member`, and every `gs_*` table in the
-  schema (for the Format Templates page and the exports).
+  schema (for the Create a List page and the exports).
 - **Writes** rows into its own `ver_export_*` tables in the same database. You create those tables once by hand with
   `db/postgres/ver-export-schema.sql`; the application never creates, alters or drops a table.
 
@@ -132,7 +132,7 @@ Open http://localhost:8082 and sign in as `maker` / `Regliss-maker`. The sidebar
 | Where | Expected |
 |---|---|
 | Export page | Versions 42, 43 and 44 are offered. 77 is not (it is hidden). |
-| Format Templates | Only `gs_*` tables, `gs_load_log` locked (no `bnp_id`), no `ref_country`. |
+| Create a List | Only `gs_*` tables, `gs_load_log` locked (no `bnp_id`), no `ref_country`. |
 | Data explorer | Pick columns from several tables, press **Preview data and filter rows**, filter with the funnel on a column header. |
 | Export version 42 | The job ends **Held**: SHINE is held because record 42000041 has no country. Accept the omissions on the job to release its file. |
 | Approver review | Save a template, sign in as `approver` / `Regliss-approver`, review it on **Approvals**, request changes or approve. |
