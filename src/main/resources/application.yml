@@ -49,6 +49,9 @@ export:
     mock: true
   # Seed demo subscribers and show the demo sign-in accounts when the database has none.
   demo-data: true
+  # Seed two starter lists (Party Basic, Party Detail). Off: the application starts with no lists; create them
+  # on the Create a List page. The automated tests turn it on.
+  demo-lists: false
   # At start-up, mark exports that were running when the application stopped as FAILED (retryable).
   # Turn off if several application instances share one database.
   recover-interrupted: true

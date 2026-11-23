@@ -8,12 +8,13 @@ import org.springframework.core.annotation.Order;
 import org.springframework.stereotype.Component;
 
 /**
- * Demo databases only: approved starter templates built from GS_PARTY. Runs after the demo
- * gs_ tables are created. Real databases start with no templates.
+ * Two approved starter lists (Party Basic, Party Detail) built from GS_PARTY, for the automated tests.
+ * Off unless both export.demo-data and export.demo-lists are true: the application starts with no lists,
+ * and users create their own on the Create a List page.
  */
 @Component
 @Order(100)
-@ConditionalOnProperty(name = "export.demo-data", havingValue = "true")
+@ConditionalOnProperty(name = {"export.demo-data", "export.demo-lists"}, havingValue = "true")
 public class FormatTemplateSeeder implements ApplicationListener<ApplicationReadyEvent> {
 
     private final FormatTemplateService formatTemplateService;
