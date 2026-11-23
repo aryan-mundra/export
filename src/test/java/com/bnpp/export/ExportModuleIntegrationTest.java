@@ -1,16 +1,12 @@
 package com.bnpp.export;
 
-import com.bnpp.export.model.ExportJob;
+import com.bnpp.export.entity.ExportJob;
 import com.bnpp.export.repository.DeliveryRepository;
 import com.bnpp.export.repository.ExportJobRepository;
 import com.bnpp.export.repository.QuarantineRepository;
 import com.bnpp.export.repository.SubscriberRepository;
-import com.bnpp.export.service.ExportOrchestrator;
+import com.bnpp.export.service.ExportService;
 import org.junit.jupiter.api.Test;
-
-import java.time.LocalDate;
-
-import static org.hamcrest.Matchers.greaterThan;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -18,8 +14,10 @@ import org.springframework.mock.web.MockHttpSession;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 
+import java.time.LocalDate;
+
+import static org.hamcrest.Matchers.greaterThan;
 import static org.hamcrest.Matchers.hasSize;
-import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.forwardedUrl;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.user;
@@ -27,6 +25,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.forwardedUrl;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -38,7 +37,7 @@ class ExportModuleIntegrationTest {
     private MockMvc mockMvc;
 
     @Autowired
-    private ExportOrchestrator orchestrator;
+    private ExportService orchestrator;
 
     @Autowired
     private ExportJobRepository exportJobRepository;
@@ -475,7 +474,7 @@ class ExportModuleIntegrationTest {
         job.setStatus("IN_PROGRESS");
         job.setTotalSubscribers(1);
         job = exportJobRepository.save(job);
-        com.bnpp.export.model.ExportJobSubscriberStatus running = new com.bnpp.export.model.ExportJobSubscriberStatus();
+        com.bnpp.export.entity.ExportJobSubscriberStatus running = new com.bnpp.export.entity.ExportJobSubscriberStatus();
         running.setExportJobId(job.getId());
         running.setSubscriberId(subscriberRepository.findByNameIgnoreCase("SUN").orElseThrow().getId());
         running.setSubscriberName("SUN");

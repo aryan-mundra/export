@@ -1,6 +1,6 @@
 package com.bnpp.export.repository;
 
-import com.bnpp.export.model.DataSnapshot;
+import com.bnpp.export.entity.DataSnapshot;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 

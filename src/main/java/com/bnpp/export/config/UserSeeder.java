@@ -1,6 +1,6 @@
 package com.bnpp.export.config;
 
-import com.bnpp.export.model.AppUser;
+import com.bnpp.export.entity.AppUser;
 import com.bnpp.export.repository.AppUserRepository;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.ApplicationListener;

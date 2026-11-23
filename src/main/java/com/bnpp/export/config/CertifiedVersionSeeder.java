@@ -1,6 +1,6 @@
 package com.bnpp.export.config;
 
-import com.bnpp.export.model.CertifiedVersion;
+import com.bnpp.export.entity.CertifiedVersion;
 import com.bnpp.export.repository.CertifiedVersionRepository;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.event.ApplicationReadyEvent;

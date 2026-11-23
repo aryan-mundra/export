@@ -1,14 +1,14 @@
 package com.bnpp.export;
 
 import com.bnpp.export.dto.JobDetailResponse;
-import com.bnpp.export.model.DataSnapshot;
-import com.bnpp.export.model.ExportJob;
-import com.bnpp.export.model.FormatTemplate;
+import com.bnpp.export.entity.DataSnapshot;
+import com.bnpp.export.entity.ExportJob;
+import com.bnpp.export.entity.FormatTemplate;
 import com.bnpp.export.repository.DataSnapshotRepository;
 import com.bnpp.export.repository.ExportJobRepository;
 import com.bnpp.export.repository.ExportJobSubscriberStatusRepository;
 import com.bnpp.export.repository.FormatTemplateRepository;
-import com.bnpp.export.service.ExportOrchestrator;
+import com.bnpp.export.service.ExportService;
 import com.bnpp.export.service.SnapshotService;
 import com.jayway.jsonpath.JsonPath;
 import org.junit.jupiter.api.Test;
@@ -55,7 +55,7 @@ class DataVersionTest {
     private MockMvc mockMvc;
 
     @Autowired
-    private ExportOrchestrator orchestrator;
+    private ExportService orchestrator;
 
     @Autowired
     private ExportJobRepository jobs;

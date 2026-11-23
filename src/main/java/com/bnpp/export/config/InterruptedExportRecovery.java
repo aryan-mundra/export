@@ -1,6 +1,6 @@
 package com.bnpp.export.config;
 
-import com.bnpp.export.service.ExportOrchestrator;
+import com.bnpp.export.service.ExportService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -19,9 +19,9 @@ public class InterruptedExportRecovery implements ApplicationListener<Applicatio
 
     private static final Logger log = LoggerFactory.getLogger(InterruptedExportRecovery.class);
 
-    private final ExportOrchestrator orchestrator;
+    private final ExportService orchestrator;
 
-    public InterruptedExportRecovery(ExportOrchestrator orchestrator) {
+    public InterruptedExportRecovery(ExportService orchestrator) {
         this.orchestrator = orchestrator;
     }
 

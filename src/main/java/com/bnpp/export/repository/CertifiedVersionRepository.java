@@ -1,6 +1,6 @@
 package com.bnpp.export.repository;
 
-import com.bnpp.export.model.CertifiedVersion;
+import com.bnpp.export.entity.CertifiedVersion;
 import org.springframework.data.jpa.repository.JpaRepository;
 
 import java.util.List;

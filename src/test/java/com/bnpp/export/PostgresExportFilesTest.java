@@ -1,11 +1,11 @@
 package com.bnpp.export;
 
 import com.bnpp.export.dto.JobDetailResponse;
-import com.bnpp.export.model.ExportJob;
-import com.bnpp.export.model.SubscriberProfile;
+import com.bnpp.export.entity.ExportJob;
+import com.bnpp.export.entity.SubscriberProfile;
 import com.bnpp.export.repository.ExportJobRepository;
 import com.bnpp.export.repository.SubscriberRepository;
-import com.bnpp.export.service.ExportOrchestrator;
+import com.bnpp.export.service.ExportService;
 import org.apache.commons.csv.CSVFormat;
 import org.apache.commons.csv.CSVParser;
 import org.apache.commons.csv.CSVRecord;
@@ -21,7 +21,6 @@ import org.w3c.dom.Element;
 import org.w3c.dom.Node;
 import org.w3c.dom.NodeList;
 
-import javax.xml.parsers.DocumentBuilderFactory;
 import java.io.ByteArrayInputStream;
 import java.io.StringReader;
 import java.nio.charset.StandardCharsets;
@@ -33,6 +32,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.TreeSet;
+import javax.xml.parsers.DocumentBuilderFactory;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -80,7 +80,7 @@ class PostgresExportFilesTest {
     private MockMvc mockMvc;
 
     @Autowired
-    private ExportOrchestrator orchestrator;
+    private ExportService orchestrator;
 
     @Autowired
     private ExportJobRepository jobRepository;

@@ -1,6 +1,6 @@
 package com.bnpp.export.format;
 
-import com.bnpp.export.model.FormatField;
+import com.bnpp.export.entity.FormatField;
 import com.bnpp.export.service.FormatTemplateService;
 import org.apache.commons.csv.CSVFormat;
 import org.apache.commons.csv.CSVPrinter;

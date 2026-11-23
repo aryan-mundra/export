@@ -1,6 +1,6 @@
 package com.bnpp.export.repository;
 
-import com.bnpp.export.model.QuarantineRecord;
+import com.bnpp.export.entity.QuarantineRecord;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.transaction.annotation.Transactional;
 

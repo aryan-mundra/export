@@ -1,22 +1,20 @@
 package com.bnpp.export;
 
-import com.bnpp.export.model.AppUser;
-import com.bnpp.export.model.CertifiedVersion;
-import com.bnpp.export.model.DataSnapshot;
-import com.bnpp.export.model.DeliveryRecord;
-import com.bnpp.export.model.ExportAuditLog;
-import com.bnpp.export.model.ExportJob;
-import com.bnpp.export.model.ExportJobSubscriberStatus;
-import com.bnpp.export.model.ExportedFile;
-import com.bnpp.export.model.ExportedFileRecord;
-import com.bnpp.export.model.FormatField;
-import com.bnpp.export.model.FormatFilter;
-import com.bnpp.export.model.FormatTemplate;
-import com.bnpp.export.model.QuarantineRecord;
-
-
-import com.bnpp.export.model.SnapshotSeries;
-import com.bnpp.export.model.SubscriberProfile;
+import com.bnpp.export.entity.AppUser;
+import com.bnpp.export.entity.CertifiedVersion;
+import com.bnpp.export.entity.DataSnapshot;
+import com.bnpp.export.entity.DeliveryRecord;
+import com.bnpp.export.entity.ExportAuditLog;
+import com.bnpp.export.entity.ExportJob;
+import com.bnpp.export.entity.ExportJobSubscriberStatus;
+import com.bnpp.export.entity.ExportedFile;
+import com.bnpp.export.entity.ExportedFileRecord;
+import com.bnpp.export.entity.FormatField;
+import com.bnpp.export.entity.FormatFilter;
+import com.bnpp.export.entity.FormatTemplate;
+import com.bnpp.export.entity.QuarantineRecord;
+import com.bnpp.export.entity.SnapshotSeries;
+import com.bnpp.export.entity.SubscriberProfile;
 import jakarta.persistence.Table;
 import org.hibernate.boot.Metadata;
 import org.hibernate.boot.MetadataSources;

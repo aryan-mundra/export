@@ -1,6 +1,6 @@
 package com.bnpp.export.repository;
 
-import com.bnpp.export.model.FormatFilter;
+import com.bnpp.export.entity.FormatFilter;
 import org.springframework.data.jpa.repository.JpaRepository;
 
 import java.util.List;

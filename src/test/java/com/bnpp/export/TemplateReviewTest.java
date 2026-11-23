@@ -1,6 +1,6 @@
 package com.bnpp.export;
 
-import com.bnpp.export.model.ExportAuditLog;
+import com.bnpp.export.entity.ExportAuditLog;
 import com.bnpp.export.repository.ExportAuditLogRepository;
 import com.bnpp.export.repository.FormatTemplateRepository;
 import com.jayway.jsonpath.JsonPath;

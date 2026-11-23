@@ -1,9 +1,9 @@
 package com.bnpp.export;
 
-import com.bnpp.export.model.ExportJob;
+import com.bnpp.export.entity.ExportJob;
 import com.bnpp.export.repository.ExportJobRepository;
 import com.bnpp.export.repository.SubscriberRepository;
-import com.bnpp.export.service.ExportOrchestrator;
+import com.bnpp.export.service.ExportService;
 import com.jayway.jsonpath.JsonPath;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -38,7 +38,7 @@ class ExportCatalogTest {
     private ExportJobRepository jobs;
 
     @Autowired
-    private ExportOrchestrator orchestrator;
+    private ExportService orchestrator;
 
     @Test
     void listsAndSubscribersAreSearchedAndPagedAndAnExportCanTargetSomeSubscribers() throws Exception {

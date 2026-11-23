@@ -1,10 +1,10 @@
 package com.bnpp.export;
 
 import com.bnpp.export.dto.JobDetailResponse;
-import com.bnpp.export.model.ExportJob;
+import com.bnpp.export.entity.ExportJob;
 import com.bnpp.export.repository.ExportJobRepository;
 import com.bnpp.export.repository.SubscriberRepository;
-import com.bnpp.export.service.ExportOrchestrator;
+import com.bnpp.export.service.ExportService;
 import com.jayway.jsonpath.JsonPath;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -21,8 +21,8 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.user;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -38,7 +38,7 @@ class ResendTest {
     private MockMvc mockMvc;
 
     @Autowired
-    private ExportOrchestrator orchestrator;
+    private ExportService orchestrator;
 
     @Autowired
     private ExportJobRepository jobs;

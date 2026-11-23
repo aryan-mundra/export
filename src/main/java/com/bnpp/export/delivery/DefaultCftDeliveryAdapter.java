@@ -1,7 +1,7 @@
 package com.bnpp.export.delivery;
 
-import com.bnpp.export.model.ExportFile;
-import com.bnpp.export.model.SubscriberProfile;
+import com.bnpp.export.dto.ExportFile;
+import com.bnpp.export.entity.SubscriberProfile;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
@@ -17,12 +17,13 @@ import java.util.UUID;
 
 @Component
 @ConditionalOnProperty(name = "export.delivery.mock", havingValue = "false")
-public class DefaultCftDeliveryAdapter {
+public class DefaultCftDeliveryAdapter implements CftDeliveryAdapter {
 
     private final HttpClient httpClient = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(10))
             .build();
 
+    @Override
     public String deliver(SubscriberProfile subscriber, ExportFile file) {
         if (subscriber.getCftEndpoint() == null || StringUtils.isBlank(subscriber.getCftEndpoint())) {
             throw new IllegalStateException("CFT endpoint is not configured for " + subscriber.getName());

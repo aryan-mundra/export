@@ -1,6 +1,6 @@
 package com.bnpp.export.repository;
 
-import com.bnpp.export.model.ExportJobSubscriberStatus;
+import com.bnpp.export.entity.ExportJobSubscriberStatus;
 import org.springframework.data.jpa.repository.JpaRepository;
 
 import java.util.Collection;
