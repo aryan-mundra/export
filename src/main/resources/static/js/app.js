@@ -43,6 +43,7 @@ boot();
 
 function pageFromHash() {
     const name = (location.hash || "#/dashboard").replace("#/", "");
+    if (name === "subscribers/new") return "subscriber-new";
     return pages.includes(name) ? name : "dashboard";
 }
 
@@ -52,7 +53,8 @@ async function navigate() {
     state.page = next;
     if (typeof closeEditor === "function") closeEditor();
     document.querySelectorAll(".nav a").forEach(link => {
-        const current = link.dataset.page === state.page;
+        const current = link.dataset.page === state.page
+            || (state.page === "subscriber-new" && link.dataset.page === "subscribers");
         link.classList.toggle("active", current);
         if (current) link.setAttribute("aria-current", "page");
         else link.removeAttribute("aria-current");
@@ -86,6 +88,8 @@ async function refresh() {
         state.dashboard = await api("/api/dashboard");
     } else if (state.page === "subscribers") {
         state.subscribers = await api("/api/subscribers?q=" + encodeURIComponent(state.search.subscribers));
+        state.templates = await api("/api/format-templates");
+    } else if (state.page === "subscriber-new") {
         state.templates = await api("/api/format-templates");
     } else if (state.page === "history") {
         state.jobs = await api("/api/jobs?q=" + encodeURIComponent(state.search.history));
@@ -125,6 +129,7 @@ function render() {
     if (state.page === "export") main.innerHTML = exportHtml();
     if (state.page === "history") main.innerHTML = historyHtml();
     if (state.page === "subscribers") main.innerHTML = subscribersHtml();
+    if (state.page === "subscriber-new") main.innerHTML = subscriberNewHtml();
     if (state.page === "quarantine") main.innerHTML = quarantineHtml();
     if (state.page === "templates") main.innerHTML = templatesHtml();
     if (state.page === "approvals") {
@@ -323,25 +328,44 @@ function subscribersHtml() {
             <button class="btn-delete" type="button" data-delete="${subscriber.id}">Delete</button>
         </td>
     </tr>`).join("");
+    const tools = `<div class="page-tools">
+            <input class="search" data-search="subscribers" placeholder="Search subscribers..." value="${esc(state.search.subscribers)}">
+            <a class="btn-primary" href="#/subscribers/new">Add subscriber</a>
+        </div>`;
     return `
-        ${head("Recipients", "Subscribers", "Who receives a file, in which formats, and where it is delivered.", `<input class="search" data-search="subscribers" placeholder="Search subscribers..." value="${esc(state.search.subscribers)}">`)}
+        ${head("Recipients", "Subscribers", "Who receives a file, in which formats, and where it is delivered.", tools)}
         <section class="table-card">
-            <form class="add-form" id="add-form">
-                <input name="name" placeholder="Subscriber name" required>
-                ${formatBoxes("formatType", "CSV")}
-                <select name="templateId" required aria-label="List">${templateOptions(null)}</select>
-                ${select("scope", ["ALL", "SANCTIONS", "WORLDCHECK", "PFA"], "ALL")}
-                ${select("exportMode", ["DELTA", "FULL"], "DELTA")}
-                <input name="businessLine" placeholder="Business line">
-                <input name="region" placeholder="Region">
-                <input name="cftEndpoint" placeholder="Delivery endpoint">
-                <button class="btn-primary" type="submit">+ Add</button>
-            </form>
             <table>
                 <thead><tr><th>ID</th><th>Name</th><th>Format</th><th>Mode</th><th>Scope</th><th>Business line</th><th>Region</th><th>Delivery</th><th>List</th><th>Last file</th><th>Active</th><th></th></tr></thead>
                 <tbody>${rows}</tbody>
             </table>
             ${state.subscribers.length ? "" : '<div class="empty">No subscribers found.</div>'}
+        </section>`;
+}
+
+function subscriberNewHtml() {
+    return `
+        ${head("Recipients", "Add subscriber", "Choose the formats, the list, and where the file is delivered.", `<a class="btn-ghost" href="#/subscribers">Back to subscribers</a>`)}
+        <section class="export-card subscriber-card">
+            <form id="add-form" class="subscriber-form">
+                <div class="subscriber-grid">
+                    <label class="span-2">Subscriber name<input name="name" placeholder="Subscriber name" required autofocus></label>
+                    <div class="field">
+                        <span class="field-label">Formats</span>
+                        ${formatBoxes("formatType", "CSV")}
+                    </div>
+                    <label>List<select name="templateId" required>${templateOptions(null)}</select></label>
+                    <label>Scope${select("scope", ["ALL", "SANCTIONS", "WORLDCHECK", "PFA"], "ALL")}</label>
+                    <label>Mode${select("exportMode", ["DELTA", "FULL"], "DELTA")}</label>
+                    <label>Business line<input name="businessLine" placeholder="Business line"></label>
+                    <label>Region<input name="region" placeholder="Region"></label>
+                    <label class="span-2">Delivery endpoint<input name="cftEndpoint" placeholder="Delivery endpoint"></label>
+                </div>
+                <div class="modal-actions">
+                    <a class="btn-ghost" href="#/subscribers">Cancel</a>
+                    <button class="btn-primary" type="submit">Add subscriber</button>
+                </div>
+            </form>
         </section>`;
 }
 
@@ -824,8 +848,8 @@ async function onSubmit(event) {
             });
             toast("Subscriber added", "success");
             state.search.subscribers = "";
-            await refresh();
-            render();
+            if (location.hash === "#/subscribers") navigate();
+            else location.hash = "#/subscribers";
         } catch (error) {
             toast(error.message, "error");
         }
@@ -1377,7 +1401,6 @@ function explorerInnerHtml() {
     const ex = ensureExplore();
     const draft = state.templateDraft;
     const filters = draft.filters;
-    const versions = state.versions.map(version => `<option value="${version.versionId}" ${String(version.versionId) === String(ex.versionId) ? "selected" : ""}>${esc(version.listName)} · version ${esc(version.versionId)}${version.contentAsOf ? " · as of " + esc(version.contentAsOf) : ""}</option>`).join("");
     let count = "";
     if (ex.total === null || ex.total === undefined) {
         count = ex.loading ? '<span class="muted">Counting rows…</span>' : "";
@@ -1412,9 +1435,6 @@ function explorerInnerHtml() {
     else hint = "No filters: every list entry goes in the file. Use the funnel on a column to keep only some rows.";
     return `
         <div class="explorer-bar">
-            <label class="explorer-version"><span class="field-label">Sample data from</span>
-                <select id="explore-version" aria-label="List version">${versions}</select>
-            </label>
             <div class="explorer-count" aria-live="polite">${count}${ex.loading ? '<span class="spinner" aria-hidden="true"></span>' : ""}</div>
         </div>
         <div class="filter-bar">
@@ -1825,12 +1845,6 @@ let facetTimer;
 /** Typing in the data explorer and its filter panel. Returns true when handled. */
 function onExplorerInput(event) {
     const target = event.target;
-    if (target.id === "explore-version") {
-        ensureExplore().versionId = Number(target.value);
-        closeEditor();
-        loadExplore();
-        return true;
-    }
     if (!state.editor || state.editor.menu) return false;
     if (target.id === "pop-op") {
         const wasList = state.editor.op === "in" || state.editor.op === "not_in";
@@ -2260,14 +2274,7 @@ function previousHtml() {
 }
 
 function prevVersionsPageHtml() {
-    const item = state.xp.prev.selected;
-    return `<div class="xp-versions-head">
-            <button type="button" class="btn-ghost" data-xp-back-lists>Back to lists</button>
-            <div>
-                <h2>${esc(item.name)}</h2>
-                <span class="muted">Select the version to send or download.</span>
-            </div>
-        </div>
+    return `<button type="button" class="btn-ghost xp-back-link" data-xp-back-lists>Back to lists</button>
         <section class="table-card xp-card" id="xp-prev-detail">${prevDetailHtml()}</section>`;
 }
 
@@ -2336,8 +2343,8 @@ function prevDetailHtml() {
     const item = view.selected;
     if (!item) return '<div class="empty">Choose a list to see its versions.</div>';
     const lists = view.lists && view.lists.length > 1
-        ? `<label class="compare">List <select id="xp-prev-list-code">${view.lists.map(entry => `<option value="${esc(entry.listCode)}" ${entry.listCode === view.listCode ? "selected" : ""}>${esc(entry.listName)}</option>`).join("")}</select></label>`
-        : (view.lists && view.lists.length ? `<span class="muted">${esc(view.lists[0].listName)} list</span>` : "");
+        ? `<label class="compare xp-list-pick">List <select id="xp-prev-list-code">${view.lists.map(entry => `<option value="${esc(entry.listCode)}" ${entry.listCode === view.listCode ? "selected" : ""}>${esc(entry.listName)}</option>`).join("")}</select></label>`
+        : (view.lists && view.lists.length ? `<span class="pill pill-off">${esc(view.lists[0].listName)} list</span>` : "");
     let table = '<div class="empty">Loading versions…</div>';
     if (view.versions && view.versions.error) table = `<div class="banner banner-error">${esc(view.versions.error)}</div>`;
     else if (view.versions && !view.versions.items.length) table = '<div class="empty">This list has no versions yet.</div>';
@@ -2346,34 +2353,47 @@ function prevDetailHtml() {
         const rows = view.versions.items.map(version => {
             const on = version.id === view.pickedId;
             const changes = version.previousLabel
-                ? `<span class="dv-delta"><span class="add">+${num(version.insertedRows)}</span> <span class="del">−${num(version.deletedRows)}</span> <span class="chg">~${num(version.changedRows)}</span> vs ${esc(version.previousLabel)}</span>`
-                : '<span class="muted">First version</span>';
-            return `<tr class="xp-version-row${on ? " selected" : ""}" data-xp-pick="${version.id}">
-                <td><input type="radio" name="xp-version" ${on ? "checked" : ""} tabindex="-1" aria-label="Select version ${esc(version.label)}"></td>
-                <td>${versionChip(version.label)}${version.id === view.versions.latestId ? ' <span class="pill pill-on">Latest</span>' : ""}${version.tableName ? `<div class="muted small-note xp-table-name" title="Database table holding this version">${esc(version.tableName)}</div>` : ""}</td>
-                <td>${when(version.createdAt)}</td>
-                <td>${num(version.rowCount)}</td>
-                <td>${changes}</td>
-            </tr>`;
+                ? `<span class="dv-delta"><span class="add">+${num(version.insertedRows)}</span> <span class="del">−${num(version.deletedRows)}</span> <span class="chg">~${num(version.changedRows)}</span> <span class="xp-vs">vs ${esc(version.previousLabel)}</span></span>`
+                : '<span class="xp-first">First version</span>';
+            return `<div class="xp-version-row${on ? " selected" : ""}" data-xp-pick="${version.id}" role="radio" aria-checked="${on}">
+                <input type="radio" name="xp-version" ${on ? "checked" : ""} tabindex="-1" aria-label="Select version ${esc(version.label)}">
+                <div class="xp-ver">
+                    <div class="xp-ver-line">${versionChip(version.label)}${version.id === view.versions.latestId ? ' <span class="pill pill-on">Latest</span>' : ""}</div>
+                    ${version.tableName ? `<div class="xp-table-name" title="Database table holding this version">${esc(version.tableName)}</div>` : ""}
+                </div>
+                <div class="xp-vmeta">
+                    <span class="xp-when">${when(version.createdAt)}</span>
+                    <span class="xp-rows">${num(version.rowCount)}</span>
+                    <span class="xp-changes">${changes}</span>
+                </div>
+            </div>`;
         }).join("");
         const more = view.versions.items.length < view.versions.total
             ? `<button type="button" class="btn-ghost btn-small" data-xp-older>Show older versions (${num(view.versions.total - view.versions.items.length)} more)</button>` : "";
+        const shown = view.versions.items.length;
+        const total = view.versions.total;
+        const count = total === 1 ? "1 version" : `${num(shown)} of ${num(total)} versions`;
         const bar = picked
             ? `<div class="xp-version-bar">
                 <span>Version ${versionChip(picked.label)} selected${picked.tableName ? ` · <code>${esc(picked.tableName)}</code>` : ""}</span>
                 ${formatChoices().map(f => `<a class="btn-ghost btn-small" href="/api/data-versions/${picked.id}/file?format=${encodeURIComponent(f)}" download>${esc(f)}</a>`).join("")}
                 <button type="button" class="btn-primary" data-xp-send="${picked.id}">Send this version</button>
                </div>`
-            : `<div class="xp-version-bar"><span class="muted">Select a version.</span></div>`;
-        table = `<table>
-                <thead><tr><th></th><th>Version</th><th>Created</th><th>Rows</th><th>Changes</th></tr></thead>
-                <tbody>${rows}</tbody>
-            </table>
-            <div class="pager xp-pager"><span class="muted">${num(view.versions.items.length)} of ${num(view.versions.total)} versions</span>${more}</div>
+            : "";
+        table = `<div class="xp-vlist">
+                <div class="xp-vhead" aria-hidden="true"><span></span><span>Version</span><span class="xp-vmeta"><span>Created</span><span>Rows</span><span>Changes</span></span></div>
+                ${rows}
+            </div>
+            <div class="pager xp-pager"><span class="muted">${count}</span>${more}</div>
             ${bar}`;
     }
+    const subscribers = `${num(item.subscribers)} subscriber${item.subscribers === 1 ? "" : "s"}`;
     return `<div class="xp-detail-head">
-            <div><h2>${esc(item.name)}</h2><span class="muted">List version ${item.templateVersion} · ${num(item.subscribers)} subscriber${item.subscribers === 1 ? "" : "s"}</span></div>
+            <div>
+                <h2>${esc(item.name)}</h2>
+                <p class="xp-detail-meta">List version ${item.templateVersion} · ${subscribers}</p>
+                <p class="xp-detail-hint">Select a version to send or download.</p>
+            </div>
             ${lists}
         </div>
         ${table}`;
@@ -2442,15 +2462,11 @@ function sendSectionHtml() {
                 ${esc(format)}
             </label>`;
         }).join("");
-        const own = sameFormatSet(picked, ownFormats(row.formatType));
         return `<div class="xp-sub ${on ? "selected" : ""}">
             <input type="checkbox" id="xp-sub-${row.subscriberId}" data-xp-sub="${row.subscriberId}" ${on ? "checked" : ""}>
             <label class="xp-sub-name" for="xp-sub-${row.subscriberId}">${esc(row.name)}</label>
             <span class="muted">${esc(row.scope)} · ${esc(row.exportMode)} · ${row.onTemplate ? '<span class="tag tag-new">This list</span>' : "Other list"}</span>
-            <span class="xp-sub-format">
-                ${boxes}
-                ${own ? "" : `<span class="was">usually ${formatCell(row.formatType)}</span>`}
-            </span>
+            <span class="xp-sub-format">${boxes}</span>
         </div>`;
     }).join("");
     const allChosen = rows.length && send.chosen.size === rows.length;
