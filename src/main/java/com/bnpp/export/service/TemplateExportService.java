@@ -53,7 +53,7 @@ public class TemplateExportService {
      * @param latestSnapshotId its newest data version (null when it was never exported); listCode tells which list
      * @param versionCount     data versions it has across all its lists
      */
-    public record TemplateRow(Long familyId, Long templateId, String name, String formatType, int templateVersion,
+    public record TemplateRow(Long familyId, Long templateId, String name, int templateVersion,
                               long subscribers, Long latestSnapshotId, String latestLabel, LocalDateTime latestAt,
                               String listCode, String listName, long versionCount, LocalDateTime lastExport) {
     }
@@ -62,16 +62,15 @@ public class TemplateExportService {
     }
 
     /**
-     * Approved templates in use, searched by name and filtered by format, a page at a time.
+     * Approved templates in use, searched by name, a page at a time.
      *
      * @param withVersions only templates that already have data versions (for the Previous Versions tab)
      */
-    public TemplatePage list(String query, String format, boolean withVersions, int offset, int limit) {
+    public TemplatePage list(String query, boolean withVersions, int offset, int limit) {
         String text = query == null ? "" : query.trim().toLowerCase(Locale.ROOT);
         Map<Long, Series> series = series();
         List<FormatTemplate> matching = templates.findAll().stream()
                 .filter(FormatTemplate::isActive)
-                .filter(template -> format == null || format.isBlank() || format.equalsIgnoreCase(template.getFormatType()))
                 .filter(template -> text.isEmpty() || template.getName().toLowerCase(Locale.ROOT).contains(text))
                 .filter(template -> !withVersions || series.containsKey(template.getFamilyId()))
                 .sorted(Comparator.comparing(template -> template.getName().toLowerCase(Locale.ROOT)))
@@ -82,7 +81,7 @@ public class TemplateExportService {
         List<TemplateRow> rows = new ArrayList<>();
         for (FormatTemplate template : matching.subList(start, end)) {
             Series s = series.get(template.getFamilyId());
-            rows.add(new TemplateRow(template.getFamilyId(), template.getId(), template.getName(), template.getFormatType(),
+            rows.add(new TemplateRow(template.getFamilyId(), template.getId(), template.getName(),
                     template.getVersionNumber(), counts.getOrDefault(template.getFamilyId(), 0L),
                     s == null ? null : s.latestId(), s == null ? null : s.latestLabel(), s == null ? null : s.latestAt(),
                     s == null ? null : s.listCode(), s == null ? null : s.listName(), s == null ? 0 : s.versions(),

@@ -33,12 +33,12 @@ class TemplateExportTest {
 
     @Test
     void exportLatestKeepsTheVersionUntilTheDataChanges() throws Exception {
-        Long csv = templates.findAll().stream().filter(t -> "CSV Export".equals(t.getName())).findFirst().orElseThrow().getFamilyId();
+        Long csv = templates.findAll().stream().filter(t -> "Party Basic".equals(t.getName())).findFirst().orElseThrow().getFamilyId();
 
         mockMvc.perform(get("/api/export-templates").with(user("maker").roles("MAKER")))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.total").value(2))
-                .andExpect(jsonPath("$.templates[0].name").value("CSV Export"))
+                .andExpect(jsonPath("$.templates[0].name").value("Party Basic"))
                 .andExpect(jsonPath("$.templates[0].subscribers").value(2))
                 .andExpect(jsonPath("$.templates[0].latestLabel").doesNotExist());
 
@@ -62,8 +62,8 @@ class TemplateExportTest {
                 .andExpect(jsonPath("$.total").value(1))
                 .andExpect(jsonPath("$.templates[0].latestLabel").value("1.2"))
                 .andExpect(jsonPath("$.templates[0].versionCount").value(2));
-        mockMvc.perform(get("/api/export-templates").param("q", "xml").with(user("maker").roles("MAKER")))
+        mockMvc.perform(get("/api/export-templates").param("q", "detail").with(user("maker").roles("MAKER")))
                 .andExpect(jsonPath("$.total").value(1))
-                .andExpect(jsonPath("$.templates[0].name").value("XML Export"));
+                .andExpect(jsonPath("$.templates[0].name").value("Party Detail"));
     }
 }

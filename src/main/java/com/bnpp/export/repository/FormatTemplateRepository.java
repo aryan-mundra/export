@@ -8,7 +8,7 @@ import java.util.Optional;
 
 public interface FormatTemplateRepository extends JpaRepository<FormatTemplate, Long> {
 
-    List<FormatTemplate> findAllByOrderByFormatTypeAscNameAscVersionNumberDesc();
+    List<FormatTemplate> findAllByOrderByNameAscVersionNumberDesc();
 
     /** The approved version in use of a template. */
     Optional<FormatTemplate> findFirstByFamilyIdAndActiveTrueOrderByVersionNumberDesc(Long familyId);
@@ -17,6 +17,6 @@ public interface FormatTemplateRepository extends JpaRepository<FormatTemplate, 
 
     Optional<FormatTemplate> findFirstByFamilyIdOrderByVersionNumberDesc(Long familyId);
 
-    /** The newest version of the template with this name and format, if any. */
-    Optional<FormatTemplate> findFirstByFormatTypeAndNameIgnoreCaseOrderByVersionNumberDesc(String formatType, String name);
+    /** The newest version of the template with this name, if any. */
+    Optional<FormatTemplate> findFirstByNameIgnoreCaseOrderByVersionNumberDesc(String name);
 }

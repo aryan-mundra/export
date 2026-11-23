@@ -8,7 +8,6 @@ public record FormatTemplateResponse(
         /** The template this version belongs to; subscribers choose a template by this id. */
         Long familyId,
         String name,
-        String formatType,
         int versionNumber,
         boolean active,
         String status,

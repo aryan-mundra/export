@@ -29,9 +29,6 @@ public class FormatTemplate {
     @Column(nullable = false)
     private String name;
 
-    @Column(nullable = false)
-    private String formatType;
-
     /** Version within the template (family), starting at 1. */
     private int versionNumber;
 

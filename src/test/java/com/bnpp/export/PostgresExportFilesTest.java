@@ -281,7 +281,7 @@ class PostgresExportFilesTest {
         }
         MvcResult saved = mockMvc.perform(post("/api/format-templates").with(user("maker").roles("MAKER"))
                         .contentType("application/json")
-                        .content("{\"name\":\"" + format + " check\",\"formatType\":\"" + format + "\",\"fields\":[" + fields + "]}"))
+                        .content("{\"name\":\"" + format + " check\",\"fields\":[" + fields + "]}"))
                 .andExpect(status().isOk())
                 .andReturn();
         Number id = com.jayway.jsonpath.JsonPath.read(saved.getResponse().getContentAsString(), "$.id");

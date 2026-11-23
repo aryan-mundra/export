@@ -1724,3 +1724,5 @@ tbody tr:last-child td { border-bottom: 0; }
 .xp-sub-format .was { font-size: 12px; color: var(--muted); white-space: nowrap; }
 .xp-send-summary { font-size: 13px; }
 @media (max-width: 700px) { .xp-sub { grid-template-columns: auto minmax(0, 1fr); } .xp-sub-format { grid-column: 2; justify-content: flex-start; } }
+
+.xp-table-name { font-family: ui-monospace, Consolas, monospace; font-size: 11.5px; margin-top: 4px; }

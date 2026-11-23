@@ -67,11 +67,12 @@ import static org.springframework.http.HttpStatus.NOT_FOUND;
  * (template, list, fingerprint) backs this up, so two exports at the same moment cannot create twin
  * versions or the same number twice.
  *
- * <p>Storage: one header row per version; a line table (version, line, row hash); and each distinct
- * row stored once. A version that differs from the last one in five rows adds five rows.
+ * <p>Storage: one header row per version in ver_export_snapshot, and the version's rows in a table of its
+ * own, {@code ver_<list>_v<major>_<minor>} (see {@link VersionTables}), with the list's columns and the
+ * filtered rows, in file order.
  *
- * <p>Reading: files are built from the stored rows, so a historical version never needs the source
- * query again, and the same rows can be written as CSV or XML.
+ * <p>Reading: files are built from the version's table only, so a historical version never needs the
+ * source query or joins again, and the same rows can be written in any format.
  */
 @Service
 public class SnapshotService {
@@ -80,11 +81,12 @@ public class SnapshotService {
     private static final ObjectMapper JSON = new ObjectMapper();
     private static final int BATCH = 500;
 
-    /** Entry fields kept with each row, in the order they are written and hashed. */
-    private static final String ROW_COLUMNS = "d.record_id, d.bnp_id, d.name, d.country, d.record_date, d.action, d.risk_rating, "
-            + "d.business_line, d.region, d.changed_on, d.on_sanctions, d.on_worldcheck, d.on_pfa, d.cells";
+    /** Entry fields read with each row of a version table, in the order {@link #record} expects them. */
+    private static final String ENTRY_SELECT = "\"_record_id\", \"_bnp_id\", \"_name\", \"_country\", \"_record_date\", \"_action\", "
+            + "\"_risk_rating\", \"_business_line\", \"_region\", \"_changed_on\", \"_on_sanctions\", \"_on_worldcheck\", \"_on_pfa\"";
 
     private final DataSnapshotRepository snapshots;
+    private final VersionTables tables;
     private final CertifiedVersionRepository versions;
     private final FormatTemplateService templates;
     private final RowFilterService rowFilters;
@@ -107,8 +109,10 @@ public class SnapshotService {
                            AuditService audit,
                            JdbcTemplate jdbc,
                            DataSource dataSource,
-                           PlatformTransactionManager transactionManager) {
+                           PlatformTransactionManager transactionManager,
+                           VersionTables tables) {
         this.snapshots = snapshots;
+        this.tables = tables;
         this.versions = versions;
         this.templates = templates;
         this.rowFilters = rowFilters;
@@ -264,79 +268,132 @@ public class SnapshotService {
         }
     }
 
-    /** Numbers and stores a dataset under a lock on its template and list, or finds it already stored. */
+    /**
+     * Numbers and stores a dataset under a lock on its template and list, or finds it already stored.
+     *
+     * <p>New data is first copied into a stage table (outside the lock, as it can be large). Under the
+     * lock the version is numbered, and the stage table is renamed to the version's table as the last
+     * step, so a version is never visible without its complete table.
+     */
     private Resolution register(FormatTemplate template, CertifiedVersion version, String columnsJson, String fingerprint,
                                 long rowCount, Path staging, Long jobId) {
         Long familyId = template.getFamilyId();
         String listCode = version.getListCode();
         ensureSeries(familyId, listCode);
-        Resolution resolution = transaction.execute(status -> {
-            // Serialises numbering for this template and list; other templates and lists are not blocked.
-            jdbc.queryForList("SELECT id FROM ver_export_snapshot_series WHERE family_id = ? AND list_code = ? FOR UPDATE",
-                    familyId, listCode);
-            DataSnapshot same = snapshots.findFirstByFamilyIdAndListCodeAndTemplateIdAndFingerprint(
-                    familyId, listCode, template.getId(), fingerprint).orElse(null);
-            if (same != null) {
-                same.setReuseCount(same.getReuseCount() + 1);
-                same.setLastUsedAt(LocalDateTime.now());
-                jdbc.update("UPDATE ver_export_snapshot_series SET exports_served = COALESCE(exports_served, 0) + 1, last_used_at = ? "
-                        + "WHERE family_id = ? AND list_code = ?", same.getLastUsedAt(), familyId, listCode);
-                return new Resolution(snapshots.save(same), false);
+        boolean known = snapshots.findFirstByFamilyIdAndListCodeAndTemplateIdAndFingerprint(
+                familyId, listCode, template.getId(), fingerprint).isPresent();
+        List<String> dbColumns = dbColumns(columnsJson);
+        String stage = known ? null : tables.createStage(dbColumns);
+        Resolution resolution;
+        try {
+            if (stage != null) {
+                fillStage(stage, dbColumns, staging);
             }
-            Integer minor = snapshots.maxMinor(familyId, listCode, template.getVersionNumber());
-            DataSnapshot previous = snapshots.findFirstByFamilyIdAndListCodeOrderByIdDesc(familyId, listCode).orElse(null);
+            resolution = transaction.execute(status -> {
+                // Serialises numbering for this template and list; other templates and lists are not blocked.
+                jdbc.queryForList("SELECT id FROM ver_export_snapshot_series WHERE family_id = ? AND list_code = ? FOR UPDATE",
+                        familyId, listCode);
+                DataSnapshot same = snapshots.findFirstByFamilyIdAndListCodeAndTemplateIdAndFingerprint(
+                        familyId, listCode, template.getId(), fingerprint).orElse(null);
+                if (same != null || stage == null) {
+                    if (same == null) {
+                        throw new IllegalStateException("Data version disappeared while it was being reused");
+                    }
+                    same.setReuseCount(same.getReuseCount() + 1);
+                    same.setLastUsedAt(LocalDateTime.now());
+                    jdbc.update("UPDATE ver_export_snapshot_series SET exports_served = COALESCE(exports_served, 0) + 1, last_used_at = ? "
+                            + "WHERE family_id = ? AND list_code = ?", same.getLastUsedAt(), familyId, listCode);
+                    return new Resolution(snapshots.save(same), false);
+                }
+                Integer minor = snapshots.maxMinor(familyId, listCode, template.getVersionNumber());
+                DataSnapshot previous = snapshots.findFirstByFamilyIdAndListCodeOrderByIdDesc(familyId, listCode).orElse(null);
 
-            DataSnapshot snapshot = new DataSnapshot();
-            snapshot.setFamilyId(familyId);
-            snapshot.setListCode(listCode);
-            snapshot.setListName(version.getListName());
-            snapshot.setTemplateId(template.getId());
-            snapshot.setTemplateName(template.getName());
-            snapshot.setFormatType(template.getFormatType());
-            snapshot.setMajor(template.getVersionNumber());
-            // The first data version of template version N is N.1, then N.2, N.3 ...
-            snapshot.setMinor(minor == null ? 1 : minor + 1);
-            snapshot.setLabel(snapshot.getMajor() + "." + snapshot.getMinor());
-            snapshot.setSourceVersionId(version.getVersionId());
-            snapshot.setFingerprint(fingerprint);
-            snapshot.setRowCount(rowCount);
-            snapshot.setColumnsJson(columnsJson);
-            snapshot.setCreatedBy(CurrentUser.actor());
-            snapshot.setCreatedByName(CurrentUser.displayName());
-            snapshot.setCreatedJobId(jobId);
-            snapshot = snapshots.saveAndFlush(snapshot);
-            snapshot.setStoredRows(storeRows(snapshot.getId(), staging));
-            if (previous != null) {
-                Counts counts = counts(snapshot.getId(), previous.getId());
-                snapshot.setPreviousSnapshotId(previous.getId());
-                snapshot.setPreviousLabel(previous.getLabel());
-                snapshot.setInsertedRows(counts.inserted());
-                snapshot.setDeletedRows(counts.deleted());
-                snapshot.setChangedRows(counts.changed());
+                DataSnapshot snapshot = new DataSnapshot();
+                snapshot.setFamilyId(familyId);
+                snapshot.setListCode(listCode);
+                snapshot.setListName(version.getListName());
+                snapshot.setTemplateId(template.getId());
+                snapshot.setTemplateName(template.getName());
+                snapshot.setMajor(template.getVersionNumber());
+                // The first data version of template version N is N.1, then N.2, N.3 ...
+                snapshot.setMinor(minor == null ? 1 : minor + 1);
+                snapshot.setLabel(snapshot.getMajor() + "." + snapshot.getMinor());
+                snapshot.setTableName(freeTableName(template.getName(), snapshot.getMajor(), snapshot.getMinor(), listCode));
+                snapshot.setSourceVersionId(version.getVersionId());
+                snapshot.setFingerprint(fingerprint);
+                snapshot.setRowCount(rowCount);
+                snapshot.setStoredRows(rowCount);
+                snapshot.setColumnsJson(columnsJson);
+                snapshot.setCreatedBy(CurrentUser.actor());
+                snapshot.setCreatedByName(CurrentUser.displayName());
+                snapshot.setCreatedJobId(jobId);
+                if (previous != null) {
+                    Counts counts = counts(stage, previous.getTableName());
+                    snapshot.setPreviousSnapshotId(previous.getId());
+                    snapshot.setPreviousLabel(previous.getLabel());
+                    snapshot.setInsertedRows(counts.inserted());
+                    snapshot.setDeletedRows(counts.deleted());
+                    snapshot.setChangedRows(counts.changed());
+                }
+                snapshot = snapshots.saveAndFlush(snapshot);
+                // The catalog row: what lists show without reading any version.
+                jdbc.update("UPDATE ver_export_snapshot_series SET template_name = ?, list_name = ?, "
+                                + "version_count = COALESCE(version_count, 0) + 1, latest_snapshot_id = ?, latest_label = ?, latest_at = ?, "
+                                + "exports_served = COALESCE(exports_served, 0) + 1, total_rows = COALESCE(total_rows, 0) + ?, "
+                                + "stored_rows = COALESCE(stored_rows, 0) + ?, last_used_at = ? WHERE family_id = ? AND list_code = ?",
+                        snapshot.getTemplateName(), snapshot.getListName(), snapshot.getId(), snapshot.getLabel(), snapshot.getCreatedAt(),
+                        snapshot.getRowCount(), snapshot.getStoredRows(), snapshot.getCreatedAt(), familyId, listCode);
+                // Last: the filled table takes the version's name.
+                tables.rename(stage, snapshot.getTableName());
+                return new Resolution(snapshot, true);
+            });
+        } catch (RuntimeException ex) {
+            if (stage != null) {
+                tables.drop(stage); // no version was made; the half-built table goes
             }
-            snapshot = snapshots.save(snapshot);
-            // The catalog row: what lists show without reading any version.
-            jdbc.update("UPDATE ver_export_snapshot_series SET template_name = ?, list_name = ?, "
-                            + "version_count = COALESCE(version_count, 0) + 1, latest_snapshot_id = ?, latest_label = ?, latest_at = ?, "
-                            + "exports_served = COALESCE(exports_served, 0) + 1, total_rows = COALESCE(total_rows, 0) + ?, "
-                            + "stored_rows = COALESCE(stored_rows, 0) + ?, last_used_at = ? WHERE family_id = ? AND list_code = ?",
-                    snapshot.getTemplateName(), snapshot.getListName(), snapshot.getId(), snapshot.getLabel(), snapshot.getCreatedAt(),
-                    snapshot.getRowCount(), snapshot.getStoredRows(), snapshot.getCreatedAt(), familyId, listCode);
-            return new Resolution(snapshot, true);
-        });
+            throw ex;
+        }
         DataSnapshot snapshot = Objects.requireNonNull(resolution).snapshot();
+        if (stage != null && !resolution.created()) {
+            tables.drop(stage); // the same data was stored by another export meanwhile
+        }
         if (resolution.created()) {
             audit.snapshot(snapshot.getId(), "DATA_VERSION_CREATED", snapshot.getTemplateName() + " · " + snapshot.getListName()
-                    + " data version " + snapshot.getLabel() + ": " + snapshot.getRowCount() + " rows, " + snapshot.getStoredRows()
-                    + " new to storage" + (snapshot.getPreviousLabel() == null ? "" : ". Against " + snapshot.getPreviousLabel()
+                    + " data version " + snapshot.getLabel() + ": " + snapshot.getRowCount() + " rows in table " + snapshot.getTableName()
+                    + (snapshot.getPreviousLabel() == null ? "" : ". Against " + snapshot.getPreviousLabel()
                     + ": +" + snapshot.getInsertedRows() + " −" + snapshot.getDeletedRows() + " ~" + snapshot.getChangedRows()));
         } else {
             audit.snapshot(snapshot.getId(), "DATA_VERSION_REUSED", snapshot.getTemplateName() + " · " + snapshot.getListName()
-                    + " data unchanged: reused data version " + snapshot.getLabel());
+                    + " data unchanged: reused data version " + snapshot.getLabel() + " (" + snapshot.getTableName() + ")");
         }
-        log.info("{} data version {} for {} / {} ({} rows)", resolution.created() ? "Created" : "Reused",
-                snapshot.getLabel(), snapshot.getTemplateName(), snapshot.getListCode(), snapshot.getRowCount());
+        log.info("{} data version {} for {} / {} ({} rows, table {})", resolution.created() ? "Created" : "Reused",
+                snapshot.getLabel(), snapshot.getTemplateName(), snapshot.getListCode(), snapshot.getRowCount(), snapshot.getTableName());
         return resolution;
+    }
+
+    /**
+     * ver_list_apac_v1_1; when that name is taken (the same list name exported from another source list,
+     * or two names that read the same once cleaned) the source list code is added, then a number.
+     */
+    private String freeTableName(String listName, int major, int minor, String listCode) {
+        String name = VersionTables.tableName(listName, major, minor);
+        if (!taken(name)) {
+            return name;
+        }
+        String withList = VersionTables.tableName(listName + " " + listCode, major, minor);
+        if (!taken(withList)) {
+            return withList;
+        }
+        for (int n = 2; ; n++) {
+            String numbered = VersionTables.tableName(listName + " " + listCode + " " + n, major, minor);
+            if (!taken(numbered)) {
+                return numbered;
+            }
+        }
+    }
+
+    private boolean taken(String name) {
+        return snapshots.existsByTableName(name) || tables.exists(name);
     }
 
     /** Creates the lock row for a template and list once; a concurrent creator simply wins. */
@@ -355,56 +412,48 @@ public class SnapshotService {
         }
     }
 
-    /** Copies the staged rows into storage: lines always, row content only when not stored already. */
-    private long storeRows(Long snapshotId, Path staging) {
-        long stored = 0;
+    /** Copies the staged rows into the stage table, in batches, in file order. */
+    private void fillStage(String stage, List<String> dbColumns, Path staging) {
         long line = 0;
         try (BufferedReader in = Files.newBufferedReader(staging, StandardCharsets.UTF_8)) {
-            List<String[]> batch = new ArrayList<>(BATCH);
+            List<Object[]> batch = new ArrayList<>(BATCH);
             for (String text = in.readLine(); text != null; text = in.readLine()) {
                 int tab = text.indexOf('\t');
-                batch.add(new String[] {text.substring(0, tab), text.substring(tab + 1)});
+                batch.add(tableRow(++line, text.substring(0, tab), fromJson(text.substring(tab + 1)), dbColumns.size()));
                 if (batch.size() >= BATCH) {
-                    stored += storeBatch(snapshotId, batch, line);
-                    line += batch.size();
+                    tables.insert(stage, dbColumns, batch);
                     batch.clear();
                 }
             }
-            if (!batch.isEmpty()) {
-                stored += storeBatch(snapshotId, batch, line);
-            }
+            tables.insert(stage, dbColumns, batch);
         } catch (IOException ex) {
             throw new UncheckedIOException("Could not read the staged data version", ex);
         }
-        return stored;
     }
 
-    private long storeBatch(Long snapshotId, List<String[]> batch, long firstLine) {
-        List<String> keys = batch.stream().map(row -> row[0]).toList();
-        Set<String> known = new HashSet<>(jdbc.queryForList(
-                "SELECT row_key FROM ver_export_snapshot_data WHERE row_key IN (" + RowFilterService.marks(keys.size()) + ")",
-                String.class, keys.toArray()));
-        List<Object[]> data = new ArrayList<>();
-        List<Object[]> lines = new ArrayList<>(batch.size());
-        long line = firstLine;
-        for (String[] row : batch) {
-            List<Object> values = fromJson(row[1]);
-            Long recordId = number(values.get(0));
-            if (known.add(row[0])) {
-                data.add(new Object[] {
-                        row[0], recordId, values.get(1), values.get(2), values.get(3), date(values.get(4)), values.get(5),
-                        values.get(6), values.get(7), values.get(8), date(values.get(9)), Boolean.TRUE.equals(values.get(10)),
-                        Boolean.TRUE.equals(values.get(11)), Boolean.TRUE.equals(values.get(12)), toJson(values.get(13))});
-            }
-            lines.add(new Object[] {snapshotId, ++line, recordId, row[0]});
+    /** One row of a version table: line, record id, row key, the entry fields, then the list's values. */
+    private static Object[] tableRow(long line, String rowKey, List<Object> values, int columnCount) {
+        Object[] row = new Object[VersionTables.ENTRY_COLUMNS.length + columnCount];
+        row[0] = line;
+        row[1] = number(values.get(0));
+        row[2] = rowKey;
+        row[3] = values.get(1);
+        row[4] = values.get(2);
+        row[5] = values.get(3);
+        row[6] = date(values.get(4));
+        row[7] = values.get(5);
+        row[8] = values.get(6);
+        row[9] = values.get(7);
+        row[10] = values.get(8);
+        row[11] = date(values.get(9));
+        row[12] = Boolean.TRUE.equals(values.get(10));
+        row[13] = Boolean.TRUE.equals(values.get(11));
+        row[14] = Boolean.TRUE.equals(values.get(12));
+        List<String> cells = strings(values.get(13) instanceof List<?> list ? new ArrayList<>(list) : List.of());
+        for (int index = 0; index < columnCount; index++) {
+            row[VersionTables.ENTRY_COLUMNS.length + index] = index < cells.size() ? cells.get(index) : null;
         }
-        if (!data.isEmpty()) {
-            jdbc.batchUpdate("INSERT INTO ver_export_snapshot_data (row_key, record_id, bnp_id, name, country, record_date, action, "
-                    + "risk_rating, business_line, region, changed_on, on_sanctions, on_worldcheck, on_pfa, cells) "
-                    + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", data);
-        }
-        jdbc.batchUpdate("INSERT INTO ver_export_snapshot_row (snapshot_id, line_no, record_id, row_key) VALUES (?, ?, ?, ?)", lines);
-        return data.size();
+        return row;
     }
 
     /** A row in a fixed form: the list entry fields, then the template's values in column order. */
@@ -431,24 +480,50 @@ public class SnapshotService {
         return row;
     }
 
+    /** The column layout of a version: per list column its name in files, gs_ source and column in the version table. */
     private static List<Map<String, String>> columns(List<FormatField> fields) {
+        List<String> dbColumns = VersionTables.columnNames(fields.stream().map(FormatField::getHeaderName).toList());
         List<Map<String, String>> columns = new ArrayList<>();
-        for (FormatField field : fields) {
+        for (int index = 0; index < fields.size(); index++) {
+            FormatField field = fields.get(index);
             Map<String, String> column = new LinkedHashMap<>();
             column.put("header", field.getHeaderName());
             column.put("table", field.getSourceTable());
             column.put("column", field.getSourceColumn());
+            column.put("dbColumn", dbColumns.get(index));
             columns.add(column);
         }
         return columns;
     }
 
     public List<Map<String, String>> columns(DataSnapshot snapshot) {
+        return parseColumns(snapshot.getColumnsJson(), snapshot.getLabel());
+    }
+
+    private static List<Map<String, String>> parseColumns(String json, String label) {
         try {
-            return JSON.readValue(snapshot.getColumnsJson(), new TypeReference<List<Map<String, String>>>() { });
+            return JSON.readValue(json, new TypeReference<List<Map<String, String>>>() { });
         } catch (JsonProcessingException ex) {
-            throw new IllegalStateException("Data version " + snapshot.getLabel() + " has an unreadable column layout", ex);
+            throw new IllegalStateException("Data version " + label + " has an unreadable column layout", ex);
         }
+    }
+
+    /** The version table's columns for the list's columns, in order. */
+    private static List<String> dbColumns(String columnsJson) {
+        return parseColumns(columnsJson, "").stream().map(column -> column.get("dbColumn")).toList();
+    }
+
+    /** The list's values, as a SELECT list, in column order. */
+    private static String cellSelect(DataSnapshot snapshot) {
+        return dbColumns(snapshot.getColumnsJson()).stream().map(column -> ", " + VersionTables.quote(column))
+                .collect(java.util.stream.Collectors.joining());
+    }
+
+    private static String table(DataSnapshot snapshot) {
+        if (snapshot.getTableName() == null) {
+            throw new IllegalStateException("Data version " + snapshot.getLabel() + " has no table");
+        }
+        return VersionTables.quote(snapshot.getTableName());
     }
 
     // ------------------------------------------------------------------ reading
@@ -459,33 +534,31 @@ public class SnapshotService {
     }
 
     /**
-     * Streams the stored rows of a version in line order as export records: the same keys the source
-     * reader and the gs_ enricher produce, so quality checks, profile filters and file writers work
-     * unchanged. The source tables are not read.
+     * Streams the rows of a version from its own table, in line order, as export records: the same keys
+     * the source reader and the gs_ enricher produce, so quality checks, profile filters and file writers
+     * work unchanged. The source tables are not read.
      */
     public void stream(DataSnapshot snapshot, Selection selection, List<FormatField> fields, Consumer<Map<String, Object>> consumer) {
-        StringBuilder sql = new StringBuilder("SELECT " + ROW_COLUMNS + " FROM ver_export_snapshot_row r "
-                + "JOIN ver_export_snapshot_data d ON d.row_key = r.row_key WHERE r.snapshot_id = ?");
+        StringBuilder sql = new StringBuilder("SELECT " + ENTRY_SELECT + cellSelect(snapshot) + " FROM " + table(snapshot) + " WHERE 1 = 1");
         List<Object> args = new ArrayList<>();
-        args.add(snapshot.getId());
         String flag = switch (selection.scope() == null ? "ALL" : selection.scope().toUpperCase()) {
-            case "SANCTIONS" -> "d.on_sanctions";
-            case "WORLDCHECK" -> "d.on_worldcheck";
-            case "PFA" -> "d.on_pfa";
+            case "SANCTIONS" -> "\"_on_sanctions\"";
+            case "WORLDCHECK" -> "\"_on_worldcheck\"";
+            case "PFA" -> "\"_on_pfa\"";
             default -> null;
         };
         if (flag != null) {
             sql.append(" AND ").append(flag).append(" = TRUE");
         }
         if ("DELTA".equalsIgnoreCase(selection.exportMode())) {
-            sql.append(" AND d.action IS NOT NULL");
+            sql.append(" AND \"_action\" IS NOT NULL");
             if (selection.fromDate() != null && selection.toDate() != null) {
-                sql.append(" AND d.changed_on >= ? AND d.changed_on < ?");
+                sql.append(" AND \"_changed_on\" >= ? AND \"_changed_on\" < ?");
                 args.add(Date.valueOf(selection.fromDate()));
                 args.add(Date.valueOf(selection.toDate().plusDays(1)));
             }
         }
-        sql.append(" ORDER BY r.line_no");
+        sql.append(" ORDER BY \"_line\"");
         JdbcStreams.query(dataSource, sql.toString(), args, rs -> consumer.accept(record(rs, fields)));
     }
 
@@ -504,9 +577,9 @@ public class SnapshotService {
         record.put("sanctions", rs.getBoolean(11));
         record.put("worldcheck", rs.getBoolean(12));
         record.put("pfa", rs.getBoolean(13));
-        List<Object> cells = fromJson(rs.getString(14));
+        int cellCount = rs.getMetaData().getColumnCount() - 13;
         for (int index = 0; index < fields.size(); index++) {
-            record.put(fields.get(index).recordKey(), index < cells.size() ? cells.get(index) : null);
+            record.put(fields.get(index).recordKey(), index < cellCount ? rs.getString(14 + index) : null);
         }
         return record;
     }
@@ -516,11 +589,17 @@ public class SnapshotService {
 
     /** A page of a version's rows, in file order. */
     public List<PageRow> rows(DataSnapshot snapshot, int offset, int limit) {
-        return jdbc.query("SELECT r.line_no, r.record_id, d.cells FROM ver_export_snapshot_row r "
-                        + "JOIN ver_export_snapshot_data d ON d.row_key = r.row_key WHERE r.snapshot_id = ? "
-                        + "ORDER BY r.line_no OFFSET ? ROWS FETCH NEXT ? ROWS ONLY",
-                (rs, index) -> new PageRow(rs.getLong(1), rs.getLong(2), strings(fromJson(rs.getString(3)))),
-                snapshot.getId(), Math.max(0, offset), Math.min(500, Math.max(1, limit)));
+        int cellCount = dbColumns(snapshot.getColumnsJson()).size();
+        return jdbc.query("SELECT \"_line\", \"_record_id\"" + cellSelect(snapshot) + " FROM " + table(snapshot)
+                        + " ORDER BY \"_line\" OFFSET ? ROWS FETCH NEXT ? ROWS ONLY",
+                (rs, index) -> {
+                    List<String> cells = new ArrayList<>(cellCount);
+                    for (int column = 0; column < cellCount; column++) {
+                        cells.add(rs.getString(3 + column));
+                    }
+                    return new PageRow(rs.getLong(1), rs.getLong(2), cells);
+                },
+                Math.max(0, offset), Math.min(500, Math.max(1, limit)));
     }
 
     // ------------------------------------------------------------------ comparing
@@ -530,14 +609,21 @@ public class SnapshotService {
 
     /** How {@code newer} differs from {@code older}, record by record (matched on record id). */
     public Counts counts(Long newer, Long older) {
-        long inserted = count("SELECT COUNT(*) FROM ver_export_snapshot_row n WHERE n.snapshot_id = ? AND NOT EXISTS "
-                + "(SELECT 1 FROM ver_export_snapshot_row o WHERE o.snapshot_id = ? AND o.record_id = n.record_id)", newer, older);
-        long deleted = count("SELECT COUNT(*) FROM ver_export_snapshot_row o WHERE o.snapshot_id = ? AND NOT EXISTS "
-                + "(SELECT 1 FROM ver_export_snapshot_row n WHERE n.snapshot_id = ? AND n.record_id = o.record_id)", older, newer);
-        long changed = count("SELECT COUNT(*) FROM ver_export_snapshot_row n JOIN ver_export_snapshot_row o "
-                + "ON o.snapshot_id = ? AND o.record_id = n.record_id WHERE n.snapshot_id = ? AND o.row_key <> n.row_key", older, newer);
-        long unchanged = count("SELECT COUNT(*) FROM ver_export_snapshot_row n JOIN ver_export_snapshot_row o "
-                + "ON o.snapshot_id = ? AND o.record_id = n.record_id WHERE n.snapshot_id = ? AND o.row_key = n.row_key", older, newer);
+        return counts(get(newer).getTableName(), get(older).getTableName());
+    }
+
+    /** The same, between two version tables (the newer one may still be a stage table). */
+    private Counts counts(String newerTable, String olderTable) {
+        String n = VersionTables.quote(newerTable);
+        String o = VersionTables.quote(olderTable);
+        long inserted = count("SELECT COUNT(*) FROM " + n + " n WHERE NOT EXISTS "
+                + "(SELECT 1 FROM " + o + " o WHERE o.\"_record_id\" = n.\"_record_id\")");
+        long deleted = count("SELECT COUNT(*) FROM " + o + " o WHERE NOT EXISTS "
+                + "(SELECT 1 FROM " + n + " n WHERE n.\"_record_id\" = o.\"_record_id\")");
+        long changed = count("SELECT COUNT(*) FROM " + n + " n JOIN " + o + " o ON o.\"_record_id\" = n.\"_record_id\" "
+                + "WHERE o.\"_row_key\" <> n.\"_row_key\"");
+        long unchanged = count("SELECT COUNT(*) FROM " + n + " n JOIN " + o + " o ON o.\"_record_id\" = n.\"_record_id\" "
+                + "WHERE o.\"_row_key\" = n.\"_row_key\"");
         return new Counts(inserted, deleted, changed, unchanged);
     }
 
@@ -567,41 +653,38 @@ public class SnapshotService {
         if (!newer.getFamilyId().equals(older.getFamilyId()) || !newer.getListCode().equals(older.getListCode())) {
             throw new ResponseStatusException(BAD_REQUEST, "Only data versions of the same template and list can be compared");
         }
+        String n = table(newer);
+        String o = table(older);
         int size = Math.min(200, Math.max(1, limit));
-        List<Object[]> page = jdbc.query("SELECT * FROM ("
-                        + "SELECT n.record_id AS rid, o.row_key AS before_key, n.row_key AS after_key FROM ver_export_snapshot_row n "
-                        + "JOIN ver_export_snapshot_row o ON o.snapshot_id = ? AND o.record_id = n.record_id "
-                        + "WHERE n.snapshot_id = ? AND o.row_key <> n.row_key "
-                        + "UNION ALL SELECT n.record_id, NULL, n.row_key FROM ver_export_snapshot_row n WHERE n.snapshot_id = ? AND NOT EXISTS "
-                        + "(SELECT 1 FROM ver_export_snapshot_row o WHERE o.snapshot_id = ? AND o.record_id = n.record_id) "
-                        + "UNION ALL SELECT o.record_id, o.row_key, NULL FROM ver_export_snapshot_row o WHERE o.snapshot_id = ? AND NOT EXISTS "
-                        + "(SELECT 1 FROM ver_export_snapshot_row n WHERE n.snapshot_id = ? AND n.record_id = o.record_id)"
+        List<Long> page = jdbc.queryForList("SELECT rid FROM ("
+                        + "SELECT n.\"_record_id\" AS rid FROM " + n + " n JOIN " + o + " o ON o.\"_record_id\" = n.\"_record_id\" "
+                        + "WHERE o.\"_row_key\" <> n.\"_row_key\" "
+                        + "UNION ALL SELECT n.\"_record_id\" FROM " + n + " n WHERE NOT EXISTS "
+                        + "(SELECT 1 FROM " + o + " o WHERE o.\"_record_id\" = n.\"_record_id\") "
+                        + "UNION ALL SELECT o.\"_record_id\" FROM " + o + " o WHERE NOT EXISTS "
+                        + "(SELECT 1 FROM " + n + " n WHERE n.\"_record_id\" = o.\"_record_id\")"
                         + ") x ORDER BY rid OFFSET ? ROWS FETCH NEXT ? ROWS ONLY",
-                (rs, index) -> new Object[] {rs.getLong(1), rs.getString(2), rs.getString(3)},
-                olderId, newerId, newerId, olderId, olderId, newerId, Math.max(0, offset), size + 1);
+                Long.class, Math.max(0, offset), size + 1);
         boolean more = page.size() > size;
         if (more) {
             page = page.subList(0, size);
         }
-        Set<String> keys = new HashSet<>();
-        page.forEach(row -> {
-            if (row[1] != null) keys.add((String) row[1]);
-            if (row[2] != null) keys.add((String) row[2]);
-        });
-        Map<String, StoredRow> stored = load(keys);
+        Map<Long, StoredRow> before = load(older, page);
+        Map<Long, StoredRow> after = load(newer, page);
         List<Map<String, String>> beforeColumns = columns(older);
         List<Map<String, String>> afterColumns = columns(newer);
-        boolean sameLayout = beforeColumns.equals(afterColumns);
+        boolean sameLayout = beforeColumns.stream().map(column -> column.get("header")).toList()
+                .equals(afterColumns.stream().map(column -> column.get("header")).toList());
         List<Change> changes = new ArrayList<>();
-        for (Object[] row : page) {
-            StoredRow before = row[1] == null ? null : stored.get((String) row[1]);
-            StoredRow after = row[2] == null ? null : stored.get((String) row[2]);
-            String kind = before == null ? "ADDED" : after == null ? "REMOVED" : "CHANGED";
-            String bnpId = after != null ? after.bnpId() : before != null ? before.bnpId() : null;
-            changes.add(new Change((Long) row[0], bnpId, kind, cellChanges(before, after, beforeColumns, afterColumns)));
+        for (Long recordId : page) {
+            StoredRow old = before.get(recordId);
+            StoredRow now = after.get(recordId);
+            String kind = old == null ? "ADDED" : now == null ? "REMOVED" : "CHANGED";
+            String bnpId = now != null ? now.bnpId() : old != null ? old.bnpId() : null;
+            changes.add(new Change(recordId, bnpId, kind, cellChanges(old, now, beforeColumns, afterColumns)));
         }
         return new Comparison(newer.getId(), newer.getLabel(), older.getId(), older.getLabel(), sameLayout,
-                counts(newerId, olderId), Math.max(0, offset), changes, more);
+                counts(newer.getTableName(), older.getTableName()), Math.max(0, offset), changes, more);
     }
 
     private record StoredRow(String bnpId, Map<String, String> entry, List<String> cells) {
@@ -613,21 +696,26 @@ public class SnapshotService {
             {"changed_on", "Changed on"}, {"on_sanctions", "On Sanctions"}, {"on_worldcheck", "On World-Check"}, {"on_pfa", "On PFA"}
     };
 
-    private Map<String, StoredRow> load(Set<String> keys) {
-        if (keys.isEmpty()) {
+    /** Rows of one version by record id. */
+    private Map<Long, StoredRow> load(DataSnapshot snapshot, List<Long> recordIds) {
+        if (recordIds.isEmpty()) {
             return Map.of();
         }
-        List<String> list = new ArrayList<>(keys);
-        Map<String, StoredRow> rows = new HashMap<>();
-        jdbc.query("SELECT d.row_key, " + ROW_COLUMNS + " FROM ver_export_snapshot_data d WHERE d.row_key IN ("
-                + RowFilterService.marks(list.size()) + ")", rs -> {
+        int cellCount = dbColumns(snapshot.getColumnsJson()).size();
+        Map<Long, StoredRow> rows = new HashMap<>();
+        jdbc.query("SELECT " + ENTRY_SELECT + cellSelect(snapshot) + " FROM " + table(snapshot) + " WHERE \"_record_id\" IN ("
+                + RowFilterService.marks(recordIds.size()) + ")", rs -> {
             Map<String, String> entry = new LinkedHashMap<>();
             for (int index = 0; index < ENTRY_FIELDS.length; index++) {
-                Object value = rs.getObject(index + 4);
+                Object value = rs.getObject(index + 3);
                 entry.put(ENTRY_FIELDS[index][0], value == null ? null : value instanceof Date date ? date.toLocalDate().toString() : String.valueOf(value));
             }
-            rows.put(rs.getString(1), new StoredRow(rs.getString(3), entry, strings(fromJson(rs.getString(15)))));
-        }, list.toArray());
+            List<String> cells = new ArrayList<>(cellCount);
+            for (int column = 0; column < cellCount; column++) {
+                cells.add(rs.getString(14 + column));
+            }
+            rows.put(rs.getLong(1), new StoredRow(rs.getString(2), entry, cells));
+        }, recordIds.toArray());
         return rows;
     }
 

@@ -50,7 +50,6 @@ import static org.springframework.http.HttpStatus.NOT_FOUND;
 @RequestMapping("/api")
 public class ExportController {
 
-    private static final Set<String> FORMATS = Set.copyOf(FormatTemplateService.FORMATS);
     private static final Set<String> SCOPES = Set.of("ALL", "SANCTIONS", "WORLDCHECK", "PFA");
     private static final Set<String> MODES = Set.of("FULL", "DELTA");
 
@@ -119,7 +118,7 @@ public class ExportController {
         SubscriberProfile profile = new SubscriberProfile();
         apply(profile, request, name);
         profile.setTemplateFamilyId(request.templateId());
-        formatTemplateService.checkChoice(profile.getTemplateFamilyId(), profile.getFormatType());
+        formatTemplateService.checkChoice(profile.getTemplateFamilyId());
         profile.setActive(request.active() == null || request.active());
         gateNewEndpoint(profile, null);
         SubscriberProfile saved = subscriberRepository.save(profile);
@@ -145,15 +144,14 @@ public class ExportController {
                     throw new ResponseStatusException(CONFLICT, "A subscriber named " + name + " already exists");
                 });
         String previousEndpoint = profile.getCftEndpoint();
-        String previousFormat = profile.getFormatType();
         String before = summary(profile);
         apply(profile, request, name);
         if (request.templateId() != null) {
             profile.setTemplateFamilyId(request.templateId());
         }
-        // A new template, or a new format, must be checked; an unchanged choice is left as it is.
-        if (request.templateId() != null || !profile.getFormatType().equals(previousFormat)) {
-            formatTemplateService.checkChoice(profile.getTemplateFamilyId(), profile.getFormatType());
+        // A new template must be checked; an unchanged choice is left as it is.
+        if (request.templateId() != null) {
+            formatTemplateService.checkChoice(profile.getTemplateFamilyId());
         }
         if (request.active() != null) {
             profile.setActive(request.active());
@@ -234,11 +232,10 @@ public class ExportController {
     /** Approved templates with their latest data version and subscribers, searched and paged. */
     @GetMapping("/export-templates")
     public com.bnpp.export.service.TemplateExportService.TemplatePage exportTemplates(@RequestParam(required = false) String q,
-                                                                                   @RequestParam(required = false) String format,
                                                                                    @RequestParam(defaultValue = "false") boolean withVersions,
                                                                                    @RequestParam(defaultValue = "0") int offset,
                                                                                    @RequestParam(defaultValue = "25") int limit) {
-        return templateExports.list(q, format, withVersions, offset, limit);
+        return templateExports.list(q, withVersions, offset, limit);
     }
 
     /** Reads the template's current data: the existing version if nothing changed, otherwise the next version. */
@@ -349,7 +346,9 @@ public class ExportController {
 
     private void apply(SubscriberProfile profile, SubscriberRequest request, String name) {
         profile.setName(name);
-        profile.setFormatType(required(request.formatType(), FORMATS, "Format must be CSV or XML"));
+        // The subscriber's usual format: the one it gets unless another is chosen when sending.
+        List<String> formats = orchestrator.formatTypes();
+        profile.setFormatType(required(request.formatType(), java.util.Set.copyOf(formats), "Format must be one of " + String.join(", ", formats)));
         profile.setScope(required(request.scope(), SCOPES, "Scope must be ALL, SANCTIONS, WORLDCHECK, or PFA"));
         profile.setExportMode(required(request.exportMode(), MODES, "Mode must be FULL or DELTA"));
         profile.setBusinessLine(StringUtils.trimToNull(request.businessLine()));

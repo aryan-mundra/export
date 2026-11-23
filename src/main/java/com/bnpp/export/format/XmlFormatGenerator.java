@@ -13,7 +13,6 @@ import java.nio.file.Path;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
-import java.util.regex.Pattern;
 
 /**
  * XML file: one {@code <Record>} per list record and one element per template column,
@@ -28,28 +27,10 @@ public class XmlFormatGenerator implements ExportFormat {
 
     public static final String FORMAT = "XML";
 
-    /** A name that can be used as an XML element: starts with a letter or _, then letters, digits, _ . or -. */
-    public static final Pattern ELEMENT_NAME = Pattern.compile("[A-Za-z_][A-Za-z0-9_.-]*");
-
     private final FormatTemplateService formatTemplateService;
 
     public XmlFormatGenerator(FormatTemplateService formatTemplateService) {
         this.formatTemplateService = formatTemplateService;
-    }
-
-    /** Returns null when the name works as an XML element, otherwise the reason it does not. */
-    public static String elementNameProblem(String name) {
-        String value = name == null ? "" : name.trim();
-        if (value.isEmpty()) {
-            return "Header name is required";
-        }
-        if (!ELEMENT_NAME.matcher(value).matches()) {
-            return "\"" + value + "\" cannot be an XML element name. Start with a letter or _, and use only letters, digits, _ . or - (no spaces).";
-        }
-        if (value.toLowerCase().startsWith("xml")) {
-            return "\"" + value + "\" cannot be an XML element name. Names may not start with xml.";
-        }
-        return null;
     }
 
     @Override
@@ -128,13 +109,24 @@ public class XmlFormatGenerator implements ExportFormat {
         };
     }
 
-    /** Template names are checked when saved; anything older that does not fit falls back to the column name. */
     private String elementName(FormatField field) {
-        String header = field.getHeaderName() == null ? "" : field.getHeaderName().trim();
-        if (elementNameProblem(header) == null) {
-            return header;
+        String name = elementName(field.getHeaderName());
+        return name.equals("Field") && field.getSourceColumn() != null ? elementName(field.getSourceColumn()) : name;
+    }
+
+    /**
+     * The XML element for a column name. A list has no format of its own, so its column names are free text
+     * (spaces and all, which CSV keeps as they are); in XML each run of characters an element cannot hold
+     * becomes "_", e.g. "Country risk" is written as Country_risk.
+     */
+    public static String elementName(String header) {
+        String value = (header == null ? "" : header.trim()).replaceAll("[^A-Za-z0-9_.-]+", "_").replaceAll("^_+|_+$", "");
+        if (value.isEmpty()) {
+            return "Field";
         }
-        String fallback = field.getSourceColumn().replaceAll("[^A-Za-z0-9_.-]", "");
-        return fallback.isEmpty() || !Character.isLetter(fallback.charAt(0)) ? "Field" : fallback;
+        if (!Character.isLetter(value.charAt(0)) && value.charAt(0) != '_') {
+            value = "_" + value;
+        }
+        return value.toLowerCase(java.util.Locale.ROOT).startsWith("xml") ? "_" + value : value;
     }
 }

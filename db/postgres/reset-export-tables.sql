@@ -1,8 +1,16 @@
--- Drops the Export module's own VER_EXPORT_* tables so the next application start
--- recreates them empty. Leaves the source tables (VER_VERSION, VER_VERSION_MEMBER, GS_*) alone.
+-- Drops the Export module's own VER_EXPORT_* tables so they can be created again
+-- empty with ver-export-schema.sql. Leaves the source tables (VER_VERSION, VER_VERSION_MEMBER, GS_*) alone.
 -- Test databases only. Run with psql -f, or in pgAdmin's Query Tool.
-DROP TABLE IF EXISTS VER_EXPORT_SNAPSHOT_ROW;
-DROP TABLE IF EXISTS VER_EXPORT_SNAPSHOT_DATA;
+-- First the table of every data version (ver_<list>_v<major>_<minor>), named in ver_export_snapshot.
+DO $$
+DECLARE version_table text;
+BEGIN
+    IF to_regclass('ver_export_snapshot') IS NOT NULL THEN
+        FOR version_table IN SELECT table_name FROM ver_export_snapshot LOOP
+            EXECUTE 'DROP TABLE IF EXISTS ' || quote_ident(version_table);
+        END LOOP;
+    END IF;
+END $$;
 DROP TABLE IF EXISTS VER_EXPORT_SNAPSHOT;
 DROP TABLE IF EXISTS VER_EXPORT_SNAPSHOT_SERIES;
 DROP TABLE IF EXISTS VER_EXPORT_TEMPLATE_FILTER;

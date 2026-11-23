@@ -27,4 +27,6 @@ public interface DataSnapshotRepository extends JpaRepository<DataSnapshot, Long
 
     @Query("select max(s.minor) from DataSnapshot s where s.familyId = ?1 and s.listCode = ?2 and s.major = ?3")
     Integer maxMinor(Long familyId, String listCode, int major);
+
+    boolean existsByTableName(String tableName);
 }

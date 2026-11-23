@@ -97,7 +97,6 @@ class ExportModuleIntegrationTest {
 
         mockMvc.perform(get("/api/format-templates").session(maker))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$[0].formatType").value("CSV"))
                 .andExpect(jsonPath("$[0].versionNumber").value(1))
                 .andExpect(jsonPath("$[0].status").value("APPROVED"))
                 .andExpect(jsonPath("$[0].fields", hasSize(3)))
@@ -116,7 +115,7 @@ class ExportModuleIntegrationTest {
                         .session(maker)
                         .contentType("application/json")
                         .content("""
-                                {"name":"CSV Export","formatType":"CSV","fields":[
+                                {"name":"Party Basic","formatType":"CSV","fields":[
                                   {"sourceTable":"GS_PARTY","sourceColumn":"BNP_ID","headerName":"id"},
                                   {"sourceTable":"GS_PARTY","sourceColumn":"FULL_NAME","headerName":"name"},
                                   {"sourceTable":"GS_PARTY","sourceColumn":"NATIONALITY","headerName":"nationality"},
@@ -159,19 +158,18 @@ class ExportModuleIntegrationTest {
                 .andExpect(jsonPath("$[1].versionNumber").value(1))
                 .andExpect(jsonPath("$[1].active").value(false));
 
+        // A list has no file format: column names are free text, and XML files turn them into elements.
+        org.junit.jupiter.api.Assertions.assertEquals("Country_risk", com.bnpp.export.format.XmlFormatGenerator.elementName("Country risk"));
+        org.junit.jupiter.api.Assertions.assertEquals("_2nd_name", com.bnpp.export.format.XmlFormatGenerator.elementName("2nd name"));
+        org.junit.jupiter.api.Assertions.assertEquals("_xmlData", com.bnpp.export.format.XmlFormatGenerator.elementName("xmlData"));
+        // Two names that would be the same XML element are refused.
         mockMvc.perform(post("/api/format-templates")
                         .session(maker)
                         .contentType("application/json")
-                        .content("{\"name\":\"Fircosoft\",\"formatType\":\"FIRCOSOFT\",\"fields\":[{\"sourceColumn\":\"id\",\"headerName\":\"id\"}]}"))
+                        .content("{\"name\":\"X\",\"fields\":[{\"sourceTable\":\"GS_PARTY\",\"sourceColumn\":\"FULL_NAME\",\"headerName\":\"party name\"},"
+                                + "{\"sourceTable\":\"GS_PARTY\",\"sourceColumn\":\"NATIONALITY\",\"headerName\":\"party_name\"}]}"))
                 .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.message").value("Format must be CSV or XML"));
-
-        mockMvc.perform(post("/api/format-templates")
-                        .session(maker)
-                        .contentType("application/json")
-                        .content("{\"name\":\"X\",\"formatType\":\"XML\",\"fields\":[{\"sourceTable\":\"GS_PARTY\",\"sourceColumn\":\"FULL_NAME\",\"headerName\":\"party name\"}]}"))
-                .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.message").value(org.hamcrest.Matchers.containsString("cannot be an XML element name")));
+                .andExpect(jsonPath("$.message").value(org.hamcrest.Matchers.containsString("would both be <party_name>")));
 
         mockMvc.perform(post("/api/subscribers")
                         .session(maker)
@@ -184,7 +182,7 @@ class ExportModuleIntegrationTest {
                         .contentType("application/json")
                         .content("{\"name\":\"New Channel\",\"formatType\":\"CSV\",\"scope\":\"ALL\",\"exportMode\":\"FULL\",\"cftEndpoint\":\"http://cft.local/inbox/new-channel\",\"templateId\":" + csvFamilyId + "}"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.templateName").value("CSV Export"))
+                .andExpect(jsonPath("$.templateName").value("Party Basic"))
                 .andExpect(jsonPath("$.active").value(false))
                 .andExpect(jsonPath("$.endpointStatus").value("PENDING"))
                 .andReturn();
@@ -407,14 +405,7 @@ class ExportModuleIntegrationTest {
                 .andExpect(jsonPath("$.message").value(org.hamcrest.Matchers.containsString("has no approved version yet")));
         mockMvc.perform(post("/api/format-templates/" + templateId + "/approve").with(user("approver").roles("APPROVER")))
                 .andExpect(status().isOk());
-        // ...and an XML template cannot go to a CSV subscriber.
-        Long actimizeId = subscriberRepository.findByNameIgnoreCase("Actimize").orElseThrow().getId();
-        mockMvc.perform(put("/api/subscribers/" + actimizeId).with(user("maker").roles("MAKER"))
-                        .contentType("application/json")
-                        .content("{\"name\":\"Actimize\",\"formatType\":\"CSV\",\"scope\":\"PFA\",\"exportMode\":\"FULL\",\"templateId\":" + familyId + "}"))
-                .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.message").value(org.hamcrest.Matchers.containsString("is a XML template")));
-        // SHINE now uses the new template; every other XML subscriber keeps "XML Export".
+        // SHINE now uses the new template; every other XML subscriber keeps "Party Detail".
         mockMvc.perform(put("/api/subscribers/" + shineProfile.getId()).with(user("maker").roles("MAKER"))
                         .contentType("application/json").content(chooseNew))
                 .andExpect(status().isOk())

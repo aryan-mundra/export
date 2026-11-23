@@ -23,15 +23,16 @@ import java.time.LocalDateTime;
  * change of configuration (2.1) can never be mistaken for a change of data (1.3). The first data version
  * of template version N is N.1.
  *
- * The rows live in ver_export_snapshot_row / ver_export_snapshot_data. Nothing here is ever updated
- * except the usage counters, and nothing is ever deleted.
+ * The rows live in a table of their own, named in {@code tableName} (ver_<list>_v<major>_<minor>). Nothing
+ * here is ever updated except the usage counters, and nothing is ever deleted.
  */
 @Data
 @Entity
 @Table(name = "ver_export_snapshot",
         uniqueConstraints = {
                 @UniqueConstraint(name = "uq_snapshot_number", columnNames = {"family_id", "list_code", "version_major", "version_minor"}),
-                @UniqueConstraint(name = "uq_snapshot_dataset", columnNames = {"family_id", "list_code", "template_id", "fingerprint"})
+                @UniqueConstraint(name = "uq_snapshot_dataset", columnNames = {"family_id", "list_code", "template_id", "fingerprint"}),
+                @UniqueConstraint(name = "uq_snapshot_table", columnNames = {"table_name"})
         },
         indexes = @Index(name = "ix_snapshot_series", columnList = "family_id, list_code"))
 public class DataSnapshot {
@@ -55,8 +56,6 @@ public class DataSnapshot {
 
     private String templateName;
 
-    private String formatType;
-
     @Column(name = "version_major", nullable = false)
     private int major;
 
@@ -66,6 +65,10 @@ public class DataSnapshot {
     /** major.minor, e.g. 1.2 */
     @Column(nullable = false)
     private String label;
+
+    /** The table holding this version's rows, e.g. ver_list_apac_v1_1. */
+    @Column(name = "table_name", nullable = false, length = 63)
+    private String tableName;
 
     /** The certified list version the rows were read from. */
     private Long sourceVersionId;

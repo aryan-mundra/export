@@ -34,8 +34,6 @@ import static org.springframework.http.HttpStatus.NOT_FOUND;
 @Service
 public class FormatTemplateService {
 
-    /** The only file formats the module builds. */
-    public static final List<String> FORMATS = List.of("CSV", XmlFormatGenerator.FORMAT);
 
     private final FormatTemplateRepository templateRepository;
     private final FormatFieldRepository fieldRepository;
@@ -88,7 +86,7 @@ public class FormatTemplateService {
     }
 
     public List<FormatTemplateResponse> list() {
-        return templateRepository.findAllByOrderByFormatTypeAscNameAscVersionNumberDesc().stream()
+        return templateRepository.findAllByOrderByNameAscVersionNumberDesc().stream()
                 .map(this::toResponse)
                 .toList();
     }
@@ -109,7 +107,8 @@ public class FormatTemplateService {
     }
 
     /**
-     * Saves a new version for approval. A name that already exists for this format adds a version to
+     * Saves a new version for approval. A template has no file format: the format is chosen per subscriber
+     * when a version is sent, so column names must work in every format. A name that already exists adds a version to
      * that template; a new name starts a new template at version 1. Nothing changes for subscribers
      * until an approver approves the version.
      *
@@ -118,15 +117,13 @@ public class FormatTemplateService {
      */
     @Transactional
     public FormatTemplateResponse save(FormatTemplateRequest request) {
-        String formatType = normalizeFormat(request.formatType());
         String name = request.name().trim();
-        List<FormatFieldRequest> fields = validateFields(request.fields(), true, formatType);
+        List<FormatFieldRequest> fields = validateFields(request.fields(), true);
         List<FormatFilter> filters = rowFilters.validate(request.filters(), toFields(fields));
         FormatTemplate latest = templateRepository
-                .findFirstByFormatTypeAndNameIgnoreCaseOrderByVersionNumberDesc(formatType, name).orElse(null);
+                .findFirstByNameIgnoreCaseOrderByVersionNumberDesc(name).orElse(null);
         FormatTemplate template = new FormatTemplate();
         template.setName(latest == null ? name : latest.getName());
-        template.setFormatType(formatType);
         template.setFamilyId(latest == null ? null : latest.getFamilyId());
         template.setVersionNumber(latest == null ? 1 : latest.getVersionNumber() + 1);
         template.setActive(false);
@@ -154,7 +151,7 @@ public class FormatTemplateService {
         }
         filterRepository.saveAll(filters);
         auditService.template(template.getId(), resubmission ? "TEMPLATE_RESUBMITTED" : "TEMPLATE_SUBMITTED",
-                formatType + " \"" + template.getName() + "\" v" + template.getVersionNumber() + ": " + describe(fields)
+                "\"" + template.getName() + "\" v" + template.getVersionNumber() + ": " + describe(fields)
                         + ". Rows: " + describeRows(filters));
         return toResponse(template);
     }
@@ -198,19 +195,15 @@ public class FormatTemplateService {
     }
 
     /**
-     * Checks a template chosen for a subscriber: it must exist, be of the subscriber's format and have
-     * an approved version. Returns the template's name for messages and the audit log.
+     * Checks a template chosen for a subscriber: it must exist and have an approved version. Any template
+     * can be sent in any format. Returns the template's name for messages and the audit log.
      */
-    public String checkChoice(Long familyId, String formatType) {
+    public String checkChoice(Long familyId) {
         if (familyId == null) {
             throw new ResponseStatusException(BAD_REQUEST, "Choose a template for this subscriber");
         }
         FormatTemplate latest = templateRepository.findFirstByFamilyIdOrderByVersionNumberDesc(familyId)
                 .orElseThrow(() -> new ResponseStatusException(BAD_REQUEST, "Unknown template"));
-        if (!latest.getFormatType().equalsIgnoreCase(formatType)) {
-            throw new ResponseStatusException(BAD_REQUEST, "\"" + latest.getName() + "\" is a " + latest.getFormatType()
-                    + " template; this subscriber receives " + formatType + " files");
-        }
         if (inUse(familyId).isEmpty()) {
             throw new ResponseStatusException(BAD_REQUEST, "\"" + latest.getName()
                     + "\" has no approved version yet. It can be chosen once an approver approves it.");
@@ -242,7 +235,7 @@ public class FormatTemplateService {
         template.setApprovedAt(LocalDateTime.now());
         decided(template, StringUtils.trimToNull(comment));
         auditService.template(template.getId(), "TEMPLATE_APPROVED",
-                template.getFormatType() + " \"" + template.getName() + "\" v" + template.getVersionNumber() + " is now in use"
+                "\"" + template.getName() + "\" v" + template.getVersionNumber() + " is now in use"
                         + (template.getReviewComment() == null ? "" : ". Comment: " + template.getReviewComment()));
         return toResponse(template);
     }
@@ -335,11 +328,11 @@ public class FormatTemplateService {
             return;
         }
         String table = party.name();
-        Long csv = seedIfMissing("CSV", "CSV Export", List.of(
+        Long csv = seedIfMissing("Party Basic", "CSV Export", List.of(
                 new FormatFieldRequest(table, key, "bnp_id", key, SourceCatalogService.RECORD_KEY),
                 new FormatFieldRequest(table, column.apply("FULL_NAME"), "name", key, SourceCatalogService.RECORD_KEY),
                 new FormatFieldRequest(table, column.apply("NATIONALITY"), "nationality", key, SourceCatalogService.RECORD_KEY)));
-        Long xml = seedIfMissing(XmlFormatGenerator.FORMAT, "XML Export", List.of(
+        Long xml = seedIfMissing("Party Detail", "XML Export", List.of(
                 new FormatFieldRequest(table, key, "BnpId", key, SourceCatalogService.RECORD_KEY),
                 new FormatFieldRequest(table, column.apply("FULL_NAME"), "Name", key, SourceCatalogService.RECORD_KEY),
                 new FormatFieldRequest(table, column.apply("NATIONALITY"), "Nationality", key, SourceCatalogService.RECORD_KEY),
@@ -353,15 +346,26 @@ public class FormatTemplateService {
     }
 
     /** Returns the template (family id) with this name, creating an approved version 1 if it is missing. */
-    private Long seedIfMissing(String formatType, String name, List<FormatFieldRequest> defaultFields) {
+    private Long seedIfMissing(String name, String formerName, List<FormatFieldRequest> defaultFields) {
         FormatTemplate existing = templateRepository
-                .findFirstByFormatTypeAndNameIgnoreCaseOrderByVersionNumberDesc(formatType, name).orElse(null);
+                .findFirstByNameIgnoreCaseOrderByVersionNumberDesc(name).orElse(null);
+        FormatTemplate former = existing != null ? null
+                : templateRepository.findFirstByNameIgnoreCaseOrderByVersionNumberDesc(formerName).orElse(null);
+        if (former != null) {
+            // The demo lists were named after a file format before lists had none; give them their new name.
+            for (FormatTemplate version : templateRepository.findAll()) {
+                if (former.getFamilyId().equals(version.getFamilyId())) {
+                    version.setName(name);
+                    templateRepository.save(version);
+                }
+            }
+            return former.getFamilyId();
+        }
         if (existing != null) {
             return existing.getFamilyId();
         }
         FormatTemplate template = new FormatTemplate();
         template.setName(name);
-        template.setFormatType(formatType);
         template.setVersionNumber(1);
         template.setActive(true);
         template.setStatus("APPROVED");
@@ -398,7 +402,7 @@ public class FormatTemplateService {
     public List<FormatField> previewFields(List<FormatFieldRequest> fields) {
         List<FormatField> rows = new ArrayList<>();
         int position = 1;
-        for (FormatFieldRequest field : validateFields(fields, false, null)) {
+        for (FormatFieldRequest field : validateFields(fields, false)) {
             FormatField row = new FormatField();
             row.setSourceTable(field.sourceTable());
             row.setSourceColumn(field.sourceColumn());
@@ -411,12 +415,13 @@ public class FormatTemplateService {
         return rows;
     }
 
-    private List<FormatFieldRequest> validateFields(List<FormatFieldRequest> fields, boolean strictHeaders, String formatType) {
+    private List<FormatFieldRequest> validateFields(List<FormatFieldRequest> fields, boolean strictHeaders) {
         if (fields == null) {
             return List.of();
         }
         Set<String> seen = new LinkedHashSet<>();
         Set<String> headers = new LinkedHashSet<>();
+        Set<String> elements = new LinkedHashSet<>();
         Map<String, String> linkByTable = new java.util.HashMap<>();
         List<SourceCatalogService.SourceTable> tables = null;
         List<FormatFieldRequest> checked = new ArrayList<>();
@@ -463,18 +468,18 @@ public class FormatTemplateService {
             if (header.isEmpty()) {
                 throw new ResponseStatusException(BAD_REQUEST, "Header name is required");
             }
-            if (XmlFormatGenerator.FORMAT.equals(formatType)) {
-                String problem = XmlFormatGenerator.elementNameProblem(header);
-                if (problem != null) {
-                    throw new ResponseStatusException(BAD_REQUEST, problem);
-                }
-            }
             String label = table == null ? source : table + "." + source;
             if (!seen.add(label.toLowerCase(Locale.ROOT))) {
                 throw new ResponseStatusException(BAD_REQUEST, "Column " + label + " is already on the template");
             }
             if (!headers.add(header.toLowerCase(Locale.ROOT))) {
                 throw new ResponseStatusException(BAD_REQUEST, "Header " + header + " is used twice. Give each export column its own name.");
+            }
+            // The list can be sent in any format: in XML the name becomes an element, which must be unique too.
+            String element = XmlFormatGenerator.elementName(header);
+            if (!elements.add(element.toLowerCase(Locale.ROOT))) {
+                throw new ResponseStatusException(BAD_REQUEST, "Columns \"" + header + "\" and another one would both be <" + element
+                        + "> in an XML file. Give them names that differ by more than spaces or symbols.");
             }
             checked.add(new FormatFieldRequest(table, source, header, joinColumn, joinField));
         }
@@ -506,17 +511,6 @@ public class FormatTemplateService {
                 .toList();
     }
 
-    private String normalizeFormat(String formatType) {
-        String normalized = formatType == null ? "" : formatType.trim().toUpperCase(Locale.ROOT).replace(' ', '_').replace('-', '_');
-        if (normalized.endsWith("_EXPORT")) {
-            normalized = normalized.substring(0, normalized.length() - "_EXPORT".length());
-        }
-        if (!FORMATS.contains(normalized)) {
-            throw new ResponseStatusException(BAD_REQUEST, "Format must be CSV or XML");
-        }
-        return normalized;
-    }
-
     private FormatTemplateResponse toResponse(FormatTemplate template) {
         List<FormatTemplateResponse.FieldResponse> fields = fieldRepository.findByTemplateIdOrderByPositionAsc(template.getId()).stream()
                 .map(field -> new FormatTemplateResponse.FieldResponse(
@@ -534,7 +528,6 @@ public class FormatTemplateService {
                 template.getId(),
                 template.getFamilyId(),
                 template.getName(),
-                template.getFormatType(),
                 template.getVersionNumber(),
                 template.isActive(),
                 template.getStatus(),

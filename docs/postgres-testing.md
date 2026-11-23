@@ -136,16 +136,19 @@ Open http://localhost:8082 and sign in as `maker` / `Regliss-maker`. The sidebar
 | Data explorer | Pick columns from several tables, press **Preview data and filter rows**, filter with the funnel on a column header. |
 | Export version 42 | The job ends **Held**: SHINE is held because record 42000041 has no country. Accept the omissions on the job to release its file. |
 | Approver review | Save a template, sign in as `approver` / `Regliss-approver`, review it on **Approvals**, request changes or approve. |
-| Data versions | Export version 42 twice. On **Data Versions** the template has version 1.0, used by both exports (the second reused it). Change a value, e.g. `UPDATE gs_party SET full_name = 'Renamed' WHERE bnp_id = 'BNP42000005';`, export again: version 1.1 appears with "~1 changed". Download 1.0: it still holds the old name. |
+| Data versions | On **Export > Export Latest**, export Party Basic twice: the second reuses version 1.1 and table `ver_party_basic_v1_1`. Change a value, e.g. `UPDATE gs_party SET full_name = 'Renamed' WHERE bnp_id = 'BNP42000005';`, export again: version 1.2 and table `ver_party_basic_v1_2` appear. Download 1.1 under **Previous Versions**: it still holds the old name. |
 
 Then look at what the module wrote:
 
 ```sql
 SELECT table_name FROM information_schema.tables WHERE table_name LIKE 'ver_export%' ORDER BY table_name;
 
--- Data versions and how they were used
-SELECT label, template_name, list_code, row_count, stored_rows, inserted_rows, deleted_rows, changed_rows, reuse_count, created_at
+-- Data versions, their tables and how they were used
+SELECT label, template_name, list_code, table_name, row_count, inserted_rows, deleted_rows, changed_rows, reuse_count, created_at
   FROM ver_export_snapshot ORDER BY id;
+
+-- The rows of one version
+SELECT * FROM ver_party_basic_v1_1 ORDER BY _line;
 
 -- Who did what
 SELECT logged_at, actor, entity_type, action, details FROM ver_export_audit ORDER BY id;
@@ -159,21 +162,20 @@ To reset everything, run `regliss-mock.sql` again as well.
 ## Data versions: how they are stored
 
 Every export records the exact rows it produced as a **data version**, numbered `template version.data revision`
-(1.0, 1.1, … and 2.0 once a new template version is approved).
+(1.1, 1.2, ... and 2.1 once a new template version is approved).
 
 - An export reads the source once per template, writes each row in a fixed form (every value, empty ones included),
   and hashes it. The dataset's fingerprint is the hash of the column layout and all row hashes in record order. If a
   version of the same template version already has that fingerprint, it is reused; otherwise the next number is given.
-- `ver_export_snapshot` holds one row per version. `ver_export_snapshot_row` holds its lines (version, line, row hash).
-  `ver_export_snapshot_data` holds each distinct row once, so a version that changes five rows stores five rows.
-- Versions are numbered under a row lock on `ver_export_snapshot_series` (one row per template and list), and a unique
-  key on (template, list, template version, fingerprint) makes duplicates impossible even across app instances.
-- Subscriber files, retries and downloads are built from the stored rows; the source query is not run again. Nothing in
-  these tables is ever updated (apart from usage counters) or deleted.
+- Each new version gets **a table of its own**, `ver_<list>_v<major>_<minor>` (e.g. `ver_party_basic_v1_1`), with the
+  list's columns and its rows. `ver_export_snapshot` holds one row per version, with the table's name. The
+  application creates these tables, so its database user needs `CREATE` on the schema. See
+  `docs/ver-export-tables.md`.
+- Subscriber files, retries, downloads and comparisons read the version's table; the source query is not run again.
 
 ## Large data
 
 Exports stream: rows are read with a database cursor (PostgreSQL needs this inside a transaction; the module does it),
-staged to a file while hashing, and written to the snapshot tables in batches of 500. The explorer pages and counts in
+staged to a file while hashing, and written to the version's table in batches of 500. The explorer pages and counts in
 the database. On a large database, index `ver_version_member (version_id, bnp_id)` and `bnp_id` on every `gs_*`
-table; the module creates its own indexes on the snapshot tables.
+table.

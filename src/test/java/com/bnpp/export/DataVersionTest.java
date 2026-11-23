@@ -115,6 +115,11 @@ class DataVersionTest {
         assertEquals("1.1", v10.getLabel());
         assertEquals(400, v10.getRowCount());
         assertEquals(400, v10.getStoredRows());
+        // Version 1.1 has a table of its own: the list's columns and its 400 rows.
+        assertEquals("ver_party_basic_v1_1", v10.getTableName());
+        assertEquals(400, jdbc.queryForObject("SELECT COUNT(*) FROM ver_party_basic_v1_1", Integer.class));
+        assertEquals("Party 42000005", jdbc.queryForObject(
+                "SELECT \"name\" FROM ver_party_basic_v1_1 WHERE \"_bnp_id\" = 'BNP42000005'", String.class));
         assertEquals("CREATED", row(first, "Actimize").snapshotOutcome());
         assertEquals(v10.getId(), row(first, "Compliance Team").snapshotId(), "subscribers on one template share one version");
         Set<Long> versionsOfFirst = first.subscribers().stream().map(JobDetailResponse.SubscriberStatusResponse::snapshotId).collect(Collectors.toSet());
@@ -127,13 +132,19 @@ class DataVersionTest {
         assertEquals(2, snapshots.count());
         assertEquals(1, snapshots.findById(v10.getId()).orElseThrow().getReuseCount());
 
-        // One gs_ value changes: version 1.2, which stores only the changed row.
+        // One gs_ value changes: version 1.2, in a new table of its own.
         jdbc.update("UPDATE gs_party SET full_name = 'Renamed Party' WHERE bnp_id = 'BNP42000005'");
         JobDetailResponse third = export();
         DataSnapshot v11 = csvVersion(third);
         assertEquals("1.2", v11.getLabel());
         assertEquals("CREATED", row(third, "Actimize").snapshotOutcome());
-        assertEquals(1, v11.getStoredRows(), "only the changed row is stored again");
+        assertEquals("ver_party_basic_v1_2", v11.getTableName());
+        assertEquals(400, v11.getStoredRows(), "the whole version is in its table");
+        assertEquals("Renamed Party", jdbc.queryForObject(
+                "SELECT \"name\" FROM ver_party_basic_v1_2 WHERE \"_bnp_id\" = 'BNP42000005'", String.class));
+        assertEquals("Party 42000005", jdbc.queryForObject(
+                "SELECT \"name\" FROM ver_party_basic_v1_1 WHERE \"_bnp_id\" = 'BNP42000005'", String.class),
+                "the table of 1.1 is never changed");
         assertEquals(1L, v11.getChangedRows());
         assertEquals(0L, v11.getInsertedRows());
         assertEquals(0L, v11.getDeletedRows());
@@ -177,7 +188,7 @@ class DataVersionTest {
         DataSnapshot v12 = csvVersion(export());
         assertEquals("1.3", v12.getLabel());
         assertEquals(399, v12.getRowCount());
-        assertEquals(0, v12.getStoredRows(), "every remaining row is already stored");
+        assertEquals(399, jdbc.queryForObject("SELECT COUNT(*) FROM " + v12.getTableName(), Integer.class));
         assertEquals(1L, v12.getDeletedRows());
 
         // Two exports at the same moment on new data: one version is created, the other export reuses it.
@@ -198,12 +209,14 @@ class DataVersionTest {
         assertEquals(ra.snapshot().getId(), rb.snapshot().getId());
         assertTrue(ra.created() ^ rb.created(), "exactly one of the two creates the version");
         assertEquals("1.4", ra.snapshot().getLabel());
+        assertEquals(0, jdbc.queryForObject("SELECT COUNT(*) FROM information_schema.tables WHERE LOWER(table_name) LIKE 'ver_export_stage%'",
+                Integer.class), "the other export's half-built table is dropped");
 
         // A new template version starts a new number: 2.1.
         String saved = mockMvc.perform(post("/api/format-templates").with(user("maker").roles("MAKER"))
                         .contentType("application/json")
                         .content("""
-                                {"name":"CSV Export","formatType":"CSV","fields":[
+                                {"name":"Party Basic","formatType":"CSV","fields":[
                                   {"sourceTable":"gs_party","sourceColumn":"bnp_id","headerName":"bnp_id"},
                                   {"sourceTable":"gs_party","sourceColumn":"full_name","headerName":"party"}]}"""))
                 .andExpect(status().isOk())
@@ -224,13 +237,13 @@ class DataVersionTest {
         // The catalog: one row per template and list, searched and paged, without reading any version.
         mockMvc.perform(get("/api/data-versions/series").with(user("maker").roles("MAKER")))
                 .andExpect(jsonPath("$.total").value(2))
-                .andExpect(jsonPath("$.series[0].templateName").value("CSV Export"))
+                .andExpect(jsonPath("$.series[0].templateName").value("Party Basic"))
                 .andExpect(jsonPath("$.series[0].versions").value(5))
                 .andExpect(jsonPath("$.series[0].latestLabel").value("2.1"))
                 .andExpect(jsonPath("$.series[0].columnsJson").doesNotExist());
-        mockMvc.perform(get("/api/data-versions/series").param("q", "xml exp").with(user("maker").roles("MAKER")))
+        mockMvc.perform(get("/api/data-versions/series").param("q", "party det").with(user("maker").roles("MAKER")))
                 .andExpect(jsonPath("$.total").value(1))
-                .andExpect(jsonPath("$.series[0].templateName").value("XML Export"));
+                .andExpect(jsonPath("$.series[0].templateName").value("Party Detail"));
         String path = "/api/data-versions/series/" + v10.getFamilyId() + "/SANCTIONS";
         mockMvc.perform(get(path).param("limit", "2").with(user("maker").roles("MAKER")))
                 .andExpect(jsonPath("$.total").value(5))

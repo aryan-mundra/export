@@ -13,8 +13,8 @@ import com.bnpp.export.model.FormatField;
 import com.bnpp.export.model.FormatFilter;
 import com.bnpp.export.model.FormatTemplate;
 import com.bnpp.export.model.QuarantineRecord;
-import com.bnpp.export.model.SnapshotLine;
-import com.bnpp.export.model.SnapshotRow;
+
+
 import com.bnpp.export.model.SnapshotSeries;
 import com.bnpp.export.model.SubscriberProfile;
 import jakarta.persistence.Table;
@@ -55,7 +55,7 @@ class SchemaScriptTest {
             AppUser.class, SubscriberProfile.class, FormatTemplate.class, FormatField.class, FormatFilter.class,
             ExportJob.class, ExportJobSubscriberStatus.class, ExportedFile.class, ExportedFileRecord.class,
             DeliveryRecord.class, QuarantineRecord.class, ExportAuditLog.class,
-            DataSnapshot.class, SnapshotLine.class, SnapshotRow.class, SnapshotSeries.class);
+            DataSnapshot.class, SnapshotSeries.class);
 
     private static final Pattern CREATE_TABLE = Pattern.compile("^create table (\\w+) \\((.*)\\)$", Pattern.MULTILINE);
 

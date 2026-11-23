@@ -21,6 +21,11 @@
 
 ## Who creates the tables
 
+**One exception: data version tables.** Every new data version gets a table of its own, created by the application
+at the moment the version is made (see "Data version tables" below). So the database user the application runs as
+needs the right to create tables in its schema (`GRANT CREATE ON SCHEMA public TO regliss;`). Everything else in
+this section applies to the `ver_export_*` tables only.
+
 The schema is **`db/postgres/ver-export-schema.sql`**, kept by hand and reviewed like code. Hibernate never creates or
 alters a table (`spring.jpa.hibernate.ddl-auto=none`), so it can never touch REGLISS-owned tables such as `ver_version`.
 
@@ -43,7 +48,7 @@ alters a table (`spring.jpa.hibernate.ddl-auto=none`), so it can never touch REG
 | Table | One row per | Written when |
 |---|---|---|
 | `ver_export_subscriber` | Subscriber (format, scope, mode, delivery endpoint, chosen template) | A subscriber is added, changed, or its endpoint approved |
-| `ver_export_template` | Version of a named CSV or XML template (versions of one template share `family_id`; one approved version is in use per template). `status` is PENDING, APPROVED, CHANGES_REQUESTED, REJECTED or SUPERSEDED; `reviewed_by`, `reviewed_at` and `review_comment` hold the decision | A template is submitted, reviewed, or replaced by a newer submission |
+| `ver_export_template` | Version of a named list: its gs_ columns and row filters, with no file format (the format is chosen per subscriber when sending; versions of one template share `family_id`; one approved version is in use per template). `status` is PENDING, APPROVED, CHANGES_REQUESTED, REJECTED or SUPERSEDED; `reviewed_by`, `reviewed_at` and `review_comment` hold the decision | A template is submitted, reviewed, or replaced by a newer submission |
 | `ver_export_template_field` | Column in a template version (gs_ table, column, name in the file, order; matched on BNP_ID) | A template is submitted |
 | `ver_export_template_filter` | Row filter of a template version: gs_ column, operator (`in`, `not_in`, `contains`, `eq`, `ne`, `gt`, `gte`, `lt`, `lte`, `between`, `empty`, `not_empty`), values (JSON), whether empty cells count. All filters of a version must pass | A template is submitted |
 | `ver_export_job` | Export run of a certified version (date window, counters, final status) | An export is triggered, and as it progresses |
@@ -53,9 +58,8 @@ alters a table (`spring.jpa.hibernate.ddl-auto=none`), so it can never touch REG
 | `ver_export_delivery` | Delivery attempt over CFT (tracking id, hash, result, error) | Each send attempt |
 | `ver_export_quarantine` | Record held back from a file, with the reason and who accepted the omission | A record fails the quality check, or omissions are accepted |
 | `ver_export_audit` | Change of any kind (entity type and id, action, details, actor, time) | Every write above |
-| `ver_export_snapshot` | Data version: what one template version produced from one list, numbered `template version.revision`, with its fingerprint, row counts, the changes against the previous version and how often it was reused | An export finds new data (created), or the same data again (usage counters) |
-| `ver_export_snapshot_row` | Line of a data version: line number, record id, and the key of its stored row | A data version is created |
-| `ver_export_snapshot_data` | Distinct row (list entry fields and template values), stored once and shared by every version that holds it | A data version holds a row not stored before |
+| `ver_export_snapshot` | Data version: what one template version produced from one list, numbered `template version.revision`, with the name of its table (`table_name`), its fingerprint, row counts, the changes against the previous version and how often it was reused | An export finds new data (created), or the same data again (usage counters) |
+| `ver_<list>_v<major>_<minor>` | One table per data version, e.g. `ver_list_apac_v1_1`: every row of that version in file order. Columns starting with `_` are the list entry fields (`_line`, `_record_id`, `_row_key`, `_bnp_id`, `_name`, `_country`, `_record_date`, `_action`, `_risk_rating`, `_business_line`, `_region`, `_changed_on`, `_on_sanctions`, `_on_worldcheck`, `_on_pfa`); then one `text` column per column of the list, named after its column name in lower case | Created and filled by the application when a new data version is made; never changed afterwards |
 | `ver_export_snapshot_series` | Template and list pair: the catalog row screens list and search (latest version, version count, exports, rows stored, last use), and the row locked while a new version is numbered | The first export of a template and list, and every export that creates or reuses one of its versions |
 | `ver_export_dump_import` | Dump file imported from `db/dumps` at start-up (content hash, name, size, errors) | A dump is imported |
 | `ver_export_user` | User who can sign in to the module (role MAKER or APPROVER) | Seeded at start-up |
@@ -75,3 +79,39 @@ exactly as it was first produced.
 | `SUBSCRIBER` | `SUBSCRIBER_CREATED`, `SUBSCRIBER_UPDATED` (before and after), `ENDPOINT_APPROVED`, `SUBSCRIBER_DELETED` |
 | `DATA_VERSION` | `DATA_VERSION_CREATED` (rows, rows newly stored, changes against the previous version), `DATA_VERSION_REUSED`, `DATA_VERSION_DOWNLOADED` (format and audience) |
 | `TEMPLATE` | `TEMPLATE_SUBMITTED` (columns, names and row filters), `TEMPLATE_RESUBMITTED` (after changes were requested), `TEMPLATE_SUPERSEDED`, `TEMPLATE_CHANGES_REQUESTED`, `TEMPLATE_REJECTED`, `TEMPLATE_APPROVED` (each decision with the approver's comment) |
+
+## Data version tables
+
+A list (template) is only data: the `gs_*` columns it picks and its row filters. It has no file format. When an
+export finds new data for a list, the application:
+
+1. reads the list entries, applies the row filters and adds the `gs_*` values (the only time the source is queried
+   and joined),
+2. writes the rows to a new table under a temporary name (`ver_export_stage_...`),
+3. numbers the version under a lock (1.1, 1.2, ... and 2.1 after a new template version), records it in
+   `ver_export_snapshot`, and renames the table to `ver_<list>_v<major>_<minor>`.
+
+Sending a version to a subscriber, retrying, downloading it and comparing two versions read only that table, and
+convert it to CSV, XML or any other format the module supports. The source tables can change or be emptied: an old
+version's table never changes.
+
+- **Names.** `ver_` + the list name in lower case with every other character turned into `_` + `_v` + major + `_` +
+  minor: list `list_apac` version 1.1 is `ver_list_apac_v1_1` (a dot would need quoting in every query). If that name
+  is already taken (the same list exported from another source list), the source list code is added
+  (`ver_list_apac_sanctions_v1_1`). Names are at most 59 characters.
+- **Columns.** The list's column names, cleaned the same way (`Country risk` becomes `country_risk`; a name starting
+  with a digit gets `c_` in front; repeats get `_2`). The original names are kept in `ver_export_snapshot.columns_json`
+  and used in files.
+- **Same data, same table.** If an export finds exactly the data of an existing version, no table is created: that
+  version (and its table) is reused.
+- **Clean up.** A stage table left by an export that stopped half way is dropped at the next start.
+  `db/postgres/reset-export-tables.sql` drops every version table before the module's own tables.
+- **Size.** Each version holds all its rows, so storage grows by one full copy of the list per new version. Versions
+  are only made when the data changed.
+
+To see them:
+
+```sql
+SELECT label, table_name, row_count, created_at FROM ver_export_snapshot ORDER BY id;
+SELECT * FROM ver_list_apac_v1_1 ORDER BY _line;
+```
