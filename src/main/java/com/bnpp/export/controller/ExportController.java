@@ -346,9 +346,8 @@ public class ExportController {
 
     private void apply(SubscriberProfile profile, SubscriberRequest request, String name) {
         profile.setName(name);
-        // The subscriber's usual format: the one it gets unless another is chosen when sending.
-        List<String> formats = orchestrator.formatTypes();
-        profile.setFormatType(required(request.formatType(), java.util.Set.copyOf(formats), "Format must be one of " + String.join(", ", formats)));
+        // The subscriber's usual formats: the files they get unless the send chooses others.
+        profile.setFormatType(formatsOf(request.formatType()));
         profile.setScope(required(request.scope(), SCOPES, "Scope must be ALL, SANCTIONS, WORLDCHECK, or PFA"));
         profile.setExportMode(required(request.exportMode(), MODES, "Mode must be FULL or DELTA"));
         profile.setBusinessLine(StringUtils.trimToNull(request.businessLine()));
@@ -396,6 +395,27 @@ public class ExportController {
         if (request.fromDate() != null && request.fromDate().isAfter(request.toDate())) {
             throw new ResponseStatusException(BAD_REQUEST, "From date must be on or before the to date");
         }
+    }
+
+    /** One format, or several separated by a comma, stored in a stable order such as {@code CSV,XML}. */
+    private String formatsOf(String value) {
+        List<String> known = orchestrator.formatTypes();
+        Set<String> allowed = Set.copyOf(known);
+        java.util.LinkedHashSet<String> chosen = new java.util.LinkedHashSet<>();
+        for (String part : value == null ? new String[0] : value.split(",")) {
+            String format = part.trim().toUpperCase(Locale.ROOT);
+            if (format.isEmpty()) {
+                continue;
+            }
+            if (!allowed.contains(format)) {
+                throw new IllegalArgumentException("Format must be one of " + String.join(", ", known));
+            }
+            chosen.add(format);
+        }
+        if (chosen.isEmpty()) {
+            throw new IllegalArgumentException("Choose at least one format: " + String.join(", ", known));
+        }
+        return known.stream().filter(chosen::contains).collect(java.util.stream.Collectors.joining(","));
     }
 
     private String required(String value, Set<String> allowed, String message) {

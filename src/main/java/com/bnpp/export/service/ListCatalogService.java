@@ -85,7 +85,7 @@ public class ListCatalogService {
     public SubscriberPage subscribers(String query, String format, Long templateFamilyId, int offset, int limit) {
         String text = query == null ? "" : query.trim().toLowerCase(Locale.ROOT);
         List<SubscriberProfile> matching = subscribers.findByActiveTrueOrderByIdAsc().stream()
-                .filter(item -> format == null || format.isBlank() || format.equalsIgnoreCase(item.getFormatType()))
+                .filter(item -> format == null || format.isBlank() || hasFormat(item, format))
                 .filter(item -> templateFamilyId == null || templateFamilyId.equals(item.getTemplateFamilyId()))
                 .filter(item -> text.isEmpty() || contains(item.getName(), text) || contains(item.getBusinessLine(), text)
                         || contains(item.getRegion(), text) || contains(item.getScope(), text))
@@ -98,6 +98,18 @@ public class ListCatalogService {
                         item.getExportMode(), item.getBusinessLine(), item.getRegion(), item.getTemplateFamilyId(), item.isActive()))
                 .toList();
         return new SubscriberPage(matching.size(), start, page);
+    }
+
+    private static boolean hasFormat(SubscriberProfile item, String format) {
+        if (item.getFormatType() == null) {
+            return false;
+        }
+        for (String part : item.getFormatType().split(",")) {
+            if (part.trim().equalsIgnoreCase(format)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static boolean contains(String value, String text) {

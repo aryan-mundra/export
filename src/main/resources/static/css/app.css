@@ -689,6 +689,8 @@ input:focus, select:focus {
 .template-card .add-form { padding: 12px 0; border: 0; background: transparent; }
 .add-form input { flex: 1; min-width: 160px; }
 .add-form select { min-width: 140px; }
+.add-formats { display: inline-flex; align-items: center; gap: 6px; }
+.fmt-cell { display: inline-flex; align-items: center; gap: 8px; }
 
 .table-card { overflow: auto; }
 table { width: 100%; border-collapse: collapse; }

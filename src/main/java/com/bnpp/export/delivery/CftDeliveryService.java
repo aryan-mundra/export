@@ -39,7 +39,8 @@ public class CftDeliveryService {
         DeliveryRecord record = new DeliveryRecord();
         record.setVersionId(versionId);
         record.setSubscriberId(subscriber.getId());
-        record.setFormatType(subscriber.getFormatType());
+        String fileFormat = file.getFormatType();
+        record.setFormatType(fileFormat == null || fileFormat.isBlank() ? subscriber.getFormatType() : fileFormat);
         record.setExportType(exportMode);
         record.setFilePath(file.getFilePath());
         record.setFileHash(file.getFileHash());

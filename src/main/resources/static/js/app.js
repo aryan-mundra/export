@@ -308,7 +308,7 @@ function subscribersHtml() {
     const rows = state.subscribers.map(subscriber => `<tr>
         <td>${subscriber.id}</td>
         <td>${esc(subscriber.name)}</td>
-        <td class="fmt-${esc(subscriber.formatType)}">${esc(subscriber.formatType)}</td>
+        <td>${formatCell(subscriber.formatType)}</td>
         <td>${esc(subscriber.exportMode)}</td>
         <td>${esc(subscriber.scope)}</td>
         <td>${esc(subscriber.businessLine || "—")}</td>
@@ -324,11 +324,11 @@ function subscribersHtml() {
         </td>
     </tr>`).join("");
     return `
-        ${head("Recipients", "Subscribers", "Who receives a file, in which format, and where it is delivered.", `<input class="search" data-search="subscribers" placeholder="Search subscribers..." value="${esc(state.search.subscribers)}">`)}
+        ${head("Recipients", "Subscribers", "Who receives a file, in which formats, and where it is delivered.", `<input class="search" data-search="subscribers" placeholder="Search subscribers..." value="${esc(state.search.subscribers)}">`)}
         <section class="table-card">
             <form class="add-form" id="add-form">
                 <input name="name" placeholder="Subscriber name" required>
-                ${select("formatType", formatChoices(), "CSV")}
+                ${formatBoxes("formatType", "CSV")}
                 <select name="templateId" required aria-label="List">${templateOptions(null)}</select>
                 ${select("scope", ["ALL", "SANCTIONS", "WORLDCHECK", "PFA"], "ALL")}
                 ${select("exportMode", ["DELTA", "FULL"], "DELTA")}
@@ -803,11 +803,16 @@ async function onSubmit(event) {
         event.preventDefault();
         const form = new FormData(event.target);
         try {
+            const formats = form.getAll("formatType");
+            if (!formats.length) {
+                toast("Choose at least one format", "error");
+                return;
+            }
             await api("/api/subscribers", {
                 method: "POST",
                 body: {
                     name: form.get("name"),
-                    formatType: form.get("formatType"),
+                    formatType: formats.join(","),
                     scope: form.get("scope") || "ALL",
                     exportMode: form.get("exportMode"),
                     businessLine: form.get("businessLine"),
@@ -829,11 +834,16 @@ async function onSubmit(event) {
         event.preventDefault();
         const form = new FormData(event.target);
         try {
+            const formats = form.getAll("formatType");
+            if (!formats.length) {
+                toast("Choose at least one format", "error");
+                return;
+            }
             await api("/api/subscribers/" + form.get("id"), {
                 method: "PUT",
                 body: {
                     name: form.get("name"),
-                    formatType: form.get("formatType"),
+                    formatType: formats.join(","),
                     scope: form.get("scope"),
                     exportMode: form.get("exportMode"),
                     businessLine: form.get("businessLine"),
@@ -912,6 +922,10 @@ function onInput(event) {
         }
         return;
     }
+    if (event.target.name === "formatType" && event.target.type === "checkbox") {
+        const chip = event.target.closest(".xp-fmt");
+        if (chip) chip.classList.toggle("on", event.target.checked);
+    }
     if (event.target.closest("#template-form") && event.target.name === "name" && state.templateDraft) {
         state.templateDraft.name = event.target.value;
         return;
@@ -977,7 +991,7 @@ function openEdit(subscriber) {
                 <h2>Edit subscriber</h2>
                 <input type="hidden" name="id" value="${subscriber.id}">
                 <label>Name<input name="name" value="${esc(subscriber.name)}" required></label>
-                <label>Usual format<select name="formatType">${options(formatChoices(), subscriber.formatType)}</select></label>
+                <label>Usual formats${formatBoxes("formatType", subscriber.formatType)}</label>
                 <label>List<select name="templateId" required>${templateOptions(subscriber.templateFamilyId)}</select></label>
                 <label>Scope<select name="scope">${options(["ALL", "SANCTIONS", "WORLDCHECK", "PFA"], subscriber.scope)}</select></label>
                 <label>Mode<select name="exportMode">${options(["FULL", "DELTA"], subscriber.exportMode)}</select></label>
@@ -2428,14 +2442,14 @@ function sendSectionHtml() {
                 ${esc(format)}
             </label>`;
         }).join("");
-        const own = picked.length === 1 && picked[0] === row.formatType;
+        const own = sameFormatSet(picked, ownFormats(row.formatType));
         return `<div class="xp-sub ${on ? "selected" : ""}">
             <input type="checkbox" id="xp-sub-${row.subscriberId}" data-xp-sub="${row.subscriberId}" ${on ? "checked" : ""}>
             <label class="xp-sub-name" for="xp-sub-${row.subscriberId}">${esc(row.name)}</label>
             <span class="muted">${esc(row.scope)} · ${esc(row.exportMode)} · ${row.onTemplate ? '<span class="tag tag-new">This list</span>' : "Other list"}</span>
             <span class="xp-sub-format">
                 ${boxes}
-                ${own ? "" : `<span class="was">usually <span class="fmt-${esc(row.formatType)}">${esc(row.formatType)}</span></span>`}
+                ${own ? "" : `<span class="was">usually ${formatCell(row.formatType)}</span>`}
             </span>
         </div>`;
     }).join("");
@@ -2447,14 +2461,14 @@ function sendSectionHtml() {
     const summary = Object.keys(byFormat).sort().map(f => `${num(byFormat[f])} ${esc(f)}`).join(" · ");
     const changed = chosenRows.filter(row => {
         const picked = sendFormatsOf(row);
-        return picked.length !== 1 || picked[0] !== row.formatType;
+        return !sameFormatSet(picked, ownFormats(row.formatType));
     }).length;
     return `<div class="xp-send">
             <div class="xp-send-head">
                 <strong>Send to subscribers</strong>
                 <span class="muted">${num(send.chosen.size)} of ${num(rows.length)} selected</span>
             </div>
-            <p class="xp-format-note">Each subscriber starts with the format from Subscribers. Tick more formats to send those as well, for this send only.</p>
+            <p class="xp-format-note">Each subscriber starts with the formats saved on Subscribers. Change the ticks to send something else, for this send only.</p>
             <div class="xp-quick">
                 <button type="button" class="btn-ghost btn-small ${allChosen ? "on" : ""}" data-xp-sub-all="all">Select all (${num(rows.length)})</button>
                 <button type="button" class="btn-ghost btn-small" data-xp-sub-all="template" ${onTemplate.length ? "" : "disabled"}>Only this list's (${num(onTemplate.length)})</button>
@@ -2464,7 +2478,7 @@ function sendSectionHtml() {
                 <label class="xp-format">Set the format of the ${num(send.chosen.size)} selected
                     <select id="xp-format" aria-label="Set the format of the selected subscribers" ${send.chosen.size ? "" : "disabled"}>
                         <option value="" selected>Choose…</option>
-                        <option value="__own">Each subscriber's format</option>
+                        <option value="__own">Each subscriber's formats</option>
                         ${formats.map(format => `<option value="${esc(format)}">${esc(format)} for all selected</option>`).join("")}
                     </select>
                 </label>
@@ -2484,11 +2498,35 @@ function sendSectionHtml() {
         </div>`;
 }
 
-/** The formats a subscriber will be sent: the ones ticked on this page, or their format from Subscribers. */
+/** The formats saved for a subscriber, one or more, such as CSV or CSV,XML. */
+function ownFormats(value) {
+    return String(value || "").split(",").map(part => part.trim()).filter(Boolean);
+}
+
+function sameFormatSet(left, right) {
+    if (left.length !== right.length) return false;
+    const set = new Set(right);
+    return left.every(format => set.has(format));
+}
+
+function formatCell(value) {
+    return `<span class="fmt-cell">${ownFormats(value).map(format => `<span class="fmt-${esc(format)}">${esc(format)}</span>`).join("")}</span>`;
+}
+
+function formatBoxes(name, selected) {
+    const on = new Set(ownFormats(selected));
+    return `<span class="add-formats" role="group" aria-label="Formats">${formatChoices().map(format => {
+        const ticked = on.has(format);
+        return `<label class="xp-fmt fmt-${esc(format)}${ticked ? " on" : ""}"><input type="checkbox" name="${name}" value="${esc(format)}" ${ticked ? "checked" : ""}> ${esc(format)}</label>`;
+    }).join("")}</span>`;
+}
+
+/** The formats a subscriber will be sent: the ones ticked on this page, or their formats from Subscribers. */
 function sendFormatsOf(row) {
     const picked = state.xpDialog.send.formats[row.subscriberId];
     if (Array.isArray(picked) && picked.length) return picked;
-    return [row.formatType];
+    const own = ownFormats(row.formatType);
+    return own.length ? own : [row.formatType];
 }
 
 function renderDialog() {
@@ -2768,7 +2806,7 @@ function onSendInput(event) {
         const send = state.xpDialog.send;
         if (!target.value) return true;
         send.rows.filter(row => send.chosen.has(row.subscriberId)).forEach(row => {
-            if (target.value === "__own" || target.value === row.formatType) delete send.formats[row.subscriberId];
+            if (target.value === "__own" || sameFormatSet([target.value], ownFormats(row.formatType))) delete send.formats[row.subscriberId];
             else send.formats[row.subscriberId] = [target.value];
         });
         renderDialog();
@@ -2785,7 +2823,7 @@ function onSendInput(event) {
             delete send.formats[id];
             send.chosen.delete(id);
         } else {
-            const ownOnly = current.size === 1 && current.has(row.formatType);
+            const ownOnly = sameFormatSet([...current], ownFormats(row.formatType));
             if (ownOnly) delete send.formats[id];
             else send.formats[id] = [...current];
             send.chosen.add(id);

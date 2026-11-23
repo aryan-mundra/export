@@ -177,6 +177,21 @@ class ExportModuleIntegrationTest {
                         .content("{\"name\":\"Old Format\",\"formatType\":\"GENERIC_XML\",\"scope\":\"ALL\",\"exportMode\":\"FULL\"}"))
                 .andExpect(status().isBadRequest());
 
+        MvcResult both = mockMvc.perform(post("/api/subscribers")
+                        .session(maker)
+                        .contentType("application/json")
+                        .content("{\"name\":\"Both Formats\",\"formatType\":\"xml, CSV\",\"scope\":\"ALL\",\"exportMode\":\"FULL\",\"templateId\":" + csvFamilyId + "}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.formatType").value("CSV,XML"))
+                .andReturn();
+        Number bothId = com.jayway.jsonpath.JsonPath.read(both.getResponse().getContentAsString(), "$.id");
+        mockMvc.perform(delete("/api/subscribers/" + bothId).session(maker)).andExpect(status().isNoContent());
+        mockMvc.perform(post("/api/subscribers")
+                        .session(maker)
+                        .contentType("application/json")
+                        .content("{\"name\":\"Bad Mix\",\"formatType\":\"CSV,PDF\",\"scope\":\"ALL\",\"exportMode\":\"FULL\",\"templateId\":" + csvFamilyId + "}"))
+                .andExpect(status().isBadRequest());
+
         MvcResult channel = mockMvc.perform(post("/api/subscribers")
                         .session(maker)
                         .contentType("application/json")

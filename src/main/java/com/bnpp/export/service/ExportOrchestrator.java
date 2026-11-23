@@ -321,7 +321,16 @@ public class ExportOrchestrator {
         if (format != null) {
             return List.of(format);
         }
-        return List.of(subscriber.getFormatType());
+        return ownFormats(subscriber);
+    }
+
+    /** The formats saved for a subscriber, one or more, such as {@code CSV} or {@code CSV,XML}. */
+    private List<String> ownFormats(SubscriberProfile subscriber) {
+        List<String> listed = sendFormats(subscriber.getFormatType());
+        if (listed.isEmpty()) {
+            throw new ResponseStatusException(BAD_REQUEST, subscriber.getName() + " has no format");
+        }
+        return listed;
     }
 
     /** Sends a stored data version again to the chosen subscribers, after a matching review. */
@@ -368,12 +377,16 @@ public class ExportOrchestrator {
 
     /**
      * The files a job builds. A resend lists {@code id:FORMAT} once per file, so one subscriber can
-     * appear more than once. An ordinary export lists subscriber ids, each in their own format.
+     * appear more than once. An ordinary export lists subscriber ids, and each saved format is a file.
      */
     private List<Delivery> deliveriesFor(ExportJob job) {
         if (StringUtils.isBlank(job.getSubscriberIds())) {
-            return subscriberRepository.findByActiveTrueOrderByIdAsc().stream()
-                    .map(subscriber -> new Delivery(subscriber, formatFor(job, subscriber)))
+            List<SubscriberProfile> active = subscriberRepository.findByActiveTrueOrderByIdAsc();
+            if (StringUtils.isNotBlank(job.getFormatOverride())) {
+                return active.stream().map(subscriber -> new Delivery(subscriber, job.getFormatOverride())).toList();
+            }
+            return active.stream()
+                    .flatMap(subscriber -> ownFormats(subscriber).stream().map(format -> new Delivery(subscriber, format)))
                     .toList();
         }
         List<Delivery> chosen = new ArrayList<>();
@@ -384,8 +397,13 @@ public class ExportOrchestrator {
             }
             String[] parts = trimmed.split(":", 2);
             subscriberRepository.findById(Long.valueOf(parts[0].trim())).ifPresent(subscriber -> {
-                String format = parts.length == 2 && !parts[1].isBlank() ? parts[1].trim() : formatFor(job, subscriber);
-                chosen.add(new Delivery(subscriber, format));
+                if (parts.length == 2 && !parts[1].isBlank()) {
+                    chosen.add(new Delivery(subscriber, parts[1].trim()));
+                } else if (StringUtils.isNotBlank(job.getFormatOverride())) {
+                    chosen.add(new Delivery(subscriber, job.getFormatOverride()));
+                } else {
+                    ownFormats(subscriber).forEach(format -> chosen.add(new Delivery(subscriber, format)));
+                }
             });
         }
         return chosen;
@@ -404,7 +422,7 @@ public class ExportOrchestrator {
                 }
             }
         }
-        return job.getFormatOverride() != null ? job.getFormatOverride() : subscriber.getFormatType();
+        return job.getFormatOverride() != null ? job.getFormatOverride() : ownFormats(subscriber).get(0);
     }
 
     private static String sha256(String text) {
@@ -564,9 +582,10 @@ public class ExportOrchestrator {
                 .filter(item -> onList(subscriber, item.getListCode()))
                 .findFirst()
                 .orElseThrow(() -> new ResponseStatusException(BAD_REQUEST, "No certified version matches this subscriber"));
-        ExportFormat format = formats.get(subscriber.getFormatType().toUpperCase(Locale.ROOT));
+        String sampleFormat = ownFormats(subscriber).get(0);
+        ExportFormat format = formats.get(sampleFormat);
         if (format == null) {
-            throw new ResponseStatusException(BAD_REQUEST, "Unsupported format " + subscriber.getFormatType());
+            throw new ResponseStatusException(BAD_REQUEST, "Unsupported format " + sampleFormat);
         }
         List<String> columns = decisionColumns();
         FormatTemplate template = formatTemplateService.inUse(subscriber.getTemplateFamilyId())
