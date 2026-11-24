@@ -1,79 +1,66 @@
 # Code structure
 
-The module is a Spring Boot application organised in layers. Each layer has one job and only calls the layer
-below it.
+The module is a Spring Boot application organised in layers. Each layer has one job and only calls the layer below
+it.
 
 ```
 com.bnpp.export
 ├── controller      REST endpoints only: mappings, request binding, response status
 ├── service         service interfaces: the contract each controller and service depends on
-│   └── impl        their implementations (…ServiceImpl): all business logic and validation
+│   └── impl        their implementations (…ServiceImpl): business logic and validation
+├── repository      data access: Spring Data JPA repositories for the module's tables, and JDBC repositories for
+│                   the source tables (SourceTableRepository, GroupRecordRepository) and data versions
+│                   (DataVersionRepository)
+├── entity          JPA entities: the module's ver_export_* tables
+├── model           internal domain types (TableGroup, GroupSelection, GroupRow, DataVersion, VersionLayout...)
 ├── dto             request and response objects of the API (records)
-├── repository      Spring Data JPA repositories, and VersionTableRepository for the per-version tables
-├── entity          JPA entities: the ver_export_* tables and the source tables the module reads
-├── exception       the module's exceptions and the one handler that turns them into responses
-├── config          Spring configuration, security, start-up seeders, dump import
+├── config          Spring configuration: security, the groups file reader, database switch, dump import, start-up jobs
 ├── security        the signed-in user (CurrentUser, ExportPrincipal)
-├── format          file writers (CSV, XML), one ExportFormat bean per format
 ├── delivery        CFT adapters (CftDeliveryAdapter: mock or real)
-└── util            stateless helpers (SqlUtils, JdbcStreams)
+├── exception       the module's exceptions and the one handler that turns them into responses
+└── util            stateless helpers (SqlUtils, XmlNames, Hashing, OffsetPage)
 ```
+
+## How it works
+
+1. **Table groups** (`config/table-groups.yml`, read by `TableGroupsConfig`): each group (Person, Entity…) has a root
+   table with a common key, and related tables joined by the foreign keys written in the file. `TableGroupService`
+   checks every table and column against the database.
+2. **Lists** (`FormatTemplateService`): columns picked from the group tables. Each group's key is always on the list.
+   Every version is approved by a List Owner before subscribers receive it.
+3. **Preview and XML** (`GroupExportService`, `GroupRecordRepository`): a group's records are read root table first,
+   in key order, 500 at a time; each related table is read once per batch with `WHERE foreign_key IN (...)` and
+   attached to its parent rows. The XML has one section per group, one element per record with its key as an
+   attribute, and related rows nested under it.
+4. **Data versions** (`DataVersionService`): a list's data at a moment. Each record is stored once as canonical JSON
+   with a SHA-256 hash; a new version is stored only when the data changed.
+5. **Synthesis** (`SynthesisService`): two versions compared — records added, removed or changed counted in SQL by
+   hash, and what changed inside a record found by comparing its two documents.
+6. **Sends** (`SendService`, `ExportRunService`): a data version sent to chosen subscribers. The user reviews the send
+   first; each subscriber's file is the version's XML, delivered (two attempts), archived and hashed as proof. Sends
+   run in the background and are listed in History (`JobService`).
 
 ## Rules
 
-1. **Controllers are thin.** A controller method maps a URL to one service call and returns its result. It never
-   uses a repository, an entity or a `…ServiceImpl` class. Downloads go through `FileResponses`, which turns a
-   `FileDownload` from a service into the HTTP response.
-2. **Services are interfaces.** Controllers and other services depend on `service.XService`; Spring injects
-   `service.impl.XServiceImpl`. Records used only between services (for example `SnapshotService.Selection`,
-   `StorageService.PendingFile`, `RowFilterService.Condition`) live on the interface.
-3. **Business logic lives in the Impl classes**: validation, numbering, review tokens, endpoint approval, audit
-   entries. A rule that belongs to one entity's own fields can be a method on the entity
-   (`SubscriberProfile.receives(record)`).
-4. **The API speaks DTOs.** Entities never leave the service layer through a controller. Each response record has a
-   static `from(entity)` factory (for example `SubscriberResponse.from`, `DataVersionResponse.from`). Response field
-   names are the API contract: the web page reads them by name.
-5. **Errors are exceptions.** Services throw `BadRequestException` (400), `UnauthorizedException` (401),
-   `ForbiddenException` (403), `ResourceNotFoundException` (404), `ConflictException` (409) or
-   `ServiceUnavailableException` (503). `GlobalExceptionHandler` answers every error as `{"message": "..."}` with
-   that status.
-6. **Database access goes through repositories**, or through `JdbcTemplate` in an Impl class for set-based SQL
-   (streaming exports, the per-version tables, catalog searches). SQL text is built with `SqlUtils` (placeholders,
-   quoted names, LIKE escaping); values are always bound, never concatenated.
+- Controllers call services only, and services call repositories; no SQL outside `repository`.
+- Entities never leave the service layer: the API returns DTOs.
+- Errors are exceptions (`BadRequestException`, `ConflictException`…), turned into responses by
+  `GlobalExceptionHandler`; services never build HTTP responses.
+- Names read from the database are always quoted (`SqlUtils.quote`); values are always bound parameters.
+- Large data is streamed or paged, never loaded whole: records 500 at a time, files written as they are read.
 
-## Main services
+## Configuration
 
-| Interface | What it does |
-|---|---|
-| `ExportService` | The one entry point the controllers use for exports; delegates to the four services below |
-| `ExportReviewService` | Reviewing an export (counts per subscriber, review token) and queuing the export the user reviewed |
-| `ResendService` | Reviewing and queuing a send of a stored data version, in chosen formats |
-| `ExportRunService` | Running jobs in the background (stream, quality check, quarantine, deliver, settle), retries, accepting omissions |
-| `JobQueryService` | Dashboard, History (paged), job detail, delivery report, proofs, file downloads, sample files |
-| `SnapshotService` | Builds, numbers and stores data versions in their own tables, and reads them back |
-| `DataVersionService` | The data-versions API: list, detail, rows, compare, download |
-| `ComparisonService` | Compares two versions of a list in SQL: counts, changed values per column, filtered pages of records, CSV of every difference |
-| `FormatTemplateService` | Lists (templates): versions, columns, row filters, the approver's review |
-| `TemplateExportService` | Approved lists with their latest version; "export latest" |
-| `SubscriberService` | Subscribers: add, change, endpoint approval, delete |
-| `DataExplorerService` | Previewing and filtering the rows of a list being edited |
-| `RowFilterService` | Row filters: validation and SQL conditions |
-| `ListCatalogService` | Source lists and subscribers, searched and paged |
-| `SourceCatalogService` | The gs_ tables and their columns |
-| `GoldenSourceService` | Adds the gs_ values to list entries |
-| `QualityCheckService` | Record checks and quarantine |
-| `DeliveryService` | Sends a file over CFT and records the delivery |
-| `StorageService`, `ExportManifestService` | Files on disk and their manifest rows |
-| `AuditService` | The audit log |
-| `AuthService`, `SystemService`, `QuarantineService` | Sign-in, system info, held records |
+Every per-machine setting is in the `config/` folder (see `config/README.md`): `table-groups.yml`,
+`database.properties`, and an optional `application.yml` overriding any default of
+`src/main/resources/application.yml`. The module's tables are created by `db/postgres/ver-export-schema.sql`.
 
 ## Adding something
 
+- **A new group:** add it to `config/table-groups.yml`. No code change; the List page shows it on its next load.
 - **A new endpoint:** add a method to the service interface, implement it in the Impl class, add a DTO for its
   response, and a one-line controller method.
-- **A new file format:** add an `ExportFormat` bean in `format`. It appears in `/api/formats`, the send dialog and
-  the download buttons without other changes.
-- **A new error case:** throw the matching exception from the service; do not build responses in services.
+- **A new error case:** throw the matching exception from the service.
 
 ## Building and running as a jar
 
@@ -93,9 +80,9 @@ The jar starts from any folder. These are read or written **next to it** (the fo
 
 | Path | What |
 |---|---|
-| `config/database.properties` | The PostgreSQL connection for the Database switch (copy it next to the jar) |
+| `config/` | `table-groups.yml`, `database.properties`, optional `application.yml` |
 | `db/dumps/` | Dumps to import into PostgreSQL at start-up |
-| `data/` | Built files (`data/exports`) and the chosen database (`data/database.properties`) |
+| `data/` | Built and archived files (`data/exports`) and the chosen database (`data/database.properties`) |
 
-The H2 table scripts are inside the jar. Use `--server.port=9090` to change the port. The page loads two Google Fonts
-from the internet; without internet access the browser uses its standard fonts and everything else works.
+The table script is inside the jar. Use `--server.port=9090` to change the port. The page loads two Google Fonts from
+the internet; without internet access the browser uses its standard fonts and everything else works.

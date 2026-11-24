@@ -12,7 +12,6 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.LocalDateTime;
 import java.util.Collection;
 import java.util.List;
-import java.util.Optional;
 
 public interface ExportJobRepository extends JpaRepository<ExportJob, Long> {
 
@@ -22,28 +21,22 @@ public interface ExportJobRepository extends JpaRepository<ExportJob, Long> {
     List<ExportJob> findTop10ByOrderByCreatedAtDesc();
 
     /**
-     * A page of the jobs whose version, user, status or list name contains the text, newest first. {@code like}
-     * is {@code %text%}, lower case, with %, _ and \ escaped by a backslash.
+     * A page of the jobs whose list name, user or status contains the text, newest first. {@code like} is
+     * {@code %text%}, lower case, with %, _ and \ escaped by a backslash.
      */
     @Query(value = """
             select j from ExportJob j
-             where str(j.versionId) like :like escape '\\'
+             where lower(j.listName) like :like escape '\\'
                 or lower(j.triggeredBy) like :like escape '\\'
                 or lower(j.status) like :like escape '\\'
-                or lower(j.listName) like :like escape '\\'
              order by j.createdAt desc, j.id desc
             """, countQuery = """
             select count(j) from ExportJob j
-             where str(j.versionId) like :like escape '\\'
+             where lower(j.listName) like :like escape '\\'
                 or lower(j.triggeredBy) like :like escape '\\'
                 or lower(j.status) like :like escape '\\'
-                or lower(j.listName) like :like escape '\\'
             """)
     Page<ExportJob> search(@Param("like") String like, Pageable page);
-
-    Optional<ExportJob> findFirstByVersionIdOrderByCreatedAtDesc(Long versionId);
-
-    List<ExportJob> findByVersionIdOrderByCreatedAtDesc(Long versionId);
 
     long countByStatus(String status);
 
@@ -51,26 +44,20 @@ public interface ExportJobRepository extends JpaRepository<ExportJob, Long> {
 
     List<ExportJob> findByStatusIn(Collection<String> statuses);
 
+    /** Sets a job's counters from its subscribers' rows (one atomic update). */
     @Transactional
     @Modifying(clearAutomatically = true, flushAutomatically = true)
     @Query("""
             update ExportJob j
                set j.completedSubscribers = :completed,
                    j.failedSubscribers = :failed,
-                   j.heldSubscribers = :held,
-                   j.skippedSubscribers = :skipped,
-                   j.totalRecordsProcessed = :processed,
-                   j.totalRecordsQuarantined = :quarantined
+                   j.totalRecords = :records
              where j.id = :id
             """)
-    int updateCounters(@Param("id") Long id,
-                       @Param("completed") int completed,
-                       @Param("failed") int failed,
-                       @Param("held") int held,
-                       @Param("skipped") int skipped,
-                       @Param("processed") long processed,
-                       @Param("quarantined") long quarantined);
+    int updateCounters(@Param("id") Long id, @Param("completed") int completed, @Param("failed") int failed,
+                       @Param("records") long records);
 
+    /** Marks a job finished, once: a job already in that status is left as it is (returns 0). */
     @Transactional
     @Modifying(clearAutomatically = true, flushAutomatically = true)
     @Query("""
@@ -81,8 +68,6 @@ public interface ExportJobRepository extends JpaRepository<ExportJob, Long> {
              where j.id = :id
                and j.status <> :status
             """)
-    int markFinished(@Param("id") Long id,
-                     @Param("status") String status,
-                     @Param("completedAt") LocalDateTime completedAt,
+    int markFinished(@Param("id") Long id, @Param("status") String status, @Param("completedAt") LocalDateTime completedAt,
                      @Param("errorMessage") String errorMessage);
 }

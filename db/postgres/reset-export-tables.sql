@@ -1,7 +1,9 @@
--- Drops the Export module's own VER_EXPORT_* tables so they can be created again
--- empty with ver-export-schema.sql. Leaves the source tables (VER_VERSION, VER_VERSION_MEMBER, GS_*) alone.
--- Test databases only. Run with psql -f, or in pgAdmin's Query Tool.
--- First the table of every data version (ver_<list>_v<major>_<minor>), named in ver_export_snapshot.
+-- Drops every table of the Export module (ver_export_*), including those of earlier versions of the module, so they
+-- can be created again, empty, with ver-export-schema.sql. The source tables (the table groups) are not touched.
+-- Test databases only: this deletes lists, subscribers, data versions and send history.
+-- Run with psql -f, or in pgAdmin's Query Tool.
+
+-- Tables of earlier versions of the module: per-version data tables named in ver_export_snapshot, then the rest.
 DO $$
 DECLARE version_table text;
 BEGIN
@@ -11,17 +13,24 @@ BEGIN
         END LOOP;
     END IF;
 END $$;
-DROP TABLE IF EXISTS VER_EXPORT_SNAPSHOT;
-DROP TABLE IF EXISTS VER_EXPORT_SNAPSHOT_SERIES;
-DROP TABLE IF EXISTS VER_EXPORT_TEMPLATE_FILTER;
-DROP TABLE IF EXISTS VER_EXPORT_FILE_RECORD;
-DROP TABLE IF EXISTS VER_EXPORT_FILE;
-DROP TABLE IF EXISTS VER_EXPORT_DELIVERY;
-DROP TABLE IF EXISTS VER_EXPORT_QUARANTINE;
-DROP TABLE IF EXISTS VER_EXPORT_AUDIT;
-DROP TABLE IF EXISTS VER_EXPORT_JOB_SUBSCRIBER;
-DROP TABLE IF EXISTS VER_EXPORT_JOB;
-DROP TABLE IF EXISTS VER_EXPORT_TEMPLATE_FIELD;
-DROP TABLE IF EXISTS VER_EXPORT_TEMPLATE;
-DROP TABLE IF EXISTS VER_EXPORT_SUBSCRIBER;
-DROP TABLE IF EXISTS VER_EXPORT_USER;
+DROP TABLE IF EXISTS ver_export_snapshot;
+DROP TABLE IF EXISTS ver_export_snapshot_series;
+DROP TABLE IF EXISTS ver_export_template_filter;
+DROP TABLE IF EXISTS ver_export_file_record;
+DROP TABLE IF EXISTS ver_export_file;
+DROP TABLE IF EXISTS ver_export_quarantine;
+DROP TABLE IF EXISTS ver_export_group_record;
+DROP TABLE IF EXISTS ver_export_group_version;
+
+-- Current tables.
+DROP TABLE IF EXISTS ver_export_data_record;
+DROP TABLE IF EXISTS ver_export_data_version;
+DROP TABLE IF EXISTS ver_export_delivery;
+DROP TABLE IF EXISTS ver_export_audit;
+DROP TABLE IF EXISTS ver_export_job_subscriber;
+DROP TABLE IF EXISTS ver_export_job;
+DROP TABLE IF EXISTS ver_export_template_field;
+DROP TABLE IF EXISTS ver_export_template;
+DROP TABLE IF EXISTS ver_export_subscriber;
+DROP TABLE IF EXISTS ver_export_user;
+-- ver_export_dump_import is kept: it records which dump this database holds.

@@ -2,24 +2,18 @@ package com.bnpp.export.service;
 
 import com.bnpp.export.dto.JobDetailResponse;
 
-/**
- * Running export and resend jobs: streaming each subscriber's file, quality checks and quarantine, delivery with
- * retries, the job's counters and final status, and the actions on held or failed files.
- */
+/** Running sends: each subscriber's XML file is written from the stored data version, delivered with retries and archived. */
 public interface ExportRunService {
 
-    /** Runs a queued job in the background. Call it through this interface (the Spring proxy) so it runs async. */
-    void runExport(Long jobId);
+    /** Runs a queued send in the background. Call it through this interface (the Spring proxy) so it runs async. */
+    void run(Long jobId);
 
     /**
-     * Runs at start-up: any job or subscriber still PENDING or IN_PROGRESS was interrupted and is marked FAILED,
+     * At start-up: any send or file still PENDING or IN_PROGRESS was interrupted and is marked FAILED (retryable),
      * and unfinished files are removed. Assumes one application instance per database.
      */
-    int recoverInterruptedExports();
+    int recoverInterrupted();
 
-    /** Sends a held file (or closes it when no file was built) once its omissions are accepted. */
-    JobDetailResponse acceptOmissions(Long jobId, Long statusId);
-
-    /** Builds and sends a failed subscriber's file again. */
-    JobDetailResponse retry(Long jobId, Long statusId);
+    /** Builds and delivers a failed subscriber's file again, from the same data version. */
+    JobDetailResponse retry(Long jobId, Long fileId);
 }

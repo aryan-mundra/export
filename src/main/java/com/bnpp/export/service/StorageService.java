@@ -5,10 +5,8 @@ import org.springframework.core.io.Resource;
 
 import java.nio.file.Path;
 
-/** StorageService. */
+/** Where export files are written, moved to their final name, archived once delivered, and read back for download. */
 public interface StorageService {
-
-    Path getRoot();
 
     /** Where a file is written while it is being built (temp) and where it ends up (target). */
     record PendingFile(Path temp, Path target, String fileName) {

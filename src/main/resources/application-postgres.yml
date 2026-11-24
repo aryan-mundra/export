@@ -1,12 +1,10 @@
-# PostgreSQL: list entries (ver_version_member), certified versions (ver_version) and gs_ tables are
-# read from PostgreSQL, and the module's own ver_export_ tables are written to the same database.
+# PostgreSQL: the table groups (config/table-groups.yml) are read from PostgreSQL, and the module's own ver_export_
+# tables are written to the same database.
 #
-# Set the connection with environment variables:
+# Set the connection with environment variables (the sidebar's Database switch uses config/database.properties):
 #   REGLISS_DB_URL       default jdbc:postgresql://localhost:5432/regliss
 #   REGLISS_DB_USER      default regliss
 #   REGLISS_DB_PASSWORD  required
-#
-# Load the mock data first with db/postgres/regliss-mock.sql. See docs/postgres-testing.md.
 spring:
   datasource:
     url: ${REGLISS_DB_URL:jdbc:postgresql://localhost:5432/regliss}
@@ -16,20 +14,16 @@ spring:
       pool-name: regliss-postgres
       maximum-pool-size: 10
       connection-timeout: 10000
-  # The tables are created once, by hand: run db/postgres/ver-export-schema.sql (every table ver_export_*) in psql
-  # or pgAdmin. The application never creates or alters a table here; it only reads and writes rows.
+  # The tables are created once, by hand: run db/postgres/ver-export-schema.sql in psql or pgAdmin.
+  # The application never creates or alters a table here; it only reads and writes rows.
   sql:
     init:
       mode: never
   jpa:
     hibernate:
-      # Hibernate never creates or alters tables here, including the REGLISS-owned ver_version it reads.
       ddl-auto: ${REGLISS_DDL_AUTO:none}
 
 export:
-  mock:
-    # The source data comes from the database, not from the built-in demo seed.
-    enabled: false
   delivery:
     # Keep sends simulated while testing; set to false to POST files to real CFT endpoints.
     mock: true
@@ -38,5 +32,5 @@ export:
   import:
     enabled: ${REGLISS_IMPORT_ENABLED:true}
     directory: ${REGLISS_IMPORT_DIR:db/dumps}
-    # Folder with psql and pg_restore; empty = the PATH, then C:\Program Files\PostgreSQL\<newest>\bin.
+    # Folder with psql and pg_restore; empty = the PATH, then the newest PostgreSQL under C:/Program Files/PostgreSQL.
     bin-dir: ${PG_BIN:}

@@ -33,7 +33,7 @@ import java.util.stream.Stream;
  *       again. A different dump is not loaded over data already imported: that is done by hand.</li>
  * </ul>
  *
- * Needs psql / pg_restore: from export.import.bin-dir, the PATH, or C:Program FilesPostgreSQL*in.
+ * Needs psql / pg_restore: from export.import.bin-dir, the PATH, or the newest PostgreSQL under C:/Program Files/PostgreSQL.
  * Enabled by export.import.enabled (on in the postgres profile).
  */
 public class DumpImportListener implements ApplicationListener<ApplicationEnvironmentPreparedEvent>, Ordered {

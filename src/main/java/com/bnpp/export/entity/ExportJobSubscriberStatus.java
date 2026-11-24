@@ -11,6 +11,7 @@ import lombok.Data;
 
 import java.time.LocalDateTime;
 
+/** One subscriber's file in a send: its status, the file built, and where it was archived once delivered. */
 @Data
 @Entity
 @Table(name = "ver_export_job_subscriber")
@@ -26,50 +27,28 @@ public class ExportJobSubscriberStatus {
 
     private String subscriberName;
 
-    private String formatType;
-
+    /** PENDING, IN_PROGRESS, COMPLETED or FAILED. */
     @Column(nullable = false)
     private String status;
 
-    private int recordsProcessed;
-
-    private int recordsQuarantined;
+    private int records;
 
     private long fileSizeBytes;
 
     @Column(length = 1000)
     private String filePath;
 
-    private LocalDateTime startedAt;
-
-    private LocalDateTime completedAt;
+    @Column(length = 1000)
+    private String archivePath;
 
     @Column(length = 4000)
     private String errorMessage;
 
     private int retryCount;
 
-    private Long formatTemplateId;
+    private LocalDateTime startedAt;
 
-    private Integer formatTemplateVersion;
-
-    /** The data version (snapshot) this file was built from. A retry rebuilds it from the same one. */
-    private Long snapshotId;
-
-    private String snapshotLabel;
-
-    /** CREATED: this export produced a new data version. REUSED: the data was identical to an existing one. */
-    private String snapshotOutcome;
-
-    @Column(length = 1000)
-    private String archivePath;
-
-    private String acceptedBy;
-
-    private LocalDateTime acceptedAt;
-
-    @Column(length = 1000)
-    private String holdReason;
+    private LocalDateTime completedAt;
 
     private LocalDateTime createdAt;
 

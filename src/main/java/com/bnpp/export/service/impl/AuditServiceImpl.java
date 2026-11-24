@@ -31,11 +31,6 @@ public class AuditServiceImpl implements AuditService {
         write(TEMPLATE, templateId, null, null, action, details);
     }
 
-    @Override
-    public void snapshot(Long snapshotId, String action, String details) {
-        write(SNAPSHOT, snapshotId, null, null, action, details);
-    }
-
     private void write(String entityType, Long entityId, Long jobId, Long subscriberId, String action, String details) {
         ExportAuditLog entry = new ExportAuditLog();
         entry.setEntityType(entityType);

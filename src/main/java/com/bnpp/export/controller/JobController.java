@@ -3,7 +3,8 @@ package com.bnpp.export.controller;
 import com.bnpp.export.dto.DeliveryProofResponse;
 import com.bnpp.export.dto.JobDetailResponse;
 import com.bnpp.export.dto.JobPageResponse;
-import com.bnpp.export.service.ExportService;
+import com.bnpp.export.service.ExportRunService;
+import com.bnpp.export.service.JobService;
 import org.springframework.core.io.Resource;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -13,53 +14,48 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
-
-/** Export runs (History): list, detail, the files and proof of each subscriber, and acting on held or failed ones. */
+/** Sends (History): the list, one send in detail, each subscriber's file and its proof, and retrying a failed file. */
 @RestController
 @RequestMapping("/api/jobs")
 public class JobController {
 
-    private final ExportService exportService;
+    private final JobService jobs;
+    private final ExportRunService runService;
 
-    public JobController(ExportService exportService) {
-        this.exportService = exportService;
+    public JobController(JobService jobs, ExportRunService runService) {
+        this.jobs = jobs;
+        this.runService = runService;
     }
 
-    /** A page of jobs, newest first; {@code limit} is at most 100. */
+    /** A page of sends, newest first; {@code limit} is at most 100. */
     @GetMapping
-    public JobPageResponse jobs(@RequestParam(required = false) String q,
-                                @RequestParam(defaultValue = "0") int offset,
+    public JobPageResponse jobs(@RequestParam(required = false) String q, @RequestParam(defaultValue = "0") int offset,
                                 @RequestParam(defaultValue = "25") int limit) {
-        return exportService.listJobs(q, offset, limit);
+        return jobs.jobs(q, offset, limit);
     }
 
     @GetMapping("/{id}")
     public JobDetailResponse job(@PathVariable Long id) {
-        return exportService.getJob(id);
+        return jobs.job(id);
     }
 
-    @PostMapping("/{jobId}/subscribers/{statusId}/accept")
-    public JobDetailResponse accept(@PathVariable Long jobId, @PathVariable Long statusId) {
-        return exportService.acceptOmissions(jobId, statusId);
+    @PostMapping("/{jobId}/files/{fileId}/retry")
+    public JobDetailResponse retry(@PathVariable Long jobId, @PathVariable Long fileId) {
+        return runService.retry(jobId, fileId);
     }
 
-    @PostMapping("/{jobId}/subscribers/{statusId}/retry")
-    public JobDetailResponse retry(@PathVariable Long jobId, @PathVariable Long statusId) {
-        return exportService.retry(jobId, statusId);
+    @PostMapping("/{jobId}/files/{fileId}/proof")
+    public DeliveryProofResponse proof(@PathVariable Long jobId, @PathVariable Long fileId) {
+        return jobs.proof(jobId, fileId);
     }
 
-    @PostMapping("/{jobId}/subscribers/{statusId}/proof")
-    public DeliveryProofResponse proof(@PathVariable Long jobId, @PathVariable Long statusId) {
-        return exportService.proof(jobId, statusId);
+    @GetMapping("/{jobId}/files/{fileId}")
+    public ResponseEntity<Resource> file(@PathVariable Long jobId, @PathVariable Long fileId) {
+        return FileResponses.stored(jobs.file(jobId, fileId));
     }
 
-    @GetMapping("/{jobId}/subscribers/{statusId}/file")
-    public ResponseEntity<Resource> file(@PathVariable Long jobId, @PathVariable Long statusId) {
-        return FileResponses.stored(exportService.download(jobId, statusId));
-    }
-
-    @GetMapping("/{jobId}/subscribers/{statusId}/archive")
-    public ResponseEntity<Resource> archive(@PathVariable Long jobId, @PathVariable Long statusId) {
-        return FileResponses.stored(exportService.downloadArchive(jobId, statusId));
+    @GetMapping("/{jobId}/files/{fileId}/archive")
+    public ResponseEntity<Resource> archive(@PathVariable Long jobId, @PathVariable Long fileId) {
+        return FileResponses.stored(jobs.archive(jobId, fileId));
     }
 }

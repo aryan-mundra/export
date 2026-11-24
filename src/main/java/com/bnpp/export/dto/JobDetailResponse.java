@@ -3,62 +3,19 @@ package com.bnpp.export.dto;
 import java.time.LocalDateTime;
 import java.util.List;
 
-public record JobDetailResponse(
-        Long id,
-        Long versionId,
-        String listCode,
-        String listName,
-        java.time.LocalDate fromDate,
-        java.time.LocalDate toDate,
-        String triggeredBy,
-        String status,
-        int totalSubscribers,
-        int completedSubscribers,
-        int failedSubscribers,
-        int heldSubscribers,
-        int skippedSubscribers,
-        long totalRecordsProcessed,
-        long totalRecordsQuarantined,
-        LocalDateTime startedAt,
-        LocalDateTime completedAt,
-        String errorMessage,
-        LocalDateTime createdAt,
-        List<SubscriberStatusResponse> subscribers,
-        List<AuditEntry> audits,
-        String mode,
-        String snapshotTemplate,
-        String snapshotLabel
-) {
-    public record SubscriberStatusResponse(
-            Long id,
-            Long subscriberId,
-            String subscriberName,
-            String formatType,
-            String status,
-            int recordsProcessed,
-            int recordsQuarantined,
-            long fileSizeBytes,
-            String filePath,
-            String fileName,
-            String errorMessage,
-            int retryCount,
-            LocalDateTime startedAt,
-            LocalDateTime completedAt,
-            String holdReason,
-            String acceptedBy,
-            Integer formatTemplateVersion,
-            String archiveFileName,
-            Long snapshotId,
-            String snapshotLabel,
-            String snapshotOutcome
-    ) {
+/** A send: its data version, each subscriber's file and delivery, and its audit trail. */
+public record JobDetailResponse(Long id, Long familyId, String listName, Long dataVersionId, int dataVersionNumber,
+                                Integer formatTemplateVersion, String triggeredBy, String status, int totalSubscribers,
+                                int completedSubscribers, int failedSubscribers, long totalRecords, LocalDateTime startedAt,
+                                LocalDateTime completedAt, String errorMessage, LocalDateTime createdAt,
+                                List<SubscriberFile> subscribers, List<AuditEntry> audits) {
+
+    /** One subscriber's file: its status, size, names of the file and of its archived copy, and any error. */
+    public record SubscriberFile(Long id, Long subscriberId, String subscriberName, String status, int records, long fileSizeBytes,
+                                 String fileName, String archiveFileName, String errorMessage, int retryCount,
+                                 LocalDateTime startedAt, LocalDateTime completedAt) {
     }
 
-    public record AuditEntry(
-            String action,
-            String details,
-            String actor,
-            LocalDateTime timestamp
-    ) {
+    public record AuditEntry(String action, String details, String actor, LocalDateTime timestamp) {
     }
 }

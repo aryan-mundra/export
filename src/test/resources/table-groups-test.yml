@@ -1,0 +1,30 @@
+# Test table groups: Person (three levels, a different foreign-key name in every table) and Entity.
+groups:
+  - name: Person
+    root:
+      table: tg_person
+      key: person_id
+    tables:
+      - table: tg_person_name
+        key: profile_ref
+        references: tg_person.person_id
+        element: Name
+      - table: tg_person_address
+        key: owner_id
+        references: tg_person.person_id
+        element: Address
+        id: address_no
+      - table: tg_address_country
+        key: addr_fk
+        references: tg_person_address.address_no
+        element: AddressCountry
+  - name: Entity
+    section: Entities
+    root:
+      table: tg_entity
+      key: entity_id
+    tables:
+      - table: tg_entity_code
+        key: ent_ref
+        references: tg_entity.entity_id
+        element: Code

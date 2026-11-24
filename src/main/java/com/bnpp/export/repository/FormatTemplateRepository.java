@@ -10,16 +10,13 @@ public interface FormatTemplateRepository extends JpaRepository<FormatTemplate, 
 
     List<FormatTemplate> findAllByOrderByNameAscVersionNumberDesc();
 
-    /** The approved version in use of a template. */
+    /** The approved version in use of a list. */
     Optional<FormatTemplate> findFirstByFamilyIdAndActiveTrueOrderByVersionNumberDesc(Long familyId);
 
     List<FormatTemplate> findByFamilyIdAndActiveTrue(Long familyId);
 
-    /** The approved version in use of every list. */
-    List<FormatTemplate> findByActiveTrue();
-
     Optional<FormatTemplate> findFirstByFamilyIdOrderByVersionNumberDesc(Long familyId);
 
-    /** The newest version of the template with this name, if any. */
+    /** The newest version of the list with this name, if any. */
     Optional<FormatTemplate> findFirstByNameIgnoreCaseOrderByVersionNumberDesc(String name);
 }

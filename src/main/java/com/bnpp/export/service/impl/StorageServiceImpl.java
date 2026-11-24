@@ -43,11 +43,6 @@ public class StorageServiceImpl implements StorageService {
     }
 
     @Override
-    public Path getRoot() {
-        return root;
-    }
-
-    @Override
     public PendingFile reserve(String subscriberName, Long versionId, String extension) {
         String safeName = subscriberName == null ? "subscriber" : subscriberName.replaceAll("[^A-Za-z0-9_-]+", "_");
         String fileName = safeName + "_v" + versionId + "_" + STAMP.format(LocalDateTime.now()) + "." + extension;

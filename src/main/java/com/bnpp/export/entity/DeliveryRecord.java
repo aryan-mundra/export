@@ -11,6 +11,7 @@ import lombok.Data;
 
 import java.time.LocalDateTime;
 
+/** One delivery attempt of a file to a subscriber, with the file's hash (the proof) and its archived copy. */
 @Data
 @Entity
 @Table(name = "ver_export_delivery")
@@ -20,13 +21,9 @@ public class DeliveryRecord {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    private Long versionId;
+    private Long dataVersionId;
 
     private Long subscriberId;
-
-    private String formatType;
-
-    private String exportType;
 
     @Column(length = 1000)
     private String filePath;
@@ -35,6 +32,7 @@ public class DeliveryRecord {
 
     private int recordCount;
 
+    /** PENDING, SUCCESS or FAILED. */
     @Column(nullable = false)
     private String status;
 
@@ -42,15 +40,8 @@ public class DeliveryRecord {
 
     private String cftTrackingId;
 
-    private Long formatTemplateId;
-
-    private Integer formatTemplateVersion;
-
     @Column(length = 1000)
     private String archivePath;
-
-    @Column(length = 1000)
-    private String quarantineNote;
 
     @Column(length = 4000)
     private String errorMessage;

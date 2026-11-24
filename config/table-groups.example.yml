@@ -1,0 +1,57 @@
+# Table groups for the export.
+#
+# HOW TO USE: copy this file to config/table-groups.yml (same folder) and replace the example names with your real
+# table and column names. As soon as config/table-groups.yml exists, the List page builds lists from these groups
+# (instead of gs_ tables joined on BNP_ID). Delete or rename the file to go back. Changes are picked up when the
+# List page is next opened: no restart needed.
+#
+# Each group:
+#   - becomes a section of tables on the List page;
+#   - has its own preview ("Preview 1: Person", "Preview 2: Entity", ...);
+#   - becomes a section of the XML, in the order written here.
+#
+# Rules (the application checks them and says exactly what is wrong):
+#   - name, section, element: XML names (letters, digits, _; no spaces).
+#   - root.key is the group's common key: always on the list; written as <Person person_id="...">.
+#   - every related table gives its own foreign-key column (key) and what it points to (references: table.column).
+#     The names may all differ. references may name the root or another table of the same group (several levels).
+#   - a table belongs to one group only; every table and column must exist in the database.
+#   - schema is optional: without it the database's search_path is used (testdb, public on the laptop).
+#   - id is optional on related tables: the row's own primary key, used by Synthesis to match rows across versions.
+#   - tables may have any name (gs_..., cfg_dj_..., ...): write them exactly as they are in the database.
+
+groups:
+
+  - name: Person                     # XML element for one record: <Person>
+    section: Persons                 # XML element around all of them (optional; default: name + "s")
+    # schema: testdb                 # optional
+    root:
+      table: cfg_dj_person           # main table: one <Person> per row
+      key: person_id                 # common key of the group
+    tables:
+      - table: cfg_dj_entityname
+        key: profile_ref             # foreign-key column in cfg_dj_entityname...
+        references: cfg_dj_person.person_id     # ...and the table.column it points to
+        element: Name                # optional: XML element of one row (default: the table name)
+        section: Names               # optional: XML element around its rows (default: element + "s")
+      - table: cfg_dj_entityaddress
+        key: owner_id
+        references: cfg_dj_person.person_id
+        element: Address
+        id: address_no               # optional: the row's own primary key. With it, Synthesis shows "address changed
+                                     # (city Paris -> Lyon)"; without it, "one address removed, one added".
+      - table: cfg_dj_addresscountry # linked to the address table, not to the person: also fine
+        key: addr_fk
+        references: cfg_dj_entityaddress.address_no
+        element: AddressCountry
+
+  - name: Entity
+    section: Entities
+    root:
+      table: cfg_dj_entity
+      key: entity_id
+    tables:
+      - table: cfg_dj_entitysanctionsreferencevalue
+        key: entity_id
+        references: cfg_dj_entity.entity_id
+        element: Sanction

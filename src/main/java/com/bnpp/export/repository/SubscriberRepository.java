@@ -20,10 +20,8 @@ public interface SubscriberRepository extends JpaRepository<SubscriberProfile, L
 
     boolean existsByCftEndpointIgnoreCaseAndEndpointStatus(String cftEndpoint, String endpointStatus);
 
-    List<SubscriberProfile> findByFormatTypeIgnoreCaseAndActiveTrueOrderByNameAsc(String formatType);
-
-    List<SubscriberProfile> findByTemplateFamilyIdOrderByNameAsc(Long templateFamilyId);
-
     /** Every subscriber that has chosen a list, by name: who uses each list, in one query. */
     List<SubscriberProfile> findByTemplateFamilyIdIsNotNullOrderByNameAsc();
+
+    List<SubscriberProfile> findByTemplateFamilyIdOrderByNameAsc(Long templateFamilyId);
 }

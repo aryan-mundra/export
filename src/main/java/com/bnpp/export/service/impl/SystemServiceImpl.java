@@ -2,7 +2,6 @@ package com.bnpp.export.service.impl;
 
 import com.bnpp.export.ExportApplication;
 import com.bnpp.export.config.DatabaseSettings;
-import com.bnpp.export.config.MockProperties;
 import com.bnpp.export.dto.DatabaseSwitchRequest;
 import com.bnpp.export.dto.DatabaseSwitchResponse;
 import com.bnpp.export.dto.SystemInfoResponse;
@@ -38,25 +37,25 @@ public class SystemServiceImpl implements SystemService {
     /** Tables ver-export-schema.sql creates; the module cannot start on PostgreSQL without them. */
     private static final List<String> REQUIRED_TABLES = List.of("ver_export_subscriber", "ver_export_dump_import");
 
-    private final MockProperties mockProperties;
     private final ExportJobRepository jobs;
+    private final org.springframework.core.env.Environment environment;
     private final boolean switchEnabled;
 
-    public SystemServiceImpl(MockProperties mockProperties,
-                             ExportJobRepository jobs,
+    public SystemServiceImpl(ExportJobRepository jobs,
+                             org.springframework.core.env.Environment environment,
                              @Value("${export.database-switch.enabled:true}") boolean switchEnabled) {
-        this.mockProperties = mockProperties;
         this.jobs = jobs;
+        this.environment = environment;
         this.switchEnabled = switchEnabled;
     }
 
     @Override
     public SystemInfoResponse info() {
-        boolean mock = mockProperties.isEnabled();
+        boolean h2 = !environment.matchesProfiles(DatabaseSettings.POSTGRES);
         DatabaseSettings saved = DatabaseSettings.load();
-        return new SystemInfoResponse(mock, mock ? DatabaseSettings.H2 : DatabaseSettings.POSTGRES, mock ? "H2" : "PostgreSQL",
+        return new SystemInfoResponse(h2 ? DatabaseSettings.H2 : DatabaseSettings.POSTGRES, h2 ? "H2" : "PostgreSQL",
                 switchEnabled && ExportApplication.canRestart(), saved.host(), saved.port(), saved.database(), saved.username(),
-                saved.hasConnection(), mock ? saved.lastError() : null);
+                saved.hasConnection(), h2 ? saved.lastError() : null);
     }
 
     @Override

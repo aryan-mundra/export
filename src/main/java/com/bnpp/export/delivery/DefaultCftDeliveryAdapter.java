@@ -3,6 +3,7 @@ package com.bnpp.export.delivery;
 import com.bnpp.export.dto.ExportFile;
 import com.bnpp.export.entity.SubscriberProfile;
 import org.apache.commons.lang3.StringUtils;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
@@ -15,6 +16,7 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.util.UUID;
 
+/** Delivers a file by POSTing it to the subscriber's endpoint (export.delivery.mock=false). */
 @Component
 @ConditionalOnProperty(name = "export.delivery.mock", havingValue = "false")
 public class DefaultCftDeliveryAdapter implements CftDeliveryAdapter {
@@ -22,6 +24,12 @@ public class DefaultCftDeliveryAdapter implements CftDeliveryAdapter {
     private final HttpClient httpClient = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(10))
             .build();
+
+    private final Duration timeout;
+
+    public DefaultCftDeliveryAdapter(@Value("${export.delivery.timeout-minutes:60}") int timeoutMinutes) {
+        this.timeout = Duration.ofMinutes(Math.max(1, timeoutMinutes));
+    }
 
     @Override
     public String deliver(SubscriberProfile subscriber, ExportFile file) {
@@ -31,7 +39,7 @@ public class DefaultCftDeliveryAdapter implements CftDeliveryAdapter {
         try {
             HttpRequest request = HttpRequest.newBuilder()
                     .uri(URI.create(subscriber.getCftEndpoint()))
-                    .timeout(Duration.ofMinutes(Math.max(1, subscriber.getExportTimeoutMinutes())))
+                    .timeout(timeout)
                     .header("Content-Type", "application/octet-stream")
                     .header("X-File-Name", file.getFileName())
                     .header("X-File-Hash", file.getFileHash())

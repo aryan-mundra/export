@@ -20,6 +20,27 @@ totals match. A new test (`HistoryQuarantinePagingTest`) checks slices, totals, 
 Status: **Fixed** = changed in this review. **Proposed** = needs a decision (it changes behaviour, an API or the
 schema), so it was not changed.
 
+## Third round: table groups only (2026-11-24)
+
+The module now builds every list from the table groups of `config/table-groups.yml`. What served the earlier model
+was removed, and the code was reorganised into strict layers:
+
+- **Removed:** the flat source path (`gs_` tables joined on `BNP_ID`, certified versions `ver_version` /
+  `ver_version_member`, per-version data tables), the old Synthesis, the data explorer and row filters, the CSV and
+  Fircosoft writers, quality check and quarantine, delta windows, resends of the old data versions, the sample file,
+  the file manifest, and the H2 demo data. Recoverable from git.
+- **Layers:** `controller` → `service` (interfaces) → `service/impl` → `repository` (JPA for the module's tables, JDBC
+  for the source tables and data versions); `entity`, `dto`, `model` (internal types), `config`, `util`. No SQL outside
+  `repository`.
+- **Size:** Java from about 15,000 to 6,900 lines; the web page script from 4,300 to 2,050 lines; 352 unused CSS rules
+  removed.
+- **Schema:** `ver-export-schema.sql` rewritten for the new tables (run `reset-export-tables.sql` first on an existing
+  test database).
+- **Checks:** 11 tests, including one flow from groups to a delivered, proved file. All pass.
+
+Findings below refer to the code before this round; items about removed parts (2, 5, 9, 10, 13, 14, 15) no longer
+apply.
+
 ## Summary
 
 | # | Category | Finding | Priority | Status |

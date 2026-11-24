@@ -8,8 +8,7 @@ import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 import lombok.Data;
 
-import java.util.Locale;
-
+/** One column of a list version: a column of a group table, and its name in the file. */
 @Data
 @Entity
 @Table(name = "ver_export_template_field")
@@ -22,32 +21,21 @@ public class FormatField {
     @Column(nullable = false)
     private Long templateId;
 
-    /** The gs_ table the column comes from. */
+    /** The group table the column comes from. */
+    @Column(nullable = false)
     private String sourceTable;
 
     @Column(nullable = false)
     private String sourceColumn;
 
-    /** The gs_ table's BNP_ID column, which matches its rows to a list entry. */
+    /** How the table joins its group: its key (root table) or its foreign key column... */
     private String joinColumn;
 
-    /** The list entry field that joinColumn must equal: its BNP_ID. */
-    private String joinField;
+    /** ...and the "table.column" that column points to, as written in the groups file when the list was saved. */
+    private String joinTarget;
 
     @Column(nullable = false)
     private String headerName;
 
     private int position;
-
-    public boolean isGoldenSource() {
-        return sourceTable != null && !sourceTable.isBlank();
-    }
-
-    /** The key that holds this field's value in an export record. */
-    public String recordKey() {
-        if (!isGoldenSource()) {
-            return sourceColumn;
-        }
-        return sourceTable.toLowerCase(Locale.ROOT) + "." + sourceColumn.toLowerCase(Locale.ROOT);
-    }
 }

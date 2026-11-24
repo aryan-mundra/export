@@ -1,6 +1,6 @@
 # Database dumps
 
-Put a PostgreSQL dump here (for example `shine-dump-shinedata-202611230033.sql`) and start the application
+Put a PostgreSQL dump here (for example `dowjones-dump-202611241442.sql`) and start the application
 with the `postgres` profile. Before anything else starts, the application loads the dump's data into the
 database configured in `REGLISS_DB_URL`, once.
 
@@ -16,14 +16,14 @@ on each machine, directly in this folder (not in a sub-folder).
 The full walk-through, with pgAdmin and IntelliJ on Windows, is in
 [docs/postgres-testing.md](../../docs/postgres-testing.md#set-up-on-a-windows-laptop-with-pgadmin-and-intellij). In short:
 
-1. In pgAdmin, on **PostgreSQL 17**: create the database `shinedata`.
-2. In a Query Tool opened from `shinedata`: open `db/postgres/ver-export-schema.sql` and run it (F5).
+1. In pgAdmin, on **PostgreSQL 17**: create the database `reglissData`.
+2. In a Query Tool opened from `reglissData`: open `db/postgres/ver-export-schema.sql` and run it (F5).
 3. Copy the dump file into this folder.
 4. Check `config/database.properties` (host, port, database, username, password); it holds the local connection.
 5. Start the application (no profile needed), sign in, and click **PostgreSQL** under **Database** in the sidebar,
    then **Switch to PostgreSQL**.
 
-The log shows `Importing … into "shinedata"`, then `Imported … in N s`. Large dumps take a few minutes. Then open
+The log shows `Importing … into "reglissData"`, then `Imported … in N s`. Large dumps take a few minutes. Then open
 http://localhost:8082.
 
 ## What happens on start-up

@@ -84,13 +84,12 @@
             <resource>
                 <directory>src/main/resources</directory>
             </resource>
-            <!-- The table scripts H2 runs at start-up go inside the jar too, so the jar starts from any folder.
+            <!-- The table script H2 runs at start-up goes inside the jar too, so the jar starts from any folder.
                  They stay in db/ in the repository, where they are also run by hand in pgAdmin. -->
             <resource>
                 <directory>db</directory>
                 <targetPath>db</targetPath>
                 <includes>
-                    <include>h2/demo-source-tables.sql</include>
                     <include>postgres/ver-export-schema.sql</include>
                 </includes>
             </resource>

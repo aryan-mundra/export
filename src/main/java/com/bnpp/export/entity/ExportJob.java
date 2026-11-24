@@ -8,10 +8,12 @@ import jakarta.persistence.Id;
 import jakarta.persistence.PrePersist;
 import jakarta.persistence.Table;
 import lombok.Data;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 
-import java.time.LocalDate;
 import java.time.LocalDateTime;
 
+/** A send of one data version of a list to chosen subscribers: one XML file each, delivered in the background. */
 @Data
 @Entity
 @Table(name = "ver_export_job")
@@ -21,40 +23,29 @@ public class ExportJob {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @Column(nullable = false)
-    private Long versionId;
-
-    private LocalDate fromDate;
-
-    private LocalDate toDate;
-
-    private String listCode;
+    /** The list (template family) and its name. */
+    private Long familyId;
 
     private String listName;
 
+    /** The data version sent (ver_export_data_version.id) and its number within the list. */
+    @Column(nullable = false)
+    private Long dataVersionId;
+
+    private int dataVersionNumber;
+
+    /** The list version the data version was read with. */
     private Long formatTemplateId;
 
     private Integer formatTemplateVersion;
 
-    /** EXPORT: reads the current data. RESEND: sends a stored data version again, without reading the source. */
-    private String mode;
-
-    /** For a resend: the data version sent, and to whom (subscriber ids, comma-separated). */
-    private Long snapshotId;
-
-    private String snapshotLabel;
-
-    private String snapshotTemplate;
-
-    /** For a resend: CSV or XML for every file, or null for each subscriber's own format. */
-    private String formatOverride;
-
-    /** The subscribers it was limited to: "id" or, for a resend, "id:FORMAT", comma-separated. */
-    @org.hibernate.annotations.JdbcTypeCode(org.hibernate.type.SqlTypes.LONGVARCHAR)
+    /** The subscribers it is sent to, comma-separated ids. */
+    @JdbcTypeCode(SqlTypes.LONGVARCHAR)
     private String subscriberIds;
 
     private String triggeredBy;
 
+    /** PENDING, IN_PROGRESS, COMPLETED or FAILED. */
     @Column(nullable = false)
     private String status;
 
@@ -64,20 +55,15 @@ public class ExportJob {
 
     private int failedSubscribers;
 
-    private int heldSubscribers;
+    /** Records sent, over every subscriber. */
+    private long totalRecords;
 
-    private int skippedSubscribers;
-
-    private long totalRecordsProcessed;
-
-    private long totalRecordsQuarantined;
+    @Column(length = 4000)
+    private String errorMessage;
 
     private LocalDateTime startedAt;
 
     private LocalDateTime completedAt;
-
-    @Column(length = 4000)
-    private String errorMessage;
 
     private LocalDateTime createdAt;
 

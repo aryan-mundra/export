@@ -11,7 +11,6 @@ package com.bnpp.export.dto;
  * @param postgresConfigured whether config/database.properties names a host, a database and a user
  * @param switchError        why the last switch to PostgreSQL did not start, or null
  */
-public record SystemInfoResponse(boolean mockEnabled, String mode, String label, boolean switchable,
-                                 String postgresHost, int postgresPort, String postgresDatabase, String postgresUsername,
-                                 boolean postgresConfigured, String switchError) {
+public record SystemInfoResponse(String mode, String label, boolean switchable, String postgresHost, int postgresPort,
+                                 String postgresDatabase, String postgresUsername, boolean postgresConfigured, String switchError) {
 }

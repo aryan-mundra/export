@@ -28,26 +28,13 @@ public class DeliveryServiceImpl implements DeliveryService {
     }
 
     @Override
-    public DeliveryRecord deliver(SubscriberProfile subscriber,
-                                  ExportFile file,
-                                  Long versionId,
-                                  String exportMode,
-                                  int recordCount,
-                                  Long templateId,
-                                  Integer templateVersion,
-                                  String quarantineNote) {
+    public DeliveryRecord deliver(SubscriberProfile subscriber, ExportFile file, Long dataVersionId, int recordCount) {
         DeliveryRecord record = new DeliveryRecord();
-        record.setVersionId(versionId);
+        record.setDataVersionId(dataVersionId);
         record.setSubscriberId(subscriber.getId());
-        String fileFormat = file.getFormatType();
-        record.setFormatType(fileFormat == null || fileFormat.isBlank() ? subscriber.getFormatType() : fileFormat);
-        record.setExportType(exportMode);
         record.setFilePath(file.getFilePath());
         record.setFileHash(file.getFileHash());
         record.setRecordCount(recordCount);
-        record.setFormatTemplateId(templateId);
-        record.setFormatTemplateVersion(templateVersion);
-        record.setQuarantineNote(quarantineNote);
         record.setStatus("PENDING");
         try {
             String trackingId = dispatch(subscriber, file);

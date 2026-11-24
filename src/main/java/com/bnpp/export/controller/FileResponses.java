@@ -52,6 +52,13 @@ final class FileResponses {
     }
 
     private static MediaType mediaType(String fileName) {
-        return fileName.toLowerCase().endsWith(".csv") ? MediaType.parseMediaType("text/csv") : MediaType.APPLICATION_XML;
+        String name = fileName.toLowerCase();
+        if (name.endsWith(".csv")) {
+            return MediaType.parseMediaType("text/csv");
+        }
+        if (name.endsWith(".txt")) {
+            return MediaType.parseMediaType("text/plain;charset=UTF-8");
+        }
+        return MediaType.APPLICATION_XML;
     }
 }

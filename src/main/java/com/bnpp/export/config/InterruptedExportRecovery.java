@@ -1,6 +1,6 @@
 package com.bnpp.export.config;
 
-import com.bnpp.export.service.ExportService;
+import com.bnpp.export.service.ExportRunService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -19,15 +19,15 @@ public class InterruptedExportRecovery implements ApplicationListener<Applicatio
 
     private static final Logger log = LoggerFactory.getLogger(InterruptedExportRecovery.class);
 
-    private final ExportService orchestrator;
+    private final ExportRunService runService;
 
-    public InterruptedExportRecovery(ExportService orchestrator) {
-        this.orchestrator = orchestrator;
+    public InterruptedExportRecovery(ExportRunService runService) {
+        this.runService = runService;
     }
 
     @Override
     public void onApplicationEvent(ApplicationReadyEvent event) {
-        int recovered = orchestrator.recoverInterruptedExports();
+        int recovered = runService.recoverInterrupted();
         if (recovered > 0) {
             log.warn("Marked {} interrupted export job(s) as FAILED", recovered);
         }

@@ -1,18 +1,22 @@
 package com.bnpp.export.controller;
 
-import com.bnpp.export.dto.DataVersionChangePageResponse;
-import com.bnpp.export.dto.DataVersionComparisonResponse;
-import com.bnpp.export.dto.DataVersionComparisonSummaryResponse;
-import com.bnpp.export.dto.DataVersionDetailResponse;
-import com.bnpp.export.dto.DataVersionPageResponse;
 import com.bnpp.export.dto.DataVersionResponse;
-import com.bnpp.export.dto.DataVersionRowsResponse;
-import com.bnpp.export.dto.DataVersionSeriesPageResponse;
-import com.bnpp.export.service.ComparisonService;
+import com.bnpp.export.dto.ExportJobResponse;
+import com.bnpp.export.dto.SendRequest;
+import com.bnpp.export.dto.SendReviewResponse;
+import com.bnpp.export.dto.SynthesisRecordPageResponse;
+import com.bnpp.export.dto.SynthesisRecordResponse;
+import com.bnpp.export.dto.SynthesisSummaryResponse;
+import com.bnpp.export.dto.TakeVersionResponse;
+import com.bnpp.export.model.RecordChange;
 import com.bnpp.export.service.DataVersionService;
+import com.bnpp.export.service.SendService;
+import com.bnpp.export.service.SynthesisService;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -20,102 +24,67 @@ import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBo
 
 import java.util.List;
 
-/** Data versions: list, inspect, compare and download. Everything reads the versions' own tables. */
+/** Data versions of lists: taking one, its XML, Synthesis between two of them, and sending one to subscribers. */
 @RestController
 @RequestMapping("/api/data-versions")
 public class DataVersionController {
 
     private final DataVersionService dataVersions;
-    private final ComparisonService comparisons;
+    private final SynthesisService synthesis;
+    private final SendService sends;
 
-    public DataVersionController(DataVersionService dataVersions, ComparisonService comparisons) {
+    public DataVersionController(DataVersionService dataVersions, SynthesisService synthesis, SendService sends) {
         this.dataVersions = dataVersions;
-        this.comparisons = comparisons;
+        this.synthesis = synthesis;
+        this.sends = sends;
     }
 
-    /** The newest data versions (at most 200), optionally of one list. Screens use the paged endpoints below. */
+    /** The versions of a list, newest first (every list when no familyId). */
     @GetMapping
     public List<DataVersionResponse> list(@RequestParam(required = false) Long familyId) {
-        return dataVersions.latest(familyId);
+        return dataVersions.versions(familyId);
     }
 
-    /** Lists and source lists that have data versions: one catalog row each, searched and paged. */
-    @GetMapping("/series")
-    public DataVersionSeriesPageResponse series(@RequestParam(required = false) String q,
-                                                @RequestParam(required = false) Long familyId,
-                                                @RequestParam(defaultValue = "recent") String sort,
-                                                @RequestParam(defaultValue = "0") int offset,
-                                                @RequestParam(defaultValue = "50") int limit) {
-        return dataVersions.series(q, familyId, sort, offset, limit);
+    /** Reads the list's data now: a new version when it changed, otherwise the newest one. */
+    @PostMapping
+    public TakeVersionResponse take(@RequestParam Long familyId) {
+        return dataVersions.take(familyId);
     }
 
-    /** The versions of one list and source list, newest first, a page at a time. */
-    @GetMapping("/series/{familyId}/{listCode}")
-    public DataVersionPageResponse versions(@PathVariable Long familyId,
-                                            @PathVariable String listCode,
-                                            @RequestParam(defaultValue = "0") int offset,
-                                            @RequestParam(defaultValue = "25") int limit) {
-        return dataVersions.versions(familyId, listCode, offset, limit);
+    @GetMapping("/{id}/xml")
+    public ResponseEntity<StreamingResponseBody> xml(@PathVariable Long id) {
+        return FileResponses.temporary(dataVersions.xml(id));
     }
 
-    @GetMapping("/{id}")
-    public DataVersionDetailResponse detail(@PathVariable Long id) {
-        return dataVersions.detail(id);
+    @GetMapping("/{after}/compare/{before}/summary")
+    public SynthesisSummaryResponse summary(@PathVariable Long after, @PathVariable Long before) {
+        return synthesis.summary(after, before);
     }
 
-    @GetMapping("/{id}/rows")
-    public DataVersionRowsResponse rows(@PathVariable Long id,
-                                        @RequestParam(defaultValue = "0") int offset,
-                                        @RequestParam(defaultValue = "100") int limit) {
-        return dataVersions.rows(id, offset, limit);
+    /** @param change CHANGES (default: added, removed or changed), ADDED, REMOVED, CHANGED, UNCHANGED or ALL */
+    @GetMapping("/{after}/compare/{before}/records")
+    public SynthesisRecordPageResponse records(@PathVariable Long after, @PathVariable Long before, @RequestParam String group,
+                                               @RequestParam(defaultValue = "CHANGES") RecordChange.Filter change,
+                                               @RequestParam(required = false) String q, @RequestParam(defaultValue = "0") int offset,
+                                               @RequestParam(defaultValue = "50") int limit) {
+        return synthesis.records(after, before, group, change, q, offset, limit);
     }
 
-    @GetMapping("/{id}/compare/{against}")
-    public DataVersionComparisonResponse compare(@PathVariable Long id,
-                                                 @PathVariable Long against,
-                                                 @RequestParam(defaultValue = "0") int offset,
-                                                 @RequestParam(defaultValue = "50") int limit) {
-        return dataVersions.compare(id, against, offset, limit);
+    @GetMapping("/{after}/compare/{before}/record")
+    public SynthesisRecordResponse record(@PathVariable Long after, @PathVariable Long before, @RequestParam String group,
+                                          @RequestParam String key) {
+        return synthesis.record(after, before, group, key);
     }
 
-    /** A version as a file in any supported format; with a subscriber, only the rows it receives. */
-    @GetMapping("/{id}/file")
-    public ResponseEntity<StreamingResponseBody> file(@PathVariable Long id,
-                                                      @RequestParam(defaultValue = "CSV") String format,
-                                                      @RequestParam(required = false) Long subscriberId) {
-        return FileResponses.temporary(dataVersions.download(id, format, subscriberId));
+    /** Who would receive a version (default: the active subscribers of its list) and the review token. */
+    @PostMapping("/{id}/send/review")
+    public SendReviewResponse review(@PathVariable Long id, @RequestBody(required = false) SendRequest request) {
+        return sends.review(id, request == null ? null : request.subscriberIds());
     }
 
-    /** Comparing version {@code against} (before) with {@code id} (after): the counts and the changes per column. */
-    @GetMapping("/{id}/compare/{against}/summary")
-    public DataVersionComparisonSummaryResponse compareSummary(@PathVariable Long id, @PathVariable Long against) {
-        return comparisons.summary(id, against);
-    }
-
-    /**
-     * A page of the records that differ, filtered by record type (ALL, ADDED, REMOVED, CHANGED), by column (and the
-     * value change in it: ADDED, REMOVED, UPDATED) and by BNP ID.
-     */
-    @GetMapping("/{id}/compare/{against}/changes")
-    public DataVersionChangePageResponse compareChanges(@PathVariable Long id,
-                                                        @PathVariable Long against,
-                                                        @RequestParam(defaultValue = "ALL") String kind,
-                                                        @RequestParam(required = false) String column,
-                                                        @RequestParam(required = false) String cell,
-                                                        @RequestParam(required = false) String q,
-                                                        @RequestParam(defaultValue = "0") int offset,
-                                                        @RequestParam(defaultValue = "50") int limit) {
-        return comparisons.changes(id, against, kind, column, cell, q, offset, limit);
-    }
-
-    /** Every difference matching the filters as CSV, one line per changed value. */
-    @GetMapping("/{id}/compare/{against}/file")
-    public ResponseEntity<StreamingResponseBody> compareFile(@PathVariable Long id,
-                                                             @PathVariable Long against,
-                                                             @RequestParam(defaultValue = "ALL") String kind,
-                                                             @RequestParam(required = false) String column,
-                                                             @RequestParam(required = false) String cell,
-                                                             @RequestParam(required = false) String q) {
-        return FileResponses.temporary(comparisons.changesFile(id, against, kind, column, cell, q));
+    /** Sends a version to the reviewed subscribers: one XML file each, delivered in the background. */
+    @PostMapping("/{id}/send")
+    public ExportJobResponse send(@PathVariable Long id, @RequestBody SendRequest request) {
+        return sends.send(id, request);
     }
 }

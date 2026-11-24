@@ -1,19 +1,12 @@
 package com.bnpp.export;
 
 import com.bnpp.export.entity.AppUser;
-import com.bnpp.export.entity.CertifiedVersion;
-import com.bnpp.export.entity.DataSnapshot;
 import com.bnpp.export.entity.DeliveryRecord;
 import com.bnpp.export.entity.ExportAuditLog;
 import com.bnpp.export.entity.ExportJob;
 import com.bnpp.export.entity.ExportJobSubscriberStatus;
-import com.bnpp.export.entity.ExportedFile;
-import com.bnpp.export.entity.ExportedFileRecord;
 import com.bnpp.export.entity.FormatField;
-import com.bnpp.export.entity.FormatFilter;
 import com.bnpp.export.entity.FormatTemplate;
-import com.bnpp.export.entity.QuarantineRecord;
-import com.bnpp.export.entity.SnapshotSeries;
 import com.bnpp.export.entity.SubscriberProfile;
 import jakarta.persistence.Table;
 import org.hibernate.boot.Metadata;
@@ -48,12 +41,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  */
 class SchemaScriptTest {
 
-    /** Entities the module writes. CertifiedVersion maps REGLISS's own ver_version, which the module only reads. */
+    /** The module's entities (the data version tables are written with JDBC and checked by the flow test). */
     static final List<Class<?>> WRITTEN = List.of(
-            AppUser.class, SubscriberProfile.class, FormatTemplate.class, FormatField.class, FormatFilter.class,
-            ExportJob.class, ExportJobSubscriberStatus.class, ExportedFile.class, ExportedFileRecord.class,
-            DeliveryRecord.class, QuarantineRecord.class, ExportAuditLog.class,
-            DataSnapshot.class, SnapshotSeries.class);
+            AppUser.class, SubscriberProfile.class, FormatTemplate.class, FormatField.class,
+            ExportJob.class, ExportJobSubscriberStatus.class, DeliveryRecord.class, ExportAuditLog.class);
 
     private static final Pattern CREATE_TABLE = Pattern.compile("^create table (\\w+) \\((.*)\\)$", Pattern.MULTILINE);
 
@@ -63,7 +54,6 @@ class SchemaScriptTest {
             String table = entity.getAnnotation(Table.class).name();
             assertTrue(table.startsWith("ver_export_"), entity.getSimpleName() + " writes to " + table + ", which does not start with ver_export_");
         }
-        assertEquals("ver_version", CertifiedVersion.class.getAnnotation(Table.class).name());
 
         String ddl = generatedDdl();
         String script = Files.readString(Path.of("db", "postgres", "ver-export-schema.sql")).toLowerCase(Locale.ROOT);
