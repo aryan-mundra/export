@@ -114,6 +114,8 @@ public class VersionTableRepository {
         }
         ddl.setLength(ddl.length() - 2);
         jdbc.execute(ddl.append(')').toString());
+        // Comparing two versions matches their records on _record_id.
+        jdbc.execute("CREATE INDEX " + quote("ix_" + stage + "_rid") + " ON " + quote(stage) + " (" + quote("_record_id") + ")");
         return stage;
     }
 

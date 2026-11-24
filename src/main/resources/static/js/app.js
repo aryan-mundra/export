@@ -2275,13 +2275,20 @@ function exportHtml() {
         <nav class="xp-tabs" role="tablist">
             <button type="button" role="tab" class="xp-tab ${xp.tab === "latest" ? "active" : ""}" aria-selected="${xp.tab === "latest"}" data-xp-tab="latest">Export Latest</button>
             <button type="button" role="tab" class="xp-tab ${xp.tab === "previous" ? "active" : ""}" aria-selected="${xp.tab === "previous"}" data-xp-tab="previous">Previous Versions</button>
+            <button type="button" role="tab" class="xp-tab ${xp.tab === "compare" ? "active" : ""}" aria-selected="${xp.tab === "compare"}" data-xp-tab="compare">Compare</button>
         </nav>
-        <div id="xp-body">${xp.tab === "previous" ? previousHtml() : latestHtml()}</div>`;
+        <div id="xp-body">${xpBodyHtml(xp)}</div>`;
+}
+
+function xpBodyHtml(xp) {
+    if (xp.tab === "previous") return previousHtml();
+    if (xp.tab === "compare") return compareHtml();
+    return latestHtml();
 }
 
 function renderXp() {
     const body = document.getElementById("xp-body");
-    if (body) body.innerHTML = state.xp.tab === "previous" ? previousHtml() : latestHtml();
+    if (body) body.innerHTML = xpBodyHtml(state.xp);
 }
 
 function templateQuery(view, withVersions, limit) {
@@ -2482,6 +2489,7 @@ function prevDetailHtml() {
             ? `<div class="xp-version-bar">
                 <span>Version ${versionChip(picked.label)} selected${picked.tableName ? ` · <code>${esc(picked.tableName)}</code>` : ""}</span>
                 ${formatChoices().map(f => `<a class="btn-ghost btn-small" href="/api/data-versions/${picked.id}/file?format=${encodeURIComponent(f)}" download>${esc(f)}</a>`).join("")}
+                ${picked.previousSnapshotId ? `<button type="button" class="btn-ghost" data-xp-compare="${picked.id}">Compare with ${esc(picked.previousLabel)}</button>` : ""}
                 <button type="button" class="btn-primary" data-xp-send="${picked.id}">Send this version</button>
                </div>`
             : "";
@@ -2502,6 +2510,547 @@ function prevDetailHtml() {
             ${lists}
         </div>
         ${table}`;
+}
+
+/* --- Tab 3: Compare two versions of a list ---
+ *
+ * Built for large lists (tens of thousands of records, hundreds of columns): the server counts and filters,
+ * the page shows a summary, the changed values by column, and one page of records at a time. A changed record
+ * shows only the values that differ.
+ */
+
+const CMP_PAGE = 50;
+const CMP_COLUMNS_SHOWN = 8;
+const CMP_CELLS_SHOWN = 4;
+const CMP_KIND_LABEL = { ADDED: "Added", REMOVED: "Removed", CHANGED: "Changed" };
+
+function cmpView() {
+    const xp = ensureXp();
+    if (!xp.cmp) {
+        xp.cmp = {
+            q: "", offset: 0, page: null, seq: 0,
+            selected: null, lists: null, listCode: null, versions: null, versionsTotal: 0,
+            fromId: null, toId: null,
+            summary: null, summarySeq: 0,
+            filter: { kind: "ALL", column: null, q: "" },
+            result: null, resultSeq: 0, resultOffset: 0, loadingResults: false,
+            expanded: new Set(), colQ: "", colsAll: false
+        };
+    }
+    return xp.cmp;
+}
+
+function compareHtml() {
+    const v = cmpView();
+    if (!v.selected) {
+        return `<section class="table-card xp-card">
+                <div class="xp-toolbar">
+                    <input class="search" id="cmp-search-lists" placeholder="Search lists" value="${esc(v.q)}" autocomplete="off" aria-label="Search lists">
+                </div>
+                <div id="cmp-lists">${cmpListsHtml()}</div>
+            </section>`;
+    }
+    return `<button type="button" class="btn-ghost xp-back-link" data-cmp-back>Back to lists</button>
+        <section class="table-card xp-card cmp-head" id="cmp-head">${cmpHeadHtml()}</section>
+        <div id="cmp-summary">${cmpSummaryHtml()}</div>
+        <section class="table-card xp-card cmp-results" id="cmp-results">${cmpResultsHtml()}</section>`;
+}
+
+function cmpListsHtml() {
+    const v = cmpView();
+    const page = v.page;
+    if (!page) return '<div class="queue-empty">Loading…</div>';
+    if (page.error) return `<div class="banner banner-error">${esc(page.error)}</div>`;
+    if (!page.templates.length) return `<div class="empty">${v.q ? "No list matches." : "No versions yet. Export a list first."}</div>`;
+    const rows = page.templates.map(item => {
+        const enough = item.versionCount >= 2;
+        return `<tr>
+            <td><strong>${esc(item.name)}</strong></td>
+            <td>${num(item.versionCount)} version${item.versionCount === 1 ? "" : "s"}</td>
+            <td>${item.latestLabel ? versionChip(item.latestLabel) : '<span class="muted">—</span>'}</td>
+            <td class="actions">${enough
+                ? `<button type="button" class="btn-primary btn-small" data-cmp-list="${item.familyId}">Compare</button>`
+                : '<span class="muted small-note">Needs 2 versions</span>'}</td>
+        </tr>`;
+    }).join("");
+    return `<table>
+            <thead><tr><th>List</th><th>Versions</th><th>Latest</th><th></th></tr></thead>
+            <tbody>${rows}</tbody>
+        </table>
+        ${pagerHtml(page, TEMPLATE_PAGE, "cmp", "lists")}`;
+}
+
+function cmpVersionOption(version, selectedId) {
+    const text = `${version.label} · ${when(version.createdAt)} · ${num(version.rowCount)} rows`;
+    return `<option value="${version.id}" ${version.id === selectedId ? "selected" : ""}>${esc(text)}</option>`;
+}
+
+function cmpHeadHtml() {
+    const v = cmpView();
+    const item = v.selected;
+    const lists = v.lists && v.lists.length > 1
+        ? `<label class="cmp-source">Source list <select id="cmp-list-code">${v.lists.map(entry => `<option value="${esc(entry.listCode)}" ${entry.listCode === v.listCode ? "selected" : ""}>${esc(entry.listName)}</option>`).join("")}</select></label>`
+        : (v.lists && v.lists.length ? `<span class="pill pill-off">${esc(v.lists[0].listName)} list</span>` : "");
+    let pickers = '<div class="muted cmp-note">Loading versions…</div>';
+    if (v.versions && v.versions.error) pickers = `<div class="banner banner-error">${esc(v.versions.error)}</div>`;
+    else if (v.versions && v.versions.length < 2) pickers = '<div class="muted cmp-note">This list needs at least two versions to compare.</div>';
+    else if (v.versions) {
+        pickers = `<div class="cmp-pickers">
+                <label class="cmp-pick"><span>From</span><select id="cmp-from" aria-label="Compare from version">${v.versions.map(version => cmpVersionOption(version, v.fromId)).join("")}</select></label>
+                <button type="button" class="cmp-swap" data-cmp-swap title="Swap From and To" aria-label="Swap From and To">⇄</button>
+                <label class="cmp-pick"><span>To</span><select id="cmp-to" aria-label="Compare to version">${v.versions.map(version => cmpVersionOption(version, v.toId)).join("")}</select></label>
+            </div>
+            ${v.versionsTotal > v.versions.length ? `<p class="muted small-note cmp-note">The newest ${num(v.versions.length)} of ${num(v.versionsTotal)} versions are offered.</p>` : ""}`;
+    }
+    return `<div class="cmp-head-top">
+            <div>
+                <h2>${esc(item.name)}</h2>
+                <p class="xp-detail-meta">List version ${item.templateVersion} · compare any two of its versions</p>
+            </div>
+            ${lists}
+        </div>
+        ${pickers}`;
+}
+
+function cmpTile(kind, count, label, tone) {
+    const v = cmpView();
+    const active = v.filter.kind === kind && !v.filter.column;
+    return `<button type="button" class="cmp-tile ${tone}${active ? " active" : ""}" data-cmp-kind="${kind}" ${count ? "" : "disabled"} aria-pressed="${active}">
+            <span class="cmp-tile-n">${num(count)}</span><span class="cmp-tile-l">${label}</span>
+        </button>`;
+}
+
+function cmpSummaryHtml() {
+    const v = cmpView();
+    if (!v.versions || v.versions.length < 2 || !v.fromId || !v.toId) return "";
+    if (v.fromId === v.toId) return '<section class="panel cmp-summary"><div class="empty">Choose two different versions.</div></section>';
+    const s = v.summary;
+    if (!s) return '<section class="panel cmp-summary"><div class="cmp-loading">Comparing…</div></section>';
+    if (s.error) return `<section class="panel cmp-summary"><div class="banner banner-error">${esc(s.error)}</div></section>`;
+    const c = s.counts;
+    const identical = !c.inserted && !c.deleted && !c.changed && s.sameLayout;
+    const layout = s.sameLayout ? "" : `<div class="banner cmp-layout">The list's columns differ between these versions.${
+        s.addedColumns.length ? ` Only in ${esc(s.toLabel)}: ${esc(cmpNames(s.addedColumns))}.` : ""}${
+        s.removedColumns.length ? ` Only in ${esc(s.fromLabel)}: ${esc(cmpNames(s.removedColumns))}.` : ""} Those columns are not compared.</div>`;
+    return `<section class="panel cmp-summary">
+            <div class="cmp-route">
+                <span>${versionChip(s.fromLabel)} <span class="muted">${num(s.fromRows)} rows · ${when(s.fromCreatedAt)}</span></span>
+                <span class="cmp-route-arrow" aria-hidden="true">→</span>
+                <span>${versionChip(s.toLabel)} <span class="muted">${num(s.toRows)} rows · ${when(s.toCreatedAt)}</span></span>
+            </div>
+            ${identical ? `<div class="cmp-identical"><strong>No differences.</strong> ${esc(s.fromLabel)} and ${esc(s.toLabel)} hold exactly the same data.</div>` : `
+            <div class="cmp-tiles">
+                ${cmpTile("ADDED", c.inserted, "Added", "add")}
+                ${cmpTile("REMOVED", c.deleted, "Removed", "del")}
+                ${cmpTile("CHANGED", c.changed, "Changed", "chg")}
+                <div class="cmp-tile same"><span class="cmp-tile-n">${num(c.unchanged)}</span><span class="cmp-tile-l">Unchanged</span></div>
+            </div>`}
+            ${layout}
+            ${s.columns.length ? cmpColumnsHtml() : ""}
+        </section>`;
+}
+
+function cmpNames(names) {
+    return names.length > 8 ? names.slice(0, 8).join(", ") + ` and ${names.length - 8} more` : names.join(", ");
+}
+
+function cmpColumnsHtml() {
+    const s = cmpView().summary;
+    const many = s.columns.length > CMP_COLUMNS_SHOWN;
+    return `<div class="cmp-cols">
+            <div class="cmp-cols-head">
+                <strong>Changed values by column</strong>
+                <span class="muted">${num(s.columns.length)} column${s.columns.length === 1 ? "" : "s"} changed · click one to see its records</span>
+                ${many ? `<input class="search cmp-col-search" id="cmp-col-search" placeholder="Find a column" value="${esc(cmpView().colQ)}" autocomplete="off" aria-label="Find a column">` : ""}
+            </div>
+            <div id="cmp-col-list">${cmpColumnListHtml()}</div>
+        </div>`;
+}
+
+function cmpColumnListHtml() {
+    const v = cmpView();
+    const s = v.summary;
+    const top = s.columns.length ? s.columns[0].changed : 1;
+    const query = v.colQ.trim().toLowerCase();
+    const matching = s.columns.filter(column => !query || column.column.toLowerCase().includes(query));
+    const shown = query || v.colsAll ? matching : matching.slice(0, CMP_COLUMNS_SHOWN);
+    const rows = shown.map(column => {
+        const active = v.filter.column === column.column;
+        const width = Math.max(2, Math.round(column.changed / top * 100));
+        return `<button type="button" class="cmp-col${active ? " active" : ""}" data-cmp-col="${esc(column.column)}" aria-pressed="${active}" title="${esc(column.column)}">
+                <span class="cmp-col-name">${esc(column.column)}${column.entryField ? ' <span class="cmp-entry">entry</span>' : ""}</span>
+                <span class="cmp-bar" aria-hidden="true"><span style="width:${width}%"></span></span>
+                <span class="cmp-col-n">${num(column.changed)}</span>
+            </button>`;
+    }).join("");
+    const toggle = !query && s.columns.length > CMP_COLUMNS_SHOWN
+        ? `<button type="button" class="btn-ghost btn-small cmp-cols-more" data-cmp-cols-all>${v.colsAll ? "Show the top " + CMP_COLUMNS_SHOWN : `Show all ${num(s.columns.length)} columns`}</button>` : "";
+    return (rows || '<div class="muted small-note">No column matches.</div>') + toggle;
+}
+
+function cmpChipsHtml() {
+    const f = cmpView().filter;
+    const chips = [];
+    if (f.column) chips.push(`<span class="cmp-chip">Column: ${esc(f.column)}<button type="button" data-cmp-clear="column" aria-label="Remove column filter">×</button></span>`);
+    else if (f.kind !== "ALL") chips.push(`<span class="cmp-chip">${CMP_KIND_LABEL[f.kind]} only<button type="button" data-cmp-clear="kind" aria-label="Remove type filter">×</button></span>`);
+    return chips.join("");
+}
+
+function cmpFilterParams() {
+    const f = cmpView().filter;
+    const params = new URLSearchParams();
+    if (f.column) params.set("column", f.column);
+    else if (f.kind !== "ALL") params.set("kind", f.kind);
+    if (f.q) params.set("q", f.q);
+    return params;
+}
+
+function cmpDownloadHref() {
+    const v = cmpView();
+    return `/api/data-versions/${v.toId}/compare/${v.fromId}/file?${cmpFilterParams().toString()}`;
+}
+
+function cmpResultsHtml() {
+    const v = cmpView();
+    if (!v.versions || v.versions.length < 2 || !v.fromId || !v.toId || v.fromId === v.toId) return "";
+    return `<div class="cmp-toolbar">
+            <input class="search" id="cmp-q" placeholder="Find a BNP ID" value="${esc(v.filter.q)}" autocomplete="off" aria-label="Find a BNP ID">
+            <div class="cmp-chips" id="cmp-chips">${cmpChipsHtml()}</div>
+            <a class="btn-ghost btn-small" id="cmp-download" href="${cmpDownloadHref()}" download title="Every difference shown, one line per changed value">Download CSV</a>
+        </div>
+        <div id="cmp-list" class="${v.loadingResults ? "is-loading" : ""}">${cmpListHtml()}</div>`;
+}
+
+function cmpValue(value) {
+    return value === null || value === undefined || value === "" ? '<em class="cmp-empty">empty</em>' : esc(value);
+}
+
+function cmpRecordHtml(change) {
+    const v = cmpView();
+    const open = v.expanded.has(change.recordId);
+    const cells = change.cells;
+    const shown = open ? cells : cells.slice(0, CMP_CELLS_SHOWN);
+    const lines = shown.map(cell => {
+        const hit = v.filter.column && cell.column === v.filter.column ? " hit" : "";
+        if (change.kind === "CHANGED") {
+            return `<div class="cmp-cell${hit}"><span class="cmp-c" title="${esc(cell.column)}">${esc(cell.column)}</span><span class="cmp-before">${cmpValue(cell.before)}</span><span class="cmp-arrow" aria-label="changed to">→</span><span class="cmp-after">${cmpValue(cell.after)}</span></div>`;
+        }
+        const value = change.kind === "ADDED" ? cell.after : cell.before;
+        return `<div class="cmp-cell one"><span class="cmp-c" title="${esc(cell.column)}">${esc(cell.column)}</span><span class="${change.kind === "ADDED" ? "cmp-after" : "cmp-before"}">${cmpValue(value)}</span></div>`;
+    }).join("");
+    const more = cells.length > CMP_CELLS_SHOWN
+        ? `<button type="button" class="cmp-more" data-cmp-expand="${change.recordId}">${open ? "Show less" : `Show ${num(cells.length - CMP_CELLS_SHOWN)} more`}</button>` : "";
+    const what = change.kind === "CHANGED"
+        ? (cells.length ? `${num(cells.length)} value${cells.length === 1 ? "" : "s"} changed` : "Only the column layout differs")
+        : change.kind === "ADDED" ? `New in ${esc(v.summary ? v.summary.toLabel : "To")}` : `Not in ${esc(v.summary ? v.summary.toLabel : "To")}`;
+    return `<article class="cmp-rec ${change.kind.toLowerCase()}">
+            <div class="cmp-rec-head">
+                <span class="cmp-badge">${CMP_KIND_LABEL[change.kind]}</span>
+                <strong class="cmp-id">${esc(change.bnpId || "")}</strong>
+                <span class="muted small-note">record ${esc(String(change.recordId))}</span>
+                <span class="muted small-note cmp-what">${what}</span>
+            </div>
+            ${lines ? `<div class="cmp-cells">${lines}</div>` : ""}
+            ${more}
+        </article>`;
+}
+
+function cmpListHtml() {
+    const v = cmpView();
+    const r = v.result;
+    if (!r) return '<div class="cmp-loading">Loading differences…</div>';
+    if (r.error) return `<div class="banner banner-error">${esc(r.error)}</div>`;
+    const f = v.filter;
+    if (!r.total) {
+        const filtered = f.q || f.column || f.kind !== "ALL";
+        return `<div class="empty">${filtered ? "Nothing matches these filters." : "No differences between these versions."}</div>`;
+    }
+    const from = r.offset + 1;
+    const to = r.offset + r.changes.length;
+    const pages = Math.ceil(r.total / CMP_PAGE);
+    const pageNo = Math.floor(r.offset / CMP_PAGE) + 1;
+    return `<div class="cmp-recs">${r.changes.map(cmpRecordHtml).join("")}</div>
+        <div class="pager xp-pager">
+            <span class="muted">${num(from)}–${num(to)} of ${num(r.total)} record${r.total === 1 ? "" : "s"}${pages > 1 ? ` · page ${num(pageNo)} of ${num(pages)}` : ""}</span>
+            <button type="button" class="btn-ghost btn-small" data-cmp-page="-1" ${r.offset === 0 ? "disabled" : ""}>‹ Previous</button>
+            <button type="button" class="btn-ghost btn-small" data-cmp-page="1" ${to >= r.total ? "disabled" : ""}>Next ›</button>
+        </div>`;
+}
+
+/* rendering parts in place keeps the search boxes focused */
+function renderCmp(id, html) {
+    const host = document.getElementById(id);
+    if (host) host.innerHTML = html;
+}
+
+function renderCmpResultsArea() {
+    const v = cmpView();
+    renderCmp("cmp-chips", cmpChipsHtml());
+    const download = document.getElementById("cmp-download");
+    if (download) download.href = cmpDownloadHref();
+    const list = document.getElementById("cmp-list");
+    if (list) {
+        list.classList.toggle("is-loading", v.loadingResults);
+        list.innerHTML = cmpListHtml();
+    } else {
+        renderCmp("cmp-results", cmpResultsHtml());
+    }
+}
+
+async function loadCmpLists() {
+    const v = cmpView();
+    const seq = ++v.seq;
+    try {
+        const page = await api(templateQuery(v, true, TEMPLATE_PAGE));
+        if (seq !== v.seq) return;
+        v.page = page;
+    } catch (error) {
+        v.page = { total: 0, offset: 0, templates: [], error: error.message };
+    }
+    const host = document.getElementById("cmp-lists");
+    if (host) host.innerHTML = cmpListsHtml();
+    else if (!v.selected) renderXp();
+}
+
+/** Opens a list; {@code preset} chooses the source list and the two versions (from Previous Versions). */
+async function selectCmpList(item, preset) {
+    const v = cmpView();
+    v.selected = item;
+    v.lists = preset && preset.lists ? preset.lists : null;
+    v.listCode = preset && preset.listCode ? preset.listCode : null;
+    v.versions = null;
+    v.summary = null;
+    v.result = null;
+    renderXp();
+    if (!v.lists) {
+        try {
+            const series = await api(seriesUrl("", "recent", item.familyId, 0, 50));
+            if (v.selected !== item) return;
+            v.lists = series.series;
+            v.listCode = v.lists.length ? v.lists[0].listCode : null;
+        } catch (error) {
+            v.lists = [];
+        }
+    }
+    await loadCmpVersions(preset);
+}
+
+async function loadCmpVersions(preset) {
+    const v = cmpView();
+    const item = v.selected;
+    if (!item || !v.listCode) {
+        v.versions = { error: "This list has no versions yet." };
+        renderCmp("cmp-head", cmpHeadHtml());
+        return;
+    }
+    try {
+        const page = await api(versionsUrl({ familyId: item.familyId, listCode: v.listCode }, 0, 100));
+        if (v.selected !== item) return;
+        const versions = page.versions;
+        // A version chosen elsewhere may be older than the newest hundred: offer it too.
+        for (const id of preset ? [preset.toId, preset.fromId] : []) {
+            if (id && !versions.some(version => version.id === id)) {
+                try {
+                    versions.push((await api("/api/data-versions/" + id)).snapshot);
+                } catch (ignored) { /* left out */ }
+            }
+        }
+        v.versions = versions;
+        v.versionsTotal = page.total;
+        v.toId = preset && preset.toId ? preset.toId : (versions[0] ? versions[0].id : null);
+        v.fromId = preset && preset.fromId ? preset.fromId : (versions[1] ? versions[1].id : null);
+    } catch (error) {
+        v.versions = { error: error.message };
+    }
+    renderCmp("cmp-head", cmpHeadHtml());
+    runCompare();
+}
+
+/** A new pair of versions: fresh summary and first page, filters cleared. */
+function runCompare() {
+    const v = cmpView();
+    v.summary = null;
+    v.result = null;
+    v.filter = { kind: "ALL", column: null, q: "" };
+    v.expanded = new Set();
+    v.colQ = "";
+    v.colsAll = false;
+    renderCmp("cmp-summary", cmpSummaryHtml());
+    renderCmp("cmp-results", cmpResultsHtml());
+    if (!v.versions || v.versions.length < 2 || !v.fromId || !v.toId || v.fromId === v.toId) return;
+    loadCmpSummary();
+    loadCmpResults(0);
+}
+
+async function loadCmpSummary() {
+    const v = cmpView();
+    const seq = ++v.summarySeq;
+    try {
+        const summary = await api(`/api/data-versions/${v.toId}/compare/${v.fromId}/summary`);
+        if (seq !== v.summarySeq) return;
+        v.summary = summary;
+    } catch (error) {
+        if (seq !== v.summarySeq) return;
+        v.summary = { error: error.message };
+    }
+    renderCmp("cmp-summary", cmpSummaryHtml());
+    if (v.result && !v.result.error) renderCmpResultsArea();
+}
+
+async function loadCmpResults(offset) {
+    const v = cmpView();
+    const seq = ++v.resultSeq;
+    v.loadingResults = true;
+    renderCmpResultsArea();
+    const params = cmpFilterParams();
+    params.set("offset", String(Math.max(0, offset)));
+    params.set("limit", String(CMP_PAGE));
+    try {
+        const result = await api(`/api/data-versions/${v.toId}/compare/${v.fromId}/changes?${params.toString()}`);
+        if (seq !== v.resultSeq) return;
+        v.result = result;
+    } catch (error) {
+        if (seq !== v.resultSeq) return;
+        v.result = { error: error.message };
+    }
+    v.loadingResults = false;
+    renderCmpResultsArea();
+}
+
+/** From Previous Versions: compare a version with the one before it. */
+async function openCompareFromVersion(versionId) {
+    const prev = state.xp.prev;
+    const version = prev.versions && prev.versions.items.find(item => item.id === versionId);
+    if (!version || !prev.selected) return;
+    ensureXp().tab = "compare";
+    state.exportMessage = null;
+    render();
+    await selectCmpList(prev.selected, {
+        lists: prev.lists, listCode: prev.listCode, toId: version.id, fromId: version.previousSnapshotId
+    });
+}
+
+let cmpTimer;
+function onCompareClick(target) {
+    if (target.closest("[data-cmp-back]")) {
+        const v = cmpView();
+        v.selected = null;
+        v.summary = null;
+        v.result = null;
+        renderXp();
+        if (!v.page) loadCmpLists();
+        return true;
+    }
+    const list = target.closest("[data-cmp-list]");
+    if (list) {
+        const item = cmpView().page.templates.find(entry => String(entry.familyId) === list.dataset.cmpList);
+        if (item) selectCmpList(item, null);
+        return true;
+    }
+    if (target.closest("[data-cmp-swap]")) {
+        const v = cmpView();
+        [v.fromId, v.toId] = [v.toId, v.fromId];
+        renderCmp("cmp-head", cmpHeadHtml());
+        runCompare();
+        return true;
+    }
+    const kind = target.closest("[data-cmp-kind]");
+    if (kind) {
+        const v = cmpView();
+        const chosen = kind.dataset.cmpKind;
+        v.filter.kind = v.filter.kind === chosen && !v.filter.column ? "ALL" : chosen;
+        v.filter.column = null;
+        renderCmp("cmp-summary", cmpSummaryHtml());
+        loadCmpResults(0);
+        return true;
+    }
+    const column = target.closest("[data-cmp-col]");
+    if (column) {
+        const v = cmpView();
+        const chosen = column.dataset.cmpCol;
+        v.filter.column = v.filter.column === chosen ? null : chosen;
+        v.filter.kind = "ALL";
+        renderCmp("cmp-summary", cmpSummaryHtml());
+        loadCmpResults(0);
+        const results = document.getElementById("cmp-results");
+        if (results && v.filter.column) results.scrollIntoView({ behavior: "smooth", block: "start" });
+        return true;
+    }
+    const clear = target.closest("[data-cmp-clear]");
+    if (clear) {
+        const v = cmpView();
+        if (clear.dataset.cmpClear === "column") v.filter.column = null;
+        else v.filter.kind = "ALL";
+        renderCmp("cmp-summary", cmpSummaryHtml());
+        loadCmpResults(0);
+        return true;
+    }
+    const page = target.closest("[data-cmp-page]");
+    if (page) {
+        const v = cmpView();
+        const offset = Math.max(0, (v.result ? v.result.offset : 0) + Number(page.dataset.cmpPage) * CMP_PAGE);
+        loadCmpResults(offset);
+        const results = document.getElementById("cmp-results");
+        if (results) results.scrollIntoView({ behavior: "smooth", block: "start" });
+        return true;
+    }
+    const expand = target.closest("[data-cmp-expand]");
+    if (expand) {
+        const v = cmpView();
+        const id = Number(expand.dataset.cmpExpand);
+        if (v.expanded.has(id)) v.expanded.delete(id);
+        else v.expanded.add(id);
+        renderCmp("cmp-list", cmpListHtml());
+        return true;
+    }
+    if (target.closest("[data-cmp-cols-all]")) {
+        const v = cmpView();
+        v.colsAll = !v.colsAll;
+        renderCmp("cmp-col-list", cmpColumnListHtml());
+        return true;
+    }
+    const fromVersion = target.closest("[data-xp-compare]");
+    if (fromVersion) {
+        openCompareFromVersion(Number(fromVersion.dataset.xpCompare));
+        return true;
+    }
+    return false;
+}
+
+function onCompareInput(target) {
+    const v = cmpView();
+    if (target.id === "cmp-search-lists") {
+        v.q = target.value.trim();
+        v.offset = 0;
+        clearTimeout(cmpTimer);
+        cmpTimer = setTimeout(loadCmpLists, 300);
+        return true;
+    }
+    if (target.id === "cmp-from" || target.id === "cmp-to") {
+        if (target.id === "cmp-from") v.fromId = Number(target.value);
+        else v.toId = Number(target.value);
+        runCompare();
+        return true;
+    }
+    if (target.id === "cmp-list-code") {
+        v.listCode = target.value;
+        v.versions = null;
+        renderCmp("cmp-head", cmpHeadHtml());
+        loadCmpVersions(null);
+        return true;
+    }
+    if (target.id === "cmp-q") {
+        v.filter.q = target.value.trim();
+        clearTimeout(cmpTimer);
+        cmpTimer = setTimeout(() => loadCmpResults(0), 300);
+        return true;
+    }
+    if (target.id === "cmp-col-search") {
+        v.colQ = target.value;
+        renderCmp("cmp-col-list", cmpColumnListHtml());
+        return true;
+    }
+    return false;
 }
 
 /* --- Export latest, or send a previous version: a normal page, not a popup --- */
@@ -2784,6 +3333,11 @@ async function startExportPage() {
         if (!xp.latest.page) loadLatest();
         return;
     }
+    if (xp.tab === "compare") {
+        const cmp = cmpView();
+        if (!cmp.selected && !cmp.page) loadCmpLists();
+        return;
+    }
     if (xp.pendingSend) {
         const pending = xp.pendingSend;
         xp.pendingSend = null;
@@ -2818,6 +3372,7 @@ function onSendClick(event) {
         closeDialog();
         return true;
     }
+    if (target.closest && onCompareClick(target)) return true;
     const tab = target.closest("[data-xp-tab]");
     if (tab) {
         ensureXp().tab = tab.dataset.xpTab;
@@ -2837,6 +3392,7 @@ function onSendClick(event) {
         const view = state.xp[key];
         view.offset = Math.max(0, view.offset + Number(step) * TEMPLATE_PAGE);
         if (key === "latest") loadLatest();
+        else if (key === "cmp") loadCmpLists();
         else loadPrevTemplates();
         return true;
     }
@@ -2907,6 +3463,7 @@ function onSendClick(event) {
 
 function onSendInput(event) {
     const target = event.target;
+    if (ensureXp().tab === "compare" && onCompareInput(target)) return true;
     if (target.id === "xp-latest-search" || target.id === "xp-prev-search") {
         const view = target.id === "xp-latest-search" ? state.xp.latest : state.xp.prev;
         view.q = target.value.trim();

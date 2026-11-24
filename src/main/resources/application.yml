@@ -25,7 +25,8 @@ spring:
   sql:
     init:
       mode: always
-      schema-locations: file:db/h2/demo-source-tables.sql,file:db/postgres/ver-export-schema.sql
+      # Packed into the jar from db/ (see pom.xml), so this works whatever folder the module is started from.
+      schema-locations: classpath:db/h2/demo-source-tables.sql,classpath:db/postgres/ver-export-schema.sql
   jpa:
     hibernate:
       ddl-auto: none

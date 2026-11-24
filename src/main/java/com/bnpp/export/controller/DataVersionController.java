@@ -1,11 +1,14 @@
 package com.bnpp.export.controller;
 
+import com.bnpp.export.dto.DataVersionChangePageResponse;
 import com.bnpp.export.dto.DataVersionComparisonResponse;
+import com.bnpp.export.dto.DataVersionComparisonSummaryResponse;
 import com.bnpp.export.dto.DataVersionDetailResponse;
 import com.bnpp.export.dto.DataVersionPageResponse;
 import com.bnpp.export.dto.DataVersionResponse;
 import com.bnpp.export.dto.DataVersionRowsResponse;
 import com.bnpp.export.dto.DataVersionSeriesPageResponse;
+import com.bnpp.export.service.ComparisonService;
 import com.bnpp.export.service.DataVersionService;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -23,9 +26,11 @@ import java.util.List;
 public class DataVersionController {
 
     private final DataVersionService dataVersions;
+    private final ComparisonService comparisons;
 
-    public DataVersionController(DataVersionService dataVersions) {
+    public DataVersionController(DataVersionService dataVersions, ComparisonService comparisons) {
         this.dataVersions = dataVersions;
+        this.comparisons = comparisons;
     }
 
     /** The newest data versions (at most 200), optionally of one list. Screens use the paged endpoints below. */
@@ -79,5 +84,33 @@ public class DataVersionController {
                                                       @RequestParam(defaultValue = "CSV") String format,
                                                       @RequestParam(required = false) Long subscriberId) {
         return FileResponses.temporary(dataVersions.download(id, format, subscriberId));
+    }
+
+    /** Comparing version {@code against} (before) with {@code id} (after): the counts and the changes per column. */
+    @GetMapping("/{id}/compare/{against}/summary")
+    public DataVersionComparisonSummaryResponse compareSummary(@PathVariable Long id, @PathVariable Long against) {
+        return comparisons.summary(id, against);
+    }
+
+    /** A page of the records that differ, filtered by type (ALL, ADDED, REMOVED, CHANGED), column and BNP ID. */
+    @GetMapping("/{id}/compare/{against}/changes")
+    public DataVersionChangePageResponse compareChanges(@PathVariable Long id,
+                                                        @PathVariable Long against,
+                                                        @RequestParam(defaultValue = "ALL") String kind,
+                                                        @RequestParam(required = false) String column,
+                                                        @RequestParam(required = false) String q,
+                                                        @RequestParam(defaultValue = "0") int offset,
+                                                        @RequestParam(defaultValue = "50") int limit) {
+        return comparisons.changes(id, against, kind, column, q, offset, limit);
+    }
+
+    /** Every difference matching the filters as CSV, one line per changed value. */
+    @GetMapping("/{id}/compare/{against}/file")
+    public ResponseEntity<StreamingResponseBody> compareFile(@PathVariable Long id,
+                                                             @PathVariable Long against,
+                                                             @RequestParam(defaultValue = "ALL") String kind,
+                                                             @RequestParam(required = false) String column,
+                                                             @RequestParam(required = false) String q) {
+        return FileResponses.temporary(comparisons.changesFile(id, against, kind, column, q));
     }
 }

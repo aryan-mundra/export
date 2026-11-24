@@ -609,32 +609,32 @@ public class SnapshotServiceImpl implements SnapshotService {
         if (more) {
             page = page.subList(0, size);
         }
-        Map<Long, StoredRow> before = load(older, page);
-        Map<Long, StoredRow> after = load(newer, page);
+        boolean sameLayout = columns(older).stream().map(column -> column.get("header")).toList()
+                .equals(columns(newer).stream().map(column -> column.get("header")).toList());
+        List<DataVersionComparisonResponse.Change> changes = describeChanges(newer, older, page);
+        return new DataVersionComparisonResponse(newer.getId(), newer.getLabel(), older.getId(), older.getLabel(), sameLayout,
+                counts(newer.getTableName(), older.getTableName()), Math.max(0, offset), changes, more);
+    }
+
+    @Override
+    public List<DataVersionComparisonResponse.Change> describeChanges(DataSnapshot newer, DataSnapshot older, List<Long> recordIds) {
+        Map<Long, StoredRow> before = load(older, recordIds);
+        Map<Long, StoredRow> after = load(newer, recordIds);
         List<Map<String, String>> beforeColumns = columns(older);
         List<Map<String, String>> afterColumns = columns(newer);
-        boolean sameLayout = beforeColumns.stream().map(column -> column.get("header")).toList()
-                .equals(afterColumns.stream().map(column -> column.get("header")).toList());
-        List<DataVersionComparisonResponse.Change> changes = new ArrayList<>();
-        for (Long recordId : page) {
+        List<DataVersionComparisonResponse.Change> changes = new ArrayList<>(recordIds.size());
+        for (Long recordId : recordIds) {
             StoredRow old = before.get(recordId);
             StoredRow now = after.get(recordId);
             String kind = old == null ? "ADDED" : now == null ? "REMOVED" : "CHANGED";
             String bnpId = now != null ? now.bnpId() : old != null ? old.bnpId() : null;
             changes.add(new DataVersionComparisonResponse.Change(recordId, bnpId, kind, cellChanges(old, now, beforeColumns, afterColumns)));
         }
-        return new DataVersionComparisonResponse(newer.getId(), newer.getLabel(), older.getId(), older.getLabel(), sameLayout,
-                counts(newer.getTableName(), older.getTableName()), Math.max(0, offset), changes, more);
+        return changes;
     }
 
     private record StoredRow(String bnpId, Map<String, String> entry, List<String> cells) {
     }
-
-    private static final String[][] ENTRY_FIELDS = {
-            {"name", "Entry name"}, {"country", "Entry country"}, {"record_date", "Record date"}, {"action", "Action"},
-            {"risk_rating", "Risk rating"}, {"business_line", "Business line"}, {"region", "Region"},
-            {"changed_on", "Changed on"}, {"on_sanctions", "On Sanctions"}, {"on_worldcheck", "On World-Check"}, {"on_pfa", "On PFA"}
-    };
 
     /** Rows of one version by record id. */
     private Map<Long, StoredRow> load(DataSnapshot snapshot, List<Long> recordIds) {
@@ -682,7 +682,7 @@ public class SnapshotServiceImpl implements SnapshotService {
                 String old = before.entry().get(field[0]);
                 String now = after.entry().get(field[0]);
                 if (!Objects.equals(old, now)) {
-                    changes.add(new DataVersionComparisonResponse.CellChange(field[1] + " (list entry)", old, now));
+                    changes.add(new DataVersionComparisonResponse.CellChange(field[1] + ENTRY_SUFFIX, old, now));
                 }
             }
         }

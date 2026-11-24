@@ -186,6 +186,7 @@ Sign in as `maker` / `Regliss-maker`. The module starts with no lists: create th
 | Subscribers | Choose the approved list for one or more subscribers. |
 | Export → Export Latest | **Export** the list: version 1.1 and the table `ver_<list>_v1_1` appear. Export again with no change: 1.1 is reused. Change a value in a `gs_*` table and export: 1.2 and `ver_<list>_v1_2` appear. |
 | Export → Previous Versions | Download any version as CSV or XML: 1.1 still holds the old value. **Send** a version to any subscribers, choosing each one's format. |
+| Export → Compare | Pick the list, then any two versions (From ⇄ To). The tiles count added, removed, changed and unchanged records; "Changed values by column" ranks columns by how many values changed. Click a tile or a column to filter, search a BNP ID, page through the records (each shows only what changed), or **Download CSV** (one line per changed value). From Previous Versions, **Compare with …** opens it on a version and the one before. |
 | History | One job per export or send, with each subscriber's file. With the mock data, version 42 holds SHINE back (record 42000041 has no country) until the omissions are accepted. |
 
 Then look at what the module wrote:

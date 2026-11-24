@@ -48,6 +48,7 @@ com.bnpp.export
 | `ExportService` | Reviews and runs exports and sends of stored versions, retries, omissions, proofs, history, file downloads |
 | `SnapshotService` | Builds, numbers and stores data versions in their own tables, and reads them back |
 | `DataVersionService` | The data-versions API: list, detail, rows, compare, download |
+| `ComparisonService` | Compares two versions of a list in SQL: counts, changed values per column, filtered pages of records, CSV of every difference |
 | `FormatTemplateService` | Lists (templates): versions, columns, row filters, the approver's review |
 | `TemplateExportService` | Approved lists with their latest version; "export latest" |
 | `SubscriberService` | Subscribers: add, change, endpoint approval, delete |
@@ -69,3 +70,28 @@ com.bnpp.export
 - **A new file format:** add an `ExportFormat` bean in `format`. It appears in `/api/formats`, the send dialog and
   the download buttons without other changes.
 - **A new error case:** throw the matching exception from the service; do not build responses in services.
+
+## Building and running as a jar
+
+The web page (`src/main/resources/static`: `index.html`, `js/app.js`, `css/app.css`, the logo) is packed into the jar and
+served by the module itself, so the jar is all there is to deploy.
+
+```powershell
+mvn package -DskipTests
+```
+
+```powershell
+java -jar target/export-module-1.0.0-SNAPSHOT.jar
+```
+
+Add `"-Djava.version=17"` to the `mvn` command to build for Java 17; run the jar with the same Java version or newer.
+The jar starts from any folder. These are read or written **next to it** (the folder it is started from):
+
+| Path | What |
+|---|---|
+| `config/database.properties` | The PostgreSQL connection for the Database switch (copy it next to the jar) |
+| `db/dumps/` | Dumps to import into PostgreSQL at start-up |
+| `data/` | Built files (`data/exports`) and the chosen database (`data/database.properties`) |
+
+The H2 table scripts are inside the jar. Use `--server.port=9090` to change the port. The page loads two Google Fonts
+from the internet; without internet access the browser uses its standard fonts and everything else works.

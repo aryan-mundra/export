@@ -89,6 +89,25 @@ public interface SnapshotService {
     DataVersionComparisonResponse compare(Long newerId, Long olderId, int offset, int limit);
 
     /**
+     * The list entry fields compared besides the list's own columns: field (its version table column without the
+     * leading "_") and the name shown for it.
+     */
+    String[][] ENTRY_FIELDS = {
+            {"name", "Entry name"}, {"country", "Entry country"}, {"record_date", "Record date"}, {"action", "Action"},
+            {"risk_rating", "Risk rating"}, {"business_line", "Business line"}, {"region", "Region"},
+            {"changed_on", "Changed on"}, {"on_sanctions", "On Sanctions"}, {"on_worldcheck", "On World-Check"}, {"on_pfa", "On PFA"}
+    };
+
+    /** Suffix of the names of list entry fields in comparisons, e.g. "Entry name (list entry)". */
+    String ENTRY_SUFFIX = " (list entry)";
+
+    /**
+     * What changed for each of these records between two versions of one list, in the given order: ADDED (only in
+     * {@code newer}), REMOVED (only in {@code older}) or CHANGED, with the values that differ.
+     */
+    List<DataVersionComparisonResponse.Change> describeChanges(DataSnapshot newer, DataSnapshot older, List<Long> recordIds);
+
+    /**
      * Writes a version as a file in any format, from the stored rows. With a subscriber, only the rows
      * it receives (scope, business line and region) and that pass the quality check, as an export does.
      *
