@@ -92,16 +92,20 @@ public class DataVersionController {
         return comparisons.summary(id, against);
     }
 
-    /** A page of the records that differ, filtered by type (ALL, ADDED, REMOVED, CHANGED), column and BNP ID. */
+    /**
+     * A page of the records that differ, filtered by record type (ALL, ADDED, REMOVED, CHANGED), by column (and the
+     * value change in it: ADDED, REMOVED, UPDATED) and by BNP ID.
+     */
     @GetMapping("/{id}/compare/{against}/changes")
     public DataVersionChangePageResponse compareChanges(@PathVariable Long id,
                                                         @PathVariable Long against,
                                                         @RequestParam(defaultValue = "ALL") String kind,
                                                         @RequestParam(required = false) String column,
+                                                        @RequestParam(required = false) String cell,
                                                         @RequestParam(required = false) String q,
                                                         @RequestParam(defaultValue = "0") int offset,
                                                         @RequestParam(defaultValue = "50") int limit) {
-        return comparisons.changes(id, against, kind, column, q, offset, limit);
+        return comparisons.changes(id, against, kind, column, cell, q, offset, limit);
     }
 
     /** Every difference matching the filters as CSV, one line per changed value. */
@@ -110,7 +114,8 @@ public class DataVersionController {
                                                              @PathVariable Long against,
                                                              @RequestParam(defaultValue = "ALL") String kind,
                                                              @RequestParam(required = false) String column,
+                                                             @RequestParam(required = false) String cell,
                                                              @RequestParam(required = false) String q) {
-        return FileResponses.temporary(comparisons.changesFile(id, against, kind, column, q));
+        return FileResponses.temporary(comparisons.changesFile(id, against, kind, column, cell, q));
     }
 }

@@ -135,7 +135,7 @@ function render() {
     if (state.page === "approvals") {
         main.innerHTML = state.user && state.user.role === "APPROVER"
             ? approvalsHtml()
-            : `${head("Review", "Approvals", "Only an approver can open this page.")}<section class="panel"><div class="empty">Only an approver can open this page.</div></section>`;
+            : `${head("Review", "Approvals", "Only a List Owner can open this page.")}<section class="panel"><div class="empty">Only a List Owner can open this page.</div></section>`;
     }
     const search = document.querySelector("[data-search]");
     if (search && document.activeElement !== search) {
@@ -465,18 +465,18 @@ function templatesHtml() {
     </tr>`).join("");
     let waiting = "";
     if (current && current.latest.status === "PENDING") {
-        waiting = `<div class="banner">Version ${current.latest.versionNumber} of ${esc(current.name)} is waiting for approval. ${current.inUse ? `Its subscribers keep version ${current.inUse.versionNumber} until it is approved.` : "Subscribers can choose it once it is approved."} Saving again replaces it in the approver's queue.</div>`;
+        waiting = `<div class="banner">Version ${current.latest.versionNumber} of ${esc(current.name)} is waiting for approval. ${current.inUse ? `Its subscribers keep version ${current.inUse.versionNumber} until it is approved.` : "Subscribers can choose it once it is approved."} Saving again replaces it in the List Owner's queue.</div>`;
     } else if (current && current.latest.status === "CHANGES_REQUESTED") {
-        waiting = `<div class="review-callout warn"><strong>${esc(current.latest.reviewedByName || "An approver")} asked for changes to version ${current.latest.versionNumber}:</strong> “${esc(current.latest.reviewComment || "")}”<br>The editor below holds version ${current.latest.versionNumber}. Make the changes and save to resubmit it as version ${current.latest.versionNumber + 1}.</div>`;
+        waiting = `<div class="review-callout warn"><strong>${esc(current.latest.reviewedByName || "A List Owner")} asked for changes to version ${current.latest.versionNumber}:</strong> “${esc(current.latest.reviewComment || "")}”<br>The editor below holds version ${current.latest.versionNumber}. Make the changes and save to resubmit it as version ${current.latest.versionNumber + 1}.</div>`;
     } else if (current && current.latest.status === "REJECTED") {
-        waiting = `<div class="review-callout bad"><strong>Version ${current.latest.versionNumber} was rejected</strong> by ${esc(current.latest.reviewedByName || "an approver")}: “${esc(current.latest.reviewComment || "")}”<br>${current.inUse ? `Version ${current.inUse.versionNumber} stays in use.` : ""} Saving starts a new version for approval.</div>`;
+        waiting = `<div class="review-callout bad"><strong>Version ${current.latest.versionNumber} was rejected</strong> by ${esc(current.latest.reviewedByName || "a List Owner")}: “${esc(current.latest.reviewComment || "")}”<br>${current.inUse ? `Version ${current.inUse.versionNumber} stays in use.` : ""} Saving starts a new version for approval.</div>`;
     }
     return `
         ${head("Formats", "Create a List", "Pick the gs_ columns and the rows. A list is only data: you choose CSV, XML or any other format when you send it, subscriber by subscriber.")}
         <section class="export-card template-card">
             <h2>${current ? "Edit " + esc(current.name) : "New list"}</h2>
             <p class="muted">${current
-                ? `Saving creates version ${current.latest.versionNumber + 1} for approval. Its subscribers keep the version in use until an approver accepts it.`
+                ? `Saving creates version ${current.latest.versionNumber + 1} for approval. Its subscribers keep the version in use until a List Owner accepts it.`
                 : "Saving sends version 1 for approval. Once approved, any subscriber can receive it, in any format."}</p>
             ${waiting}
             <form id="template-form">
@@ -1121,7 +1121,7 @@ function enterApp(fromLogin) {
     const signedIn = document.getElementById("signed-in");
     signedIn.hidden = false;
     document.getElementById("signed-name").textContent = state.user.displayName;
-    document.getElementById("signed-role").textContent = state.user.role === "APPROVER" ? "Approver" : "Maker";
+    document.getElementById("signed-role").textContent = state.user.role === "APPROVER" ? "List Owner" : "List Manager";
     const avatar = document.querySelector(".avatar");
     if (avatar) {
         const parts = String(state.user.displayName || "").split(/\s+/).filter(Boolean);
@@ -2060,7 +2060,7 @@ function approvalsHtml() {
             ? `<div class="approval-rows-simple"><strong>Rows:</strong> only where<ul>${filters.map(filter => `<li>${esc(filter.summary)}</li>`).join("")}</ul></div>`
             : '<p class="muted"><strong>Rows:</strong> all list entries</p>';
         const actions = own
-            ? '<span class="muted">You submitted this; another approver must review it.</span>'
+            ? '<span class="muted">You submitted this; another List Owner must review it.</span>'
             : `<button class="btn-ghost" type="button" data-decide="request-changes" data-id="${template.id}">Request changes</button>
                <button class="btn-delete" type="button" data-decide="reject" data-id="${template.id}">Reject</button>
                <button class="btn-primary" type="button" data-decide="approve" data-id="${template.id}">Approve</button>`;
@@ -2130,7 +2130,7 @@ function openDecision(action, id) {
         <div class="modal-back" data-modal-close>
             <form class="modal decision-modal" id="decision-form" data-action="${action}" data-id="${template.id}">
                 <h2>${esc(copy.title)}</h2>
-                <label>${esc(copy.label)}<textarea name="comment" rows="4" maxlength="2000" required minlength="10" placeholder="At least 10 characters. The maker will see this."></textarea></label>
+                <label>${esc(copy.label)}<textarea name="comment" rows="4" maxlength="2000" required minlength="10" placeholder="At least 10 characters. The List Manager will see this."></textarea></label>
                 <div class="modal-actions">
                     <button type="button" class="btn-ghost" data-modal-close>Cancel</button>
                     <button type="submit" class="${copy.tone}" disabled>${esc(copy.confirm)}</button>
@@ -2145,7 +2145,7 @@ async function decide(action, id, comment, button) {
     try {
         const saved = await api(`/api/format-templates/${id}/${action}`, { method: "POST", body: { comment: comment } });
         document.getElementById("modal-root").innerHTML = "";
-        const words = { approve: "approved", reject: "rejected", "request-changes": "sent back to the maker" }[action];
+        const words = { approve: "approved", reject: "rejected", "request-changes": "sent back to the List Manager" }[action];
         toast(`${saved.name} version ${saved.versionNumber} ${words}`, "success");
         state.templates = await api("/api/format-templates");
         render();
@@ -2275,7 +2275,7 @@ function exportHtml() {
         <nav class="xp-tabs" role="tablist">
             <button type="button" role="tab" class="xp-tab ${xp.tab === "latest" ? "active" : ""}" aria-selected="${xp.tab === "latest"}" data-xp-tab="latest">Export Latest</button>
             <button type="button" role="tab" class="xp-tab ${xp.tab === "previous" ? "active" : ""}" aria-selected="${xp.tab === "previous"}" data-xp-tab="previous">Previous Versions</button>
-            <button type="button" role="tab" class="xp-tab ${xp.tab === "compare" ? "active" : ""}" aria-selected="${xp.tab === "compare"}" data-xp-tab="compare">Compare</button>
+            <button type="button" role="tab" class="xp-tab ${xp.tab === "compare" ? "active" : ""}" aria-selected="${xp.tab === "compare"}" data-xp-tab="compare">Synthesis</button>
         </nav>
         <div id="xp-body">${xpBodyHtml(xp)}</div>`;
 }
@@ -2522,7 +2522,8 @@ function prevDetailHtml() {
 const CMP_PAGE = 50;
 const CMP_COLUMNS_SHOWN = 8;
 const CMP_CELLS_SHOWN = 4;
-const CMP_KIND_LABEL = { ADDED: "Added", REMOVED: "Removed", CHANGED: "Changed" };
+const CMP_KIND_LABEL = { ADDED: "Added", REMOVED: "Deleted", CHANGED: "Updated" };
+const CMP_CELL_LABEL = { ADDED: "Added", REMOVED: "Deleted", UPDATED: "Updated" };
 
 function cmpView() {
     const xp = ensureXp();
@@ -2532,7 +2533,7 @@ function cmpView() {
             selected: null, lists: null, listCode: null, versions: null, versionsTotal: 0,
             fromId: null, toId: null,
             summary: null, summarySeq: 0,
-            filter: { kind: "ALL", column: null, q: "" },
+            filter: { kind: "ALL", column: null, cell: null, q: "" },
             result: null, resultSeq: 0, resultOffset: 0, loadingResults: false,
             expanded: new Set(), colQ: "", colsAll: false
         };
@@ -2629,9 +2630,7 @@ function cmpSummaryHtml() {
     if (s.error) return `<section class="panel cmp-summary"><div class="banner banner-error">${esc(s.error)}</div></section>`;
     const c = s.counts;
     const identical = !c.inserted && !c.deleted && !c.changed && s.sameLayout;
-    const layout = s.sameLayout ? "" : `<div class="banner cmp-layout">The list's columns differ between these versions.${
-        s.addedColumns.length ? ` Only in ${esc(s.toLabel)}: ${esc(cmpNames(s.addedColumns))}.` : ""}${
-        s.removedColumns.length ? ` Only in ${esc(s.fromLabel)}: ${esc(cmpNames(s.removedColumns))}.` : ""} Those columns are not compared.</div>`;
+    const layout = s.sameLayout ? "" : cmpLayoutHtml(s);
     return `<section class="panel cmp-summary">
             <div class="cmp-route">
                 <span>${versionChip(s.fromLabel)} <span class="muted">${num(s.fromRows)} rows · ${when(s.fromCreatedAt)}</span></span>
@@ -2640,18 +2639,24 @@ function cmpSummaryHtml() {
             </div>
             ${identical ? `<div class="cmp-identical"><strong>No differences.</strong> ${esc(s.fromLabel)} and ${esc(s.toLabel)} hold exactly the same data.</div>` : `
             <div class="cmp-tiles">
-                ${cmpTile("ADDED", c.inserted, "Added", "add")}
-                ${cmpTile("REMOVED", c.deleted, "Removed", "del")}
-                ${cmpTile("CHANGED", c.changed, "Changed", "chg")}
-                <div class="cmp-tile same"><span class="cmp-tile-n">${num(c.unchanged)}</span><span class="cmp-tile-l">Unchanged</span></div>
+                ${cmpTile("ADDED", c.inserted, "Records added", "add")}
+                ${cmpTile("REMOVED", c.deleted, "Records deleted", "del")}
+                ${cmpTile("CHANGED", c.changed, "Records updated", "chg")}
+                <div class="cmp-tile same"><span class="cmp-tile-n">${num(c.unchanged)}</span><span class="cmp-tile-l">Records unchanged</span></div>
             </div>`}
             ${layout}
             ${s.columns.length ? cmpColumnsHtml() : ""}
         </section>`;
 }
 
-function cmpNames(names) {
-    return names.length > 8 ? names.slice(0, 8).join(", ") + ` and ${names.length - 8} more` : names.join(", ");
+/** Columns the list gained or lost between the two versions (a new list version changed its columns). */
+function cmpLayoutHtml(s) {
+    const chips = (names, tone) => names.map(name => `<button type="button" class="cmp-colchip ${tone}" data-cmp-col="${esc(name)}" title="Show the records with a value in ${esc(name)}">${esc(name)}</button>`).join("");
+    return `<div class="cmp-layout">
+            <strong>The list's columns changed</strong>
+            ${s.addedColumns.length ? `<div class="cmp-layout-row"><span class="cmp-layout-l add">${num(s.addedColumns.length)} column${s.addedColumns.length === 1 ? "" : "s"} added in ${esc(s.toLabel)}</span>${chips(s.addedColumns, "add")}</div>` : ""}
+            ${s.removedColumns.length ? `<div class="cmp-layout-row"><span class="cmp-layout-l del">${num(s.removedColumns.length)} column${s.removedColumns.length === 1 ? "" : "s"} deleted since ${esc(s.fromLabel)}</span>${chips(s.removedColumns, "del")}</div>` : ""}
+        </div>`;
 }
 
 function cmpColumnsHtml() {
@@ -2660,7 +2665,7 @@ function cmpColumnsHtml() {
     return `<div class="cmp-cols">
             <div class="cmp-cols-head">
                 <strong>Changed values by column</strong>
-                <span class="muted">${num(s.columns.length)} column${s.columns.length === 1 ? "" : "s"} changed · click one to see its records</span>
+                <span class="muted">${num(s.columns.length)} column${s.columns.length === 1 ? "" : "s"} with changed values · click one to see its records</span>
                 ${many ? `<input class="search cmp-col-search" id="cmp-col-search" placeholder="Find a column" value="${esc(cmpView().colQ)}" autocomplete="off" aria-label="Find a column">` : ""}
             </div>
             <div id="cmp-col-list">${cmpColumnListHtml()}</div>
@@ -2676,10 +2681,21 @@ function cmpColumnListHtml() {
     const shown = query || v.colsAll ? matching : matching.slice(0, CMP_COLUMNS_SHOWN);
     const rows = shown.map(column => {
         const active = v.filter.column === column.column;
-        const width = Math.max(2, Math.round(column.changed / top * 100));
+        const part = count => count ? `${Math.max(1, count / top * 100)}%` : "0";
+        const tag = column.status === "ADDED" ? '<span class="cmp-coltag add">new column</span>'
+            : column.status === "REMOVED" ? '<span class="cmp-coltag del">deleted column</span>'
+            : column.entryField ? '<span class="cmp-entry">entry</span>' : "";
+        const split = [
+            column.added ? `<span class="add">+${num(column.added)} added</span>` : "",
+            column.removed ? `<span class="del">−${num(column.removed)} deleted</span>` : "",
+            column.updated ? `<span class="chg">~${num(column.updated)} updated</span>` : ""
+        ].filter(Boolean).join(" ");
         return `<button type="button" class="cmp-col${active ? " active" : ""}" data-cmp-col="${esc(column.column)}" aria-pressed="${active}" title="${esc(column.column)}">
-                <span class="cmp-col-name">${esc(column.column)}${column.entryField ? ' <span class="cmp-entry">entry</span>' : ""}</span>
-                <span class="cmp-bar" aria-hidden="true"><span style="width:${width}%"></span></span>
+                <span class="cmp-col-name">${esc(column.column)} ${tag}</span>
+                <span class="cmp-col-bar">
+                    <span class="cmp-bar" aria-hidden="true"><span class="add" style="width:${part(column.added)}"></span><span class="del" style="width:${part(column.removed)}"></span><span class="chg" style="width:${part(column.updated)}"></span></span>
+                    <span class="cmp-split">${split}</span>
+                </span>
                 <span class="cmp-col-n">${num(column.changed)}</span>
             </button>`;
     }).join("");
@@ -2691,7 +2707,15 @@ function cmpColumnListHtml() {
 function cmpChipsHtml() {
     const f = cmpView().filter;
     const chips = [];
-    if (f.column) chips.push(`<span class="cmp-chip">Column: ${esc(f.column)}<button type="button" data-cmp-clear="column" aria-label="Remove column filter">×</button></span>`);
+    if (f.column) {
+        chips.push(`<span class="cmp-chip">Column: ${esc(f.column)}<button type="button" data-cmp-clear="column" aria-label="Remove column filter">×</button></span>`);
+        const column = cmpView().summary && cmpView().summary.columns ? cmpView().summary.columns.find(entry => entry.column === f.column) : null;
+        if (column) {
+            const option = (type, label, count) => count || type === null
+                ? `<button type="button" class="cmp-seg${f.cell === type ? " on" : ""}" data-cmp-cell="${type || ""}">${label}${type ? ` <span>${num(count)}</span>` : ""}</button>` : "";
+            chips.push(`<span class="cmp-segs" role="group" aria-label="Value change in ${esc(f.column)}">${option(null, "Any change", column.changed)}${option("ADDED", "Added", column.added)}${option("REMOVED", "Deleted", column.removed)}${option("UPDATED", "Updated", column.updated)}</span>`);
+        }
+    }
     else if (f.kind !== "ALL") chips.push(`<span class="cmp-chip">${CMP_KIND_LABEL[f.kind]} only<button type="button" data-cmp-clear="kind" aria-label="Remove type filter">×</button></span>`);
     return chips.join("");
 }
@@ -2699,8 +2723,10 @@ function cmpChipsHtml() {
 function cmpFilterParams() {
     const f = cmpView().filter;
     const params = new URLSearchParams();
-    if (f.column) params.set("column", f.column);
-    else if (f.kind !== "ALL") params.set("kind", f.kind);
+    if (f.column) {
+        params.set("column", f.column);
+        if (f.cell) params.set("cell", f.cell);
+    } else if (f.kind !== "ALL") params.set("kind", f.kind);
     if (f.q) params.set("q", f.q);
     return params;
 }
@@ -2732,17 +2758,24 @@ function cmpRecordHtml(change) {
     const shown = open ? cells : cells.slice(0, CMP_CELLS_SHOWN);
     const lines = shown.map(cell => {
         const hit = v.filter.column && cell.column === v.filter.column ? " hit" : "";
+        const columnTag = cell.columnStatus === "ADDED" ? ' <span class="cmp-coltag add">new column</span>'
+            : cell.columnStatus === "REMOVED" ? ' <span class="cmp-coltag del">deleted column</span>' : "";
         if (change.kind === "CHANGED") {
-            return `<div class="cmp-cell${hit}"><span class="cmp-c" title="${esc(cell.column)}">${esc(cell.column)}</span><span class="cmp-before">${cmpValue(cell.before)}</span><span class="cmp-arrow" aria-label="changed to">→</span><span class="cmp-after">${cmpValue(cell.after)}</span></div>`;
+            const type = cell.type || "UPDATED";
+            const before = type === "ADDED" ? '<span class="cmp-none">no value</span>' : `<span class="cmp-before">${cmpValue(cell.before)}</span>`;
+            const after = type === "REMOVED" ? '<span class="cmp-none">no value</span>' : `<span class="cmp-after">${cmpValue(cell.after)}</span>`;
+            return `<div class="cmp-cell t-${type.toLowerCase()}${hit}"><span class="cmp-c" title="${esc(cell.column)}">${esc(cell.column)}${columnTag}</span>${before}<span class="cmp-arrow" aria-hidden="true">→</span>${after}<span class="cmp-ctype">${CMP_CELL_LABEL[type]}</span></div>`;
         }
         const value = change.kind === "ADDED" ? cell.after : cell.before;
-        return `<div class="cmp-cell one"><span class="cmp-c" title="${esc(cell.column)}">${esc(cell.column)}</span><span class="${change.kind === "ADDED" ? "cmp-after" : "cmp-before"}">${cmpValue(value)}</span></div>`;
+        return `<div class="cmp-cell one"><span class="cmp-c" title="${esc(cell.column)}">${esc(cell.column)}${columnTag}</span><span class="${change.kind === "ADDED" ? "cmp-after" : "cmp-before"}">${cmpValue(value)}</span></div>`;
     }).join("");
     const more = cells.length > CMP_CELLS_SHOWN
         ? `<button type="button" class="cmp-more" data-cmp-expand="${change.recordId}">${open ? "Show less" : `Show ${num(cells.length - CMP_CELLS_SHOWN)} more`}</button>` : "";
+    const byType = type => cells.filter(cell => cell.type === type).length;
     const what = change.kind === "CHANGED"
-        ? (cells.length ? `${num(cells.length)} value${cells.length === 1 ? "" : "s"} changed` : "Only the column layout differs")
-        : change.kind === "ADDED" ? `New in ${esc(v.summary ? v.summary.toLabel : "To")}` : `Not in ${esc(v.summary ? v.summary.toLabel : "To")}`;
+        ? [["ADDED", "added"], ["REMOVED", "deleted"], ["UPDATED", "updated"]]
+            .map(([type, word]) => byType(type) ? `${num(byType(type))} ${word}` : "").filter(Boolean).join(" · ") || "No visible change"
+        : change.kind === "ADDED" ? `Record added in ${esc(v.summary ? v.summary.toLabel : "To")}` : `Record deleted in ${esc(v.summary ? v.summary.toLabel : "To")}`;
     return `<article class="cmp-rec ${change.kind.toLowerCase()}">
             <div class="cmp-rec-head">
                 <span class="cmp-badge">${CMP_KIND_LABEL[change.kind]}</span>
@@ -2762,7 +2795,7 @@ function cmpListHtml() {
     if (r.error) return `<div class="banner banner-error">${esc(r.error)}</div>`;
     const f = v.filter;
     if (!r.total) {
-        const filtered = f.q || f.column || f.kind !== "ALL";
+        const filtered = f.q || f.column || f.cell || f.kind !== "ALL";
         return `<div class="empty">${filtered ? "Nothing matches these filters." : "No differences between these versions."}</div>`;
     }
     const from = r.offset + 1;
@@ -2871,7 +2904,7 @@ function runCompare() {
     const v = cmpView();
     v.summary = null;
     v.result = null;
-    v.filter = { kind: "ALL", column: null, q: "" };
+    v.filter = { kind: "ALL", column: null, cell: null, q: "" };
     v.expanded = new Set();
     v.colQ = "";
     v.colsAll = false;
@@ -2969,6 +3002,7 @@ function onCompareClick(target) {
         const v = cmpView();
         const chosen = column.dataset.cmpCol;
         v.filter.column = v.filter.column === chosen ? null : chosen;
+        v.filter.cell = null;
         v.filter.kind = "ALL";
         renderCmp("cmp-summary", cmpSummaryHtml());
         loadCmpResults(0);
@@ -2976,10 +3010,20 @@ function onCompareClick(target) {
         if (results && v.filter.column) results.scrollIntoView({ behavior: "smooth", block: "start" });
         return true;
     }
+    const cellType = target.closest("[data-cmp-cell]");
+    if (cellType) {
+        const v = cmpView();
+        v.filter.cell = cellType.dataset.cmpCell || null;
+        loadCmpResults(0);
+        return true;
+    }
     const clear = target.closest("[data-cmp-clear]");
     if (clear) {
         const v = cmpView();
-        if (clear.dataset.cmpClear === "column") v.filter.column = null;
+        if (clear.dataset.cmpClear === "column") {
+            v.filter.column = null;
+            v.filter.cell = null;
+        }
         else v.filter.kind = "ALL";
         renderCmp("cmp-summary", cmpSummaryHtml());
         loadCmpResults(0);

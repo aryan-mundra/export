@@ -21,10 +21,22 @@ public class UserSeeder implements ApplicationListener<ApplicationReadyEvent> {
     @Override
     public void onApplicationEvent(ApplicationReadyEvent event) {
         if (appUserRepository.count() > 0) {
+            // Databases seeded before the roles were renamed: give the demo users their new names.
+            rename("maker", "List operator", "List Manager");
+            rename("approver", "Export approver", "List Owner");
             return;
         }
-        save("maker", "Regliss-maker", "List operator", "MAKER");
-        save("approver", "Regliss-approver", "Export approver", "APPROVER");
+        save("maker", "Regliss-maker", "List Manager", "MAKER");
+        save("approver", "Regliss-approver", "List Owner", "APPROVER");
+    }
+
+    private void rename(String username, String oldName, String newName) {
+        appUserRepository.findByUsername(username)
+                .filter(user -> oldName.equals(user.getDisplayName()))
+                .ifPresent(user -> {
+                    user.setDisplayName(newName);
+                    appUserRepository.save(user);
+                });
     }
 
     private void save(String username, String password, String displayName, String role) {

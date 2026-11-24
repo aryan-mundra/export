@@ -62,7 +62,7 @@ alters a table (`spring.jpa.hibernate.ddl-auto=none`), so it can never touch REG
 | `ver_<list>_v<major>_<minor>` | One table per data version, e.g. `ver_list_apac_v1_1`: every row of that version in file order. Columns starting with `_` are the list entry fields (`_line`, `_record_id`, `_row_key`, `_bnp_id`, `_name`, `_country`, `_record_date`, `_action`, `_risk_rating`, `_business_line`, `_region`, `_changed_on`, `_on_sanctions`, `_on_worldcheck`, `_on_pfa`); then one `text` column per column of the list, named after its column name in lower case | Created and filled by the application when a new data version is made; never changed afterwards |
 | `ver_export_snapshot_series` | Template and list pair: the catalog row screens list and search (latest version, version count, exports, rows stored, last use), and the row locked while a new version is numbered | The first export of a template and list, and every export that creates or reuses one of its versions |
 | `ver_export_dump_import` | Dump file imported from `db/dumps` at start-up (content hash, name, size, errors) | A dump is imported |
-| `ver_export_user` | User who can sign in to the module (role MAKER or APPROVER) | Seeded at start-up |
+| `ver_export_user` | User who can sign in to the module (role MAKER, shown as List Manager, or APPROVER, shown as List Owner) | Seeded at start-up |
 
 The module reads, and never writes, `ver_version` (certified versions), `ver_version_member` (list entries, each with a `BNP_ID`) and the
 `gs_*` tables. On H2 the module seeds them with demo data at start-up; on PostgreSQL they come from the database (see

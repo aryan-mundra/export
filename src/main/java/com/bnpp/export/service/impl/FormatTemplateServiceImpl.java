@@ -188,7 +188,7 @@ public class FormatTemplateServiceImpl implements FormatTemplateService {
                 .orElseThrow(() -> new BadRequestException("Unknown list"));
         if (inUse(familyId).isEmpty()) {
             throw new BadRequestException("\"" + latest.getName()
-                    + "\" has no approved version yet. It can be chosen once an approver approves it.");
+                    + "\" has no approved version yet. It can be chosen once a List Owner approves it.");
         }
         return latest.getName();
     }
@@ -249,7 +249,7 @@ public class FormatTemplateServiceImpl implements FormatTemplateService {
     /** A version an approver may decide on now: waiting for review, and not submitted by them. */
     private FormatTemplate forDecision(Long id) {
         if (!CurrentUser.approver()) {
-            throw new ForbiddenException("Only an approver can review a list");
+            throw new ForbiddenException("Only a List Owner can review a list");
         }
         FormatTemplate template = templateRepository.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("List not found"));
@@ -264,7 +264,7 @@ public class FormatTemplateServiceImpl implements FormatTemplateService {
                     + template.getStatus().toLowerCase(Locale.ROOT).replace('_', ' ') + ")");
         }
         if (template.getCreatedBy() != null && template.getCreatedBy().equalsIgnoreCase(CurrentUser.username())) {
-            throw new ForbiddenException("You submitted this version. Another approver must review it.");
+            throw new ForbiddenException("You submitted this version. Another List Owner must review it.");
         }
         return template;
     }
@@ -280,7 +280,7 @@ public class FormatTemplateServiceImpl implements FormatTemplateService {
     private static String requiredComment(String comment, String action) {
         String text = StringUtils.trimToEmpty(comment);
         if (text.length() < 10) {
-            throw new BadRequestException("Explain to the maker why you are " + action + " (at least 10 characters)");
+            throw new BadRequestException("Explain to the List Manager why you are " + action + " (at least 10 characters)");
         }
         if (text.length() > 2000) {
             throw new BadRequestException("Keep the comment under 2,000 characters");

@@ -77,7 +77,7 @@ class ExportModuleIntegrationTest {
                         .content("{\"username\":\"maker\",\"password\":\"Regliss-maker\"}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.role").value("MAKER"))
-                .andExpect(jsonPath("$.displayName").value("List operator"))
+                .andExpect(jsonPath("$.displayName").value("List Manager"))
                 .andReturn();
         MockHttpSession maker = (MockHttpSession) makerLogin.getRequest().getSession();
 
@@ -125,7 +125,7 @@ class ExportModuleIntegrationTest {
                 .andExpect(jsonPath("$.versionNumber").value(2))
                 .andExpect(jsonPath("$.status").value("PENDING"))
                 .andExpect(jsonPath("$.active").value(false))
-                .andExpect(jsonPath("$.createdByName").value("List operator"))
+                .andExpect(jsonPath("$.createdByName").value("List Manager"))
                 .andExpect(jsonPath("$.fields", hasSize(4)))
                 .andExpect(jsonPath("$.fields[3].sourceTable").value("gs_party"))
                 .andExpect(jsonPath("$.fields[3].joinColumn").value("bnp_id"))

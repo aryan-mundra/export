@@ -43,7 +43,7 @@ public class SecurityConfig {
                         .authenticationEntryPoint((request, response, exception) ->
                                 write(response, HttpServletResponse.SC_UNAUTHORIZED, "Sign in required"))
                         .accessDeniedHandler((request, response, exception) ->
-                                write(response, HttpServletResponse.SC_FORBIDDEN, "Only an approver can do that")));
+                                write(response, HttpServletResponse.SC_FORBIDDEN, "Only a List Owner can do that")));
         return http.build();
     }
 

@@ -103,7 +103,7 @@ The screen never asks for the password. Because this file is committed, only eve
 1. Start it the plain way, with no profile and no environment variables: in IntelliJ, open
    `src/main/java/com/bnpp/export/ExportApplication.java` and click ▶ (leave **Program arguments** and **Environment
    variables** empty); or in PowerShell, `mvn spring-boot:run` (add `"-Djava.version=17"` with Java 17). It starts on H2.
-2. Open http://localhost:8082 and sign in as `maker` / `Regliss-maker`.
+2. Open http://localhost:8082 and sign in as the List Manager (`maker` / `Regliss-maker`).
 3. In the sidebar, under **Database**, click **PostgreSQL**. The dialog shows the database, host, port and user from the
    file; click **Switch to PostgreSQL**.
 4. The module checks the connection and that the `ver_export_*` tables are there. If something is wrong (password,
@@ -128,7 +128,7 @@ to choose another.
 - **pgAdmin:** **shinedata → Schemas → public → Tables → Refresh** lists the dump's tables (including `ver_version`,
   `ver_version_member` and the `gs_*` tables) next to the `ver_export_*` ones. `ver_export_dump_import` has one row for
   the imported file.
-- **The module:** open http://localhost:8082, sign in as `maker` / `Regliss-maker`. The Database switch shows
+- **The module:** open http://localhost:8082, sign in as the List Manager (`maker` / `Regliss-maker`). The Database switch shows
   **PostgreSQL**, and **Create a List** offers the dump's `gs_*` tables.
 
 If the dump keeps its tables in another schema than `public`, set `export.source.schema` to it.
@@ -186,7 +186,7 @@ Sign in as `maker` / `Regliss-maker`. The module starts with no lists: create th
 | Subscribers | Choose the approved list for one or more subscribers. |
 | Export → Export Latest | **Export** the list: version 1.1 and the table `ver_<list>_v1_1` appear. Export again with no change: 1.1 is reused. Change a value in a `gs_*` table and export: 1.2 and `ver_<list>_v1_2` appear. |
 | Export → Previous Versions | Download any version as CSV or XML: 1.1 still holds the old value. **Send** a version to any subscribers, choosing each one's format. |
-| Export → Compare | Pick the list, then any two versions (From ⇄ To). The tiles count added, removed, changed and unchanged records; "Changed values by column" ranks columns by how many values changed. Click a tile or a column to filter, search a BNP ID, page through the records (each shows only what changed), or **Download CSV** (one line per changed value). From Previous Versions, **Compare with …** opens it on a version and the one before. |
+| Export → Synthesis | Pick the list, then any two versions (From ⇄ To). Tiles count records added, deleted, updated and unchanged. "Changed values by column" shows, per column, values added (was empty), deleted (now empty) and updated; columns the list gained or dropped between list versions are tagged **new column** / **deleted column**. Click a tile or a column to filter (and, in a column, Added / Deleted / Updated values), search a BNP ID, page through the records (each shows only its changed values, labelled), or **Download CSV** (one line per changed value). From Previous Versions, **Compare with …** opens it on a version and the one before. |
 | History | One job per export or send, with each subscriber's file. With the mock data, version 42 holds SHINE back (record 42000041 has no country) until the omissions are accepted. |
 
 Then look at what the module wrote:

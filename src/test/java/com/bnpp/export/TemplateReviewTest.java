@@ -96,7 +96,7 @@ class TemplateReviewTest {
                 .andReturn().getResponse().getContentAsString();
         mockMvc.perform(post("/api/format-templates/" + id(own) + "/approve").with(user("approver").roles("APPROVER")))
                 .andExpect(status().isForbidden())
-                .andExpect(jsonPath("$.message").value("You submitted this version. Another approver must review it."));
+                .andExpect(jsonPath("$.message").value("You submitted this version. Another List Owner must review it."));
 
         // Approve with a comment: the version is in use and keeps its row filter.
         mockMvc.perform(post("/api/format-templates/" + v3 + "/approve").with(user("approver").roles("APPROVER"))

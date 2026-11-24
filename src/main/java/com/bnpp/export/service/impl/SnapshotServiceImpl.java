@@ -663,26 +663,32 @@ public class SnapshotServiceImpl implements SnapshotService {
     private static List<DataVersionComparisonResponse.CellChange> cellChanges(StoredRow before, StoredRow after,
                                                 List<Map<String, String>> beforeColumns, List<Map<String, String>> afterColumns) {
         List<DataVersionComparisonResponse.CellChange> changes = new ArrayList<>();
-        List<String> headers = new ArrayList<>();
-        afterColumns.forEach(column -> headers.add(column.get("header")));
-        beforeColumns.forEach(column -> {
-            if (!headers.contains(column.get("header"))) {
-                headers.add(column.get("header"));
+        List<String> afterHeaders = afterColumns.stream().map(column -> column.get("header")).toList();
+        List<String> beforeHeaders = beforeColumns.stream().map(column -> column.get("header")).toList();
+        List<String> headers = new ArrayList<>(afterHeaders);
+        beforeHeaders.forEach(header -> {
+            if (!headers.contains(header)) {
+                headers.add(header);
             }
         });
         for (String header : headers) {
             String old = value(before, beforeColumns, header);
             String now = value(after, afterColumns, header);
-            if (!Objects.equals(old, now)) {
-                changes.add(new DataVersionComparisonResponse.CellChange(header, old, now));
+            String type = DataVersionComparisonResponse.CellChange.typeOf(old, now);
+            if (type != null) {
+                // A column only one version has: the list's columns changed between them.
+                String columnStatus = !beforeHeaders.contains(header) ? DataVersionComparisonResponse.CellChange.ADDED
+                        : !afterHeaders.contains(header) ? DataVersionComparisonResponse.CellChange.REMOVED : null;
+                changes.add(new DataVersionComparisonResponse.CellChange(header, old, now, type, columnStatus));
             }
         }
         if (before != null && after != null) {
             for (String[] field : ENTRY_FIELDS) {
                 String old = before.entry().get(field[0]);
                 String now = after.entry().get(field[0]);
-                if (!Objects.equals(old, now)) {
-                    changes.add(new DataVersionComparisonResponse.CellChange(field[1] + ENTRY_SUFFIX, old, now));
+                String type = DataVersionComparisonResponse.CellChange.typeOf(old, now);
+                if (type != null) {
+                    changes.add(new DataVersionComparisonResponse.CellChange(field[1] + ENTRY_SUFFIX, old, now, type, null));
                 }
             }
         }

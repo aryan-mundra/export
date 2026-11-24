@@ -26,8 +26,8 @@ import java.util.List;
 public class AuthServiceImpl implements AuthService {
 
     private static final List<AuthConfigResponse.DemoAccount> DEMO_ACCOUNTS = List.of(
-            new AuthConfigResponse.DemoAccount("Maker", "maker", "Regliss-maker"),
-            new AuthConfigResponse.DemoAccount("Approver", "approver", "Regliss-approver"));
+            new AuthConfigResponse.DemoAccount("List Manager", "maker", "Regliss-maker"),
+            new AuthConfigResponse.DemoAccount("List Owner", "approver", "Regliss-approver"));
 
     private final AuthenticationManager authenticationManager;
     private final SecurityContextRepository securityContextRepository;
