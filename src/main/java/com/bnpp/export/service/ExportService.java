@@ -8,6 +8,7 @@ import com.bnpp.export.dto.ExportJobResponse;
 import com.bnpp.export.dto.ExportPreview;
 import com.bnpp.export.dto.FileDownload;
 import com.bnpp.export.dto.JobDetailResponse;
+import com.bnpp.export.dto.JobPageResponse;
 import com.bnpp.export.dto.ResendPreviewResponse;
 import com.bnpp.export.dto.ResendRequest;
 import com.bnpp.export.dto.TriggerExportRequest;
@@ -98,7 +99,8 @@ public interface ExportService {
 
     DashboardResponse dashboard();
 
-    List<DashboardResponse.JobSummary> listJobs(String query);
+    /** A page of export jobs (History), newest first, searched by version, user, status or list name. */
+    JobPageResponse listJobs(String query, int offset, int limit);
 
     /** Certified list versions operators can export, oldest first. */
     List<CertifiedVersionResponse> versions();
@@ -112,8 +114,4 @@ public interface ExportService {
 
     /** The last file delivered to a subscriber. */
     FileDownload downloadLastSubscriberFile(Long subscriberId);
-
-    void recount(Long jobId);
-
-    void finish(Long jobId, String status, String errorMessage);
 }

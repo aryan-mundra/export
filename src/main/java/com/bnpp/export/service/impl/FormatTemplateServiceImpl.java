@@ -33,6 +33,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 /** Implementation of {@link FormatTemplateService}. */
 @Service
@@ -78,8 +79,20 @@ public class FormatTemplateServiceImpl implements FormatTemplateService {
 
     @Override
     public List<FormatTemplateResponse> list() {
+        // Every version with its columns, filters and subscribers: four queries in all, however many versions
+        // there are (the List and Approvals pages call this every 15 seconds).
+        Map<Long, List<FormatField>> fields = fieldRepository.findAllByOrderByTemplateIdAscPositionAsc().stream()
+                .collect(Collectors.groupingBy(FormatField::getTemplateId));
+        Map<Long, List<FormatFilter>> filters = filterRepository.findAllByOrderByTemplateIdAscPositionAsc().stream()
+                .collect(Collectors.groupingBy(FormatFilter::getTemplateId));
+        Map<Long, List<String>> usedBy = subscriberRepository.findByTemplateFamilyIdIsNotNullOrderByNameAsc().stream()
+                .collect(Collectors.groupingBy(SubscriberProfile::getTemplateFamilyId,
+                        Collectors.mapping(SubscriberProfile::getName, Collectors.toList())));
         return templateRepository.findAllByOrderByNameAscVersionNumberDesc().stream()
-                .map(this::toResponse)
+                .map(template -> toResponse(template,
+                        fields.getOrDefault(template.getId(), List.of()),
+                        filters.getOrDefault(template.getId(), List.of()),
+                        template.getFamilyId() == null ? List.of() : usedBy.getOrDefault(template.getFamilyId(), List.of())))
                 .toList();
     }
 
@@ -191,6 +204,17 @@ public class FormatTemplateServiceImpl implements FormatTemplateService {
                     + "\" has no approved version yet. It can be chosen once a List Owner approves it.");
         }
         return latest.getName();
+    }
+
+    @Override
+    public Map<Long, String> templateNames() {
+        // Newest version first within each list, so each list gets its current name.
+        Map<Long, String> names = new java.util.HashMap<>();
+        templateRepository.findAllByOrderByNameAscVersionNumberDesc().stream()
+                .filter(template -> template.getFamilyId() != null)
+                .sorted(java.util.Comparator.comparingInt(FormatTemplate::getVersionNumber).reversed())
+                .forEach(template -> names.putIfAbsent(template.getFamilyId(), template.getName()));
+        return names;
     }
 
     @Override
@@ -470,7 +494,13 @@ public class FormatTemplateServiceImpl implements FormatTemplateService {
     }
 
     private FormatTemplateResponse toResponse(FormatTemplate template) {
-        List<FormatTemplateResponse.FieldResponse> fields = fieldRepository.findByTemplateIdOrderByPositionAsc(template.getId()).stream()
+        return toResponse(template, fieldRepository.findByTemplateIdOrderByPositionAsc(template.getId()), filters(template.getId()),
+                usedBy(template.getFamilyId()));
+    }
+
+    private FormatTemplateResponse toResponse(FormatTemplate template, List<FormatField> templateFields,
+                                              List<FormatFilter> templateFilters, List<String> usedBy) {
+        List<FormatTemplateResponse.FieldResponse> fields = templateFields.stream()
                 .map(field -> new FormatTemplateResponse.FieldResponse(
                         field.getId(),
                         field.getSourceTable(),
@@ -496,7 +526,7 @@ public class FormatTemplateServiceImpl implements FormatTemplateService {
                 template.getApprovedAt(),
                 template.getCreatedAt(),
                 fields,
-                filters(template.getId()).stream()
+                templateFilters.stream()
                         .map(filter -> new FormatTemplateResponse.FilterResponse(
                                 filter.getSourceTable(),
                                 filter.getSourceColumn(),
@@ -505,7 +535,7 @@ public class FormatTemplateServiceImpl implements FormatTemplateService {
                                 filter.isIncludeBlank(),
                                 rowFilters.describe(filter)))
                         .toList(),
-                usedBy(template.getFamilyId()),
+                usedBy,
                 template.getReviewedBy(),
                 template.getReviewedByName(),
                 template.getReviewedAt(),

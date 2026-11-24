@@ -1,13 +1,18 @@
 package com.bnpp.export.service.impl;
 
+import com.bnpp.export.dto.QuarantinePageResponse;
 import com.bnpp.export.dto.QuarantineResponse;
 import com.bnpp.export.entity.QuarantineRecord;
 import com.bnpp.export.entity.SubscriberProfile;
 import com.bnpp.export.repository.QuarantineRepository;
 import com.bnpp.export.repository.SubscriberRepository;
 import com.bnpp.export.service.QuarantineService;
+import com.bnpp.export.util.OffsetPage;
+import com.bnpp.export.util.SqlUtils;
+import org.springframework.data.domain.Page;
 import org.springframework.stereotype.Service;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -26,12 +31,26 @@ public class QuarantineServiceImpl implements QuarantineService {
     }
 
     @Override
-    public List<QuarantineResponse> search(String query) {
+    public QuarantinePageResponse search(String query, int offset, int limit) {
         String text = query == null ? "" : query.trim().toLowerCase(Locale.ROOT);
         Map<Long, String> names = subscriberRepository.findAll().stream()
                 .collect(Collectors.toMap(SubscriberProfile::getId, SubscriberProfile::getName));
-        return quarantineRepository.findAllByOrderByCreatedAtDesc().stream()
-                .filter(record -> text.isEmpty() || matches(record, names.get(record.getSubscriberId()), text))
+        OffsetPage page = OffsetPage.of(offset, limit);
+        Page<QuarantineRecord> found;
+        if (text.isEmpty()) {
+            found = quarantineRepository.findAllByOrderByCreatedAtDescIdDesc(page);
+        } else {
+            // The search runs in the database; subscriber names are matched here (a small table).
+            List<Long> matchingSubscribers = names.entrySet().stream()
+                    .filter(entry -> contains(entry.getValue(), text))
+                    .map(Map.Entry::getKey)
+                    .collect(Collectors.toCollection(ArrayList::new));
+            if (matchingSubscribers.isEmpty()) {
+                matchingSubscribers.add(-1L); // "in ()" is not valid SQL
+            }
+            found = quarantineRepository.search("%" + SqlUtils.likeEscape(text) + "%", matchingSubscribers, page);
+        }
+        List<QuarantineResponse> records = found.getContent().stream()
                 .map(record -> new QuarantineResponse(
                         record.getId(),
                         record.getVersionId(),
@@ -45,13 +64,7 @@ public class QuarantineServiceImpl implements QuarantineService {
                         record.getAcceptedAt(),
                         record.getCreatedAt()))
                 .toList();
-    }
-
-    private static boolean matches(QuarantineRecord record, String subscriberName, String query) {
-        return contains(record.getRecordIdentifier(), query)
-                || contains(record.getQuarantineReason(), query)
-                || contains(subscriberName, query)
-                || String.valueOf(record.getVersionId()).contains(query);
+        return new QuarantinePageResponse(found.getTotalElements(), (int) page.offset(), records);
     }
 
     private static boolean contains(String value, String query) {

@@ -1,8 +1,8 @@
 package com.bnpp.export.controller;
 
-import com.bnpp.export.dto.DashboardResponse;
 import com.bnpp.export.dto.DeliveryProofResponse;
 import com.bnpp.export.dto.JobDetailResponse;
+import com.bnpp.export.dto.JobPageResponse;
 import com.bnpp.export.service.ExportService;
 import org.springframework.core.io.Resource;
 import org.springframework.http.ResponseEntity;
@@ -13,7 +13,6 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
-import java.util.List;
 
 /** Export runs (History): list, detail, the files and proof of each subscriber, and acting on held or failed ones. */
 @RestController
@@ -26,9 +25,12 @@ public class JobController {
         this.exportService = exportService;
     }
 
+    /** A page of jobs, newest first; {@code limit} is at most 100. */
     @GetMapping
-    public List<DashboardResponse.JobSummary> jobs(@RequestParam(required = false) String q) {
-        return exportService.listJobs(q);
+    public JobPageResponse jobs(@RequestParam(required = false) String q,
+                                @RequestParam(defaultValue = "0") int offset,
+                                @RequestParam(defaultValue = "25") int limit) {
+        return exportService.listJobs(q, offset, limit);
     }
 
     @GetMapping("/{id}")

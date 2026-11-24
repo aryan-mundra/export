@@ -8,4 +8,7 @@ import java.util.List;
 public interface FormatFilterRepository extends JpaRepository<FormatFilter, Long> {
 
     List<FormatFilter> findByTemplateIdOrderByPositionAsc(Long templateId);
+
+    /** The row filters of every list version at once, for building the whole list in one query. */
+    List<FormatFilter> findAllByOrderByTemplateIdAscPositionAsc();
 }

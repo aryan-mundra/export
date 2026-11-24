@@ -15,6 +15,9 @@ public interface FormatTemplateRepository extends JpaRepository<FormatTemplate, 
 
     List<FormatTemplate> findByFamilyIdAndActiveTrue(Long familyId);
 
+    /** The approved version in use of every list. */
+    List<FormatTemplate> findByActiveTrue();
+
     Optional<FormatTemplate> findFirstByFamilyIdOrderByVersionNumberDesc(Long familyId);
 
     /** The newest version of the template with this name, if any. */

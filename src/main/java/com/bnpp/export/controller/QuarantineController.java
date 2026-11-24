@@ -1,13 +1,12 @@
 package com.bnpp.export.controller;
 
-import com.bnpp.export.dto.QuarantineResponse;
+import com.bnpp.export.dto.QuarantinePageResponse;
 import com.bnpp.export.service.QuarantineService;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
-import java.util.List;
 
 /** Records held back from files by the quality check. */
 @RestController
@@ -20,8 +19,11 @@ public class QuarantineController {
         this.quarantineService = quarantineService;
     }
 
+    /** A page of held records, newest first; {@code limit} is at most 100. */
     @GetMapping
-    public List<QuarantineResponse> quarantine(@RequestParam(required = false) String q) {
-        return quarantineService.search(q);
+    public QuarantinePageResponse quarantine(@RequestParam(required = false) String q,
+                                             @RequestParam(defaultValue = "0") int offset,
+                                             @RequestParam(defaultValue = "25") int limit) {
+        return quarantineService.search(q, offset, limit);
     }
 }

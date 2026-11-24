@@ -23,4 +23,7 @@ public interface SubscriberRepository extends JpaRepository<SubscriberProfile, L
     List<SubscriberProfile> findByFormatTypeIgnoreCaseAndActiveTrueOrderByNameAsc(String formatType);
 
     List<SubscriberProfile> findByTemplateFamilyIdOrderByNameAsc(Long templateFamilyId);
+
+    /** Every subscriber that has chosen a list, by name: who uses each list, in one query. */
+    List<SubscriberProfile> findByTemplateFamilyIdIsNotNullOrderByNameAsc();
 }

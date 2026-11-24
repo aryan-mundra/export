@@ -2,8 +2,10 @@ const state = {
     page: "dashboard",
     dashboard: null,
     subscribers: [],
-    jobs: [],
-    quarantine: [],
+    jobs: null,
+    quarantine: null,
+    /** Where the History and Quarantine pages start (row offset); back to 0 when their search changes. */
+    listOffset: { history: 0, quarantine: 0 },
     system: null,
     search: { history: "", subscribers: "", quarantine: "" },
     openJobId: null,
@@ -92,12 +94,12 @@ async function refresh() {
     } else if (state.page === "subscriber-new") {
         state.templates = await api("/api/format-templates");
     } else if (state.page === "history") {
-        state.jobs = await api("/api/jobs?q=" + encodeURIComponent(state.search.history));
+        state.jobs = await loadJobs();
         if (state.openJobId) {
             state.jobDetail = await api("/api/jobs/" + state.openJobId);
         }
     } else if (state.page === "quarantine") {
-        state.quarantine = await api("/api/quarantine?q=" + encodeURIComponent(state.search.quarantine));
+        state.quarantine = await loadQuarantine();
     } else if (state.page === "templates") {
         const [templates, sources, versions] = await Promise.all([
             api("/api/format-templates"),
@@ -195,7 +197,7 @@ async function poll() {
         if (state.page === "dashboard" && changed) {
             document.getElementById("main").innerHTML = dashboardHtml();
         } else if (state.page === "history" && busy) {
-            state.jobs = await api("/api/jobs?q=" + encodeURIComponent(state.search.history));
+            state.jobs = await loadJobs();
             if (state.openJobId) state.jobDetail = await api("/api/jobs/" + state.openJobId);
             document.getElementById("main").innerHTML = historyHtml();
             const search = document.querySelector("[data-search]");
@@ -243,8 +245,33 @@ function activityRow(job) {
     </button>`;
 }
 
+const LIST_PAGE = 25;
+
+/** One page of export jobs (History), for the current search. */
+function loadJobs() {
+    return api(`/api/jobs?q=${encodeURIComponent(state.search.history)}&offset=${state.listOffset.history}&limit=${LIST_PAGE}`);
+}
+
+/** One page of held records (Quarantine), for the current search. */
+function loadQuarantine() {
+    return api(`/api/quarantine?q=${encodeURIComponent(state.search.quarantine)}&offset=${state.listOffset.quarantine}&limit=${LIST_PAGE}`);
+}
+
+/** "1–25 of 312 jobs" with Previous and Next, for a page of History or Quarantine. */
+function listPagerHtml(page, shown, key, noun) {
+    if (!page.total) return "";
+    const from = page.offset + 1;
+    const to = page.offset + shown;
+    return `<div class="pager xp-pager">
+            <span class="muted">${num(from)}–${num(to)} of ${num(page.total)} ${noun}</span>
+            <button type="button" class="btn-ghost btn-small" data-list-page="${key}:-1" ${page.offset === 0 ? "disabled" : ""}>‹ Previous</button>
+            <button type="button" class="btn-ghost btn-small" data-list-page="${key}:1" ${to >= page.total ? "disabled" : ""}>Next ›</button>
+        </div>`;
+}
+
 function historyHtml() {
-    const rows = state.jobs.map(job => {
+    const page = state.jobs || { total: 0, offset: 0, jobs: [] };
+    const rows = page.jobs.map(job => {
         const open = String(state.openJobId) === String(job.id);
         return `<tr class="clickable" data-job="${job.id}">
             <td>${job.id}</td>
@@ -266,7 +293,8 @@ function historyHtml() {
                 <thead><tr><th>Job ID</th><th>Version</th><th>Status</th><th>List</th><th>Delta window</th><th>Triggered by</th><th>Records</th><th>Delivery</th><th>Created</th></tr></thead>
                 <tbody>${rows}</tbody>
             </table>
-            ${state.jobs.length ? "" : '<div class="empty">No export jobs found.</div>'}
+            ${page.jobs.length ? "" : '<div class="empty">No export jobs found.</div>'}
+            ${listPagerHtml(page, page.jobs.length, "history", "jobs")}
         </section>`;
 }
 
@@ -576,7 +604,8 @@ function endpointApprovals() {
 
 
 function quarantineHtml() {
-    const rows = state.quarantine.map(record => `<tr>
+    const page = state.quarantine || { total: 0, offset: 0, records: [] };
+    const rows = page.records.map(record => `<tr>
         <td>${record.id}</td>
         <td>${esc(record.versionId)}</td>
         <td>${esc(record.subscriberName)}</td>
@@ -591,7 +620,8 @@ function quarantineHtml() {
                 <thead><tr><th>ID</th><th>Version</th><th>Subscriber</th><th>Record ID</th><th>Reason</th><th>Decision</th></tr></thead>
                 <tbody>${rows}</tbody>
             </table>
-            ${state.quarantine.length ? "" : '<div class="empty">No quarantined records.</div>'}
+            ${page.records.length ? "" : '<div class="empty">No quarantined records.</div>'}
+            ${listPagerHtml(page, page.records.length, "quarantine", "records")}
         </section>`;
 }
 
@@ -644,8 +674,23 @@ async function onClick(event) {
     if (onExplorerClick(event)) return;
     const historyButton = event.target.closest("[data-history]");
     if (historyButton) {
+        state.listOffset.history = 0;
         location.hash = "#/history";
         state.openJobId = historyButton.dataset.history;
+        return;
+    }
+    const listPage = event.target.closest("[data-list-page]");
+    if (listPage) {
+        const [key, step] = listPage.dataset.listPage.split(":");
+        state.listOffset[key] = Math.max(0, state.listOffset[key] + Number(step) * LIST_PAGE);
+        try {
+            if (key === "history") state.jobs = await loadJobs();
+            else state.quarantine = await loadQuarantine();
+            render();
+            document.getElementById("main").scrollIntoView({ block: "start" });
+        } catch (error) {
+            toast(error.message, "error");
+        }
         return;
     }
     const jobRow = event.target.closest("[data-job]");
@@ -957,6 +1002,7 @@ function onInput(event) {
     const field = event.target.closest("[data-search]");
     if (!field) return;
     state.search[field.dataset.search] = field.value;
+    if (field.dataset.search in state.listOffset) state.listOffset[field.dataset.search] = 0;
     clearTimeout(searchTimer);
     searchTimer = setTimeout(async () => {
         try {
@@ -978,7 +1024,7 @@ async function postJobAction(pair, action, message) {
     const [jobId, statusId] = pair.split(":");
     try {
         state.jobDetail = await api(`/api/jobs/${jobId}/subscribers/${statusId}/${action}`, { method: "POST" });
-        state.jobs = await api("/api/jobs?q=" + encodeURIComponent(state.search.history));
+        state.jobs = await loadJobs();
         toast(message, "success");
         render();
     } catch (error) {

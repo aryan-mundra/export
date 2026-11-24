@@ -9,6 +9,7 @@ import com.bnpp.export.entity.FormatFilter;
 import com.bnpp.export.entity.FormatTemplate;
 
 import java.util.List;
+import java.util.Map;
 
 /** FormatTemplateService. */
 public interface FormatTemplateService {
@@ -48,6 +49,9 @@ public interface FormatTemplateService {
 
     /** The name of a template, for display; null when there is none. */
     String templateName(Long familyId);
+
+    /** The name of every list (by family id), in one query. */
+    Map<Long, String> templateNames();
 
     /**
      * Puts a version in use for its own template only; other templates are not affected. Its

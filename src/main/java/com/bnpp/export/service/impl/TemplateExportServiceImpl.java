@@ -50,8 +50,7 @@ public class TemplateExportServiceImpl implements TemplateExportService {
     public ExportTemplatePageResponse list(String query, boolean withVersions, int offset, int limit) {
         String text = query == null ? "" : query.trim().toLowerCase(Locale.ROOT);
         Map<Long, Series> series = series();
-        List<FormatTemplate> matching = templates.findAll().stream()
-                .filter(FormatTemplate::isActive)
+        List<FormatTemplate> matching = templates.findByActiveTrue().stream()
                 .filter(template -> text.isEmpty() || template.getName().toLowerCase(Locale.ROOT).contains(text))
                 .filter(template -> !withVersions || series.containsKey(template.getFamilyId()))
                 .sorted(Comparator.comparing(template -> template.getName().toLowerCase(Locale.ROOT)))

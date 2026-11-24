@@ -19,9 +19,12 @@ import com.bnpp.export.service.SubscriberService;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.stereotype.Service;
 
+import com.bnpp.export.entity.DeliveryRecord;
+import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -63,9 +66,17 @@ public class SubscriberServiceImpl implements SubscriberService {
     @Override
     public List<SubscriberResponse> list(String query) {
         String text = query == null ? "" : query.trim().toLowerCase(Locale.ROOT);
+        // List names and last deliveries for all subscribers at once, not two queries per subscriber.
+        Map<Long, String> names = formatTemplateService.templateNames();
+        Map<Long, DeliveryRecord> lastDelivery = new HashMap<>();
+        for (DeliveryRecord delivery : deliveryRepository.findLatestOfEverySubscriber()) {
+            lastDelivery.merge(delivery.getSubscriberId(), delivery, (kept, other) -> other.getId() > kept.getId() ? other : kept);
+        }
         return subscriberRepository.findAllByOrderByIdAsc().stream()
                 .filter(subscriber -> text.isEmpty() || matches(subscriber, text))
-                .map(this::toResponse)
+                .map(subscriber -> SubscriberResponse.from(subscriber,
+                        subscriber.getTemplateFamilyId() == null ? null : names.get(subscriber.getTemplateFamilyId()),
+                        lastDelivery.get(subscriber.getId())))
                 .toList();
     }
 

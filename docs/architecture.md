@@ -45,7 +45,11 @@ com.bnpp.export
 
 | Interface | What it does |
 |---|---|
-| `ExportService` | Reviews and runs exports and sends of stored versions, retries, omissions, proofs, history, file downloads |
+| `ExportService` | The one entry point the controllers use for exports; delegates to the four services below |
+| `ExportReviewService` | Reviewing an export (counts per subscriber, review token) and queuing the export the user reviewed |
+| `ResendService` | Reviewing and queuing a send of a stored data version, in chosen formats |
+| `ExportRunService` | Running jobs in the background (stream, quality check, quarantine, deliver, settle), retries, accepting omissions |
+| `JobQueryService` | Dashboard, History (paged), job detail, delivery report, proofs, file downloads, sample files |
 | `SnapshotService` | Builds, numbers and stores data versions in their own tables, and reads them back |
 | `DataVersionService` | The data-versions API: list, detail, rows, compare, download |
 | `ComparisonService` | Compares two versions of a list in SQL: counts, changed values per column, filtered pages of records, CSV of every difference |

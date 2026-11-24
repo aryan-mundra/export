@@ -1,6 +1,8 @@
 package com.bnpp.export.repository;
 
 import com.bnpp.export.entity.ExportJob;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
@@ -10,12 +12,36 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.LocalDateTime;
 import java.util.Collection;
 import java.util.List;
+import java.util.Optional;
 
 public interface ExportJobRepository extends JpaRepository<ExportJob, Long> {
 
-    List<ExportJob> findAllByOrderByCreatedAtDesc();
+    /** A page of all jobs, newest first (the id breaks ties, so pages never overlap). */
+    Page<ExportJob> findAllByOrderByCreatedAtDescIdDesc(Pageable page);
 
     List<ExportJob> findTop10ByOrderByCreatedAtDesc();
+
+    /**
+     * A page of the jobs whose version, user, status or list name contains the text, newest first. {@code like}
+     * is {@code %text%}, lower case, with %, _ and \ escaped by a backslash.
+     */
+    @Query(value = """
+            select j from ExportJob j
+             where str(j.versionId) like :like escape '\\'
+                or lower(j.triggeredBy) like :like escape '\\'
+                or lower(j.status) like :like escape '\\'
+                or lower(j.listName) like :like escape '\\'
+             order by j.createdAt desc, j.id desc
+            """, countQuery = """
+            select count(j) from ExportJob j
+             where str(j.versionId) like :like escape '\\'
+                or lower(j.triggeredBy) like :like escape '\\'
+                or lower(j.status) like :like escape '\\'
+                or lower(j.listName) like :like escape '\\'
+            """)
+    Page<ExportJob> search(@Param("like") String like, Pageable page);
+
+    Optional<ExportJob> findFirstByVersionIdOrderByCreatedAtDesc(Long versionId);
 
     List<ExportJob> findByVersionIdOrderByCreatedAtDesc(Long versionId);
 
