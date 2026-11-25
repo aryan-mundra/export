@@ -32,6 +32,7 @@ document.addEventListener("click", onClick);
 document.addEventListener("submit", onSubmit);
 document.addEventListener("input", onInput);
 document.addEventListener("keydown", event => {
+    if (event.key === "Escape" && state.filterEdit) closeFilterMenu();
     if (event.key === "Enter" && event.target.matches && event.target.matches("[data-table-filter]")) {
         event.preventDefault();
     }
@@ -526,12 +527,11 @@ function exportColumnsHtml(draft) {
             <span class="col-source" title="${esc(field.sourceTable + "." + field.sourceColumn)}">${group ? `<span class="group-tag">${esc(group)}</span>` : ""}<span class="col-table">${esc(field.sourceTable)}</span><strong>${esc(field.sourceColumn)}</strong></span>
             <span class="muted">→</span>
             <input data-draft-header="${index}" value="${esc(field.headerName)}" placeholder="${esc(field.sourceColumn)}" aria-label="Export name for ${esc(field.sourceColumn)}">
-            <button class="btn-ghost btn-small ${(field.filterValues || []).length ? "filter-on" : ""}" type="button" data-filter="${index}" title="Keep only some values of this column">Filter${(field.filterValues || []).length ? " · " + field.filterValues.length : ""}</button>
             <button class="btn-ghost btn-small" type="button" data-reset-header="${index}" ${renamed ? "" : "disabled"} title="Use the column name as the export name">Keep original</button>
             <button class="btn-ghost btn-icon" type="button" data-move="${index}:-1" ${index === 0 ? "disabled" : ""} aria-label="Move up">↑</button>
             <button class="btn-ghost btn-icon" type="button" data-move="${index}:1" ${index === draft.fields.length - 1 ? "disabled" : ""} aria-label="Move down">↓</button>
             ${key ? '<span class="key-tag" title="The group\'s key: identifies each record; removed with the group\'s last column">key</span>' : `<button class="btn-delete" type="button" data-remove-field="${index}">Remove</button>`}
-            ${(field.filterValues || []).length ? `<div class="filter-summary">Keeps only: ${esc(field.filterValues.slice(0, 6).join(", "))}${field.filterValues.length > 6 ? " … +" + (field.filterValues.length - 6) : ""}</div>` : ""}
+            ${(field.filterValues || []).length ? `<div class="filter-summary">Filtered, keeps only: ${esc(field.filterValues.slice(0, 6).join(", "))}${field.filterValues.length > 6 ? " … +" + (field.filterValues.length - 6) : ""}</div>` : ""}
         </div>`;
     }).join("");
 }
@@ -670,9 +670,15 @@ function groupPreviewHtml() {
     if (!view || (view.loading && !view.groups.length)) return '<div class="queue-empty">Loading the preview of each group…</div>';
     if (view.error) return `<div class="banner banner-error">${esc(view.error)}</div>`;
     if (!view.groups.length) return '<div class="empty">Pick columns of a group to preview it.</div>';
-    return view.groups.map((group, index) => {
-        const headRow = `<th title="The group's key">${esc(group.keyColumn)} <span class="key-tag">key</span></th>`
-            + group.columns.map(column => `<th title="${esc(column.table + "." + column.column)}${column.root ? "" : " (related table: every value of the record)"}">${esc(column.header)}${column.root ? "" : ' <span class="muted">· ' + esc(column.table) + "</span>"}</th>`).join("");
+    return filterBarHtml() + view.groups.map((group, index) => {
+        const arrow = (table, columnName) => {
+            const at = draftIndexOf(table, columnName);
+            if (at < 0) return "";
+            const on = (state.templateDraft.fields[at].filterValues || []).length;
+            return ` <button type="button" class="th-filter ${on ? "on" : ""}" data-th-filter="${at}" title="${on ? "Filtered: " + esc(state.templateDraft.fields[at].filterValues.join(", ")) : "Filter this column"}">${on ? "▾ " + on : "▾"}</button>`;
+        };
+        const headRow = `<th title="The group's key">${esc(group.keyColumn)} <span class="key-tag">key</span>${arrow(group.rootTable, group.keyColumn)}</th>`
+            + group.columns.map(column => `<th title="${esc(column.table + "." + column.column)}${column.root ? "" : " (related table: every value of the record)"}">${esc(column.header)}${column.root ? "" : ' <span class="muted">· ' + esc(column.table) + "</span>"}${arrow(column.table, column.column)}</th>`).join("");
         const rows = group.rows.map(row => `<tr><td><strong>${esc(row.key)}</strong></td>${row.values.map(value => `<td>${value ? esc(value) : '<span class="muted">—</span>'}</td>`).join("")}</tr>`).join("");
         return `<section class="group-preview">
             <div class="group-preview-head">
@@ -747,7 +753,7 @@ function renderTemplatesKeepingFilter() {
 }
 
 
-/* ---------- Filters: keep only some values of a column ---------- */
+/* ---------- Filters: Excel-style, on the column headers of the group previews ---------- */
 
 /** "city: Mumbai, Delhi · country: FR" for a list version, or "" when it has no filter. */
 function filtersText(template) {
@@ -755,12 +761,49 @@ function filtersText(template) {
         .map(field => field.headerName + ": " + field.filterValues.join(", ")).join(" · ");
 }
 
-async function openFilter(index) {
+/** The place of a column in the list being edited (-1 when it is not on it). */
+function draftIndexOf(table, column) {
+    return state.templateDraft.fields.findIndex(field => tableKey(field.sourceTable) === tableKey(table)
+        && String(field.sourceColumn).toLowerCase() === String(column).toLowerCase());
+}
+
+/** The chips above the previews: each active filter, to remove one by one. */
+function filterBarHtml() {
+    const active = state.templateDraft.fields.map((field, index) => ({ field, index })).filter(item => (item.field.filterValues || []).length);
+    if (!active.length) return '<p class="muted filter-hint">Click ▾ on a column header to keep only some of its values.</p>';
+    return `<div class="filter-bar"><span class="muted">Filters:</span>${active.map(({ field, index }) =>
+        `<span class="filter-chip" title="${esc(field.sourceTable + "." + field.sourceColumn)}"><b>${esc(field.headerName || field.sourceColumn)}</b> = ${esc(field.filterValues.slice(0, 4).join(", "))}${field.filterValues.length > 4 ? " +" + (field.filterValues.length - 4) : ""}<button type="button" data-filter-remove="${index}" aria-label="Remove filter">×</button></span>`).join("")}
+        <button type="button" class="btn-ghost btn-small" data-filter-remove="all">Clear all filters</button></div>`;
+}
+
+function closeFilterMenu() {
+    state.filterEdit = null;
+    const menu = document.getElementById("filter-menu");
+    if (menu) menu.remove();
+}
+
+/** Opens the value list under a column header, like the arrow of an Excel table. */
+async function openFilterMenu(index, anchor) {
     readDraftFromForm();
     const field = state.templateDraft.fields[index];
     if (!field) return;
+    closeFilterMenu();
     state.filterEdit = { index, selected: new Set(field.filterValues || []), values: [], truncated: false, q: "", loading: true, error: null };
-    renderFilterDialog();
+    const menu = document.createElement("div");
+    menu.id = "filter-menu";
+    menu.className = "filter-menu";
+    menu.innerHTML = `
+        <div class="filter-menu-title">${esc(field.headerName || field.sourceColumn)} <span class="muted">${esc(field.sourceTable)}</span></div>
+        <input class="search" data-filter-search placeholder="Search" autocomplete="off">
+        <div class="filter-links"><button type="button" data-filter-all>Select all shown</button><button type="button" data-filter-clear>Clear</button></div>
+        <div id="filter-list"></div>
+        <div class="filter-menu-actions"><button type="button" class="btn-ghost btn-small" data-filter-cancel>Cancel</button><button type="button" class="btn-primary btn-small" data-filter-apply>OK</button></div>`;
+    document.body.appendChild(menu);
+    const box = anchor.getBoundingClientRect();
+    menu.style.top = Math.min(box.bottom + 4, window.innerHeight - 40) + "px";
+    menu.style.left = Math.max(8, Math.min(box.left, window.innerWidth - 280)) + "px";
+    renderFilterList();
+    menu.querySelector("[data-filter-search]").focus();
     await loadFilterValues("");
 }
 
@@ -787,25 +830,8 @@ async function loadFilterValues(q) {
     renderFilterList();
 }
 
-function renderFilterDialog() {
-    const edit = state.filterEdit;
-    const field = state.templateDraft.fields[edit.index];
-    document.getElementById("modal-root").innerHTML = `
-        <div class="modal-back"><div class="modal filter-modal" id="filter-dialog">
-            <h2>Filter ${esc(field.headerName || field.sourceColumn)}</h2>
-            <p class="muted">${esc(field.sourceTable)}.${esc(field.sourceColumn)} · tick the values to keep. A record whose value is not ticked is left out${groupOfField(field) && !isGroupKey(field) && !(sourceOf(field.sourceTable) || {}).root ? "; a record with no related row holding a ticked value is left out too" : ""}.</p>
-            <input class="search" data-filter-search placeholder="Search the values" autocomplete="off" style="width:100%">
-            <div id="filter-list"></div>
-            <div class="modal-actions">
-                <button type="button" class="btn-ghost" data-filter-clear>Clear</button>
-                <span class="spacer"></span>
-                <button type="button" class="btn-ghost" data-filter-cancel>Cancel</button>
-                <button type="button" class="btn-primary" data-filter-apply>Apply</button>
-            </div>
-        </div></div>`;
-    renderFilterList();
-    const search = document.querySelector("[data-filter-search]");
-    if (search) search.focus();
+function filterCountText(edit) {
+    return num(edit.selected.size) + " ticked" + (edit.truncated ? " · more values exist: search to find them" : "");
 }
 
 function renderFilterList() {
@@ -816,23 +842,46 @@ function renderFilterList() {
     const shown = [...new Set([...edit.selected, ...edit.values])].sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
     host.innerHTML = edit.error ? `<div class="banner banner-error">${esc(edit.error)}</div>`
         : edit.loading && !shown.length ? '<div class="queue-empty">Reading the values…</div>'
-        : `<div class="filter-count muted">${num(edit.selected.size)} ticked${edit.truncated ? " · more values exist: search to find them" : ""}</div>
+        : `<div class="filter-count muted">${filterCountText(edit)}</div>
            <div class="filter-values">${shown.map(value => `<label class="column-option"><input type="checkbox" data-filter-value="${esc(value)}" ${edit.selected.has(value) ? "checked" : ""}><span class="column-name">${esc(value)}</span></label>`).join("") || '<div class="empty">No value.</div>'}</div>`;
 }
 
-/** Clicks of the filter dialog and of the Filter buttons. Returns true when the click was one of them. */
+function applyFilterChange() {
+    renderTemplatesKeepingFilter();
+    loadGroupPreview();
+}
+
+/** Clicks on the filter arrows, the open list, and the filter chips. Returns true when the click was one of them. */
 function onFilterClick(target) {
-    const open = target.closest("[data-filter]");
-    if (open) {
-        openFilter(Number(open.dataset.filter));
+    const arrow = target.closest("[data-th-filter]");
+    if (arrow) {
+        const wasOpen = state.filterEdit && String(state.filterEdit.index) === arrow.dataset.thFilter;
+        if (wasOpen) closeFilterMenu(); else openFilterMenu(Number(arrow.dataset.thFilter), arrow);
+        return true;
+    }
+    const remove = target.closest("[data-filter-remove]");
+    if (remove) {
+        readDraftFromForm();
+        if (remove.dataset.filterRemove === "all") state.templateDraft.fields.forEach(field => { field.filterValues = []; });
+        else state.templateDraft.fields[Number(remove.dataset.filterRemove)].filterValues = [];
+        applyFilterChange();
         return true;
     }
     const edit = state.filterEdit;
     if (!edit) return false;
+    if (!target.closest("#filter-menu")) {   // a click anywhere else closes the list without applying, like Excel
+        closeFilterMenu();
+        return false;
+    }
     if (target.matches && target.matches("input[data-filter-value]")) {
         if (target.checked) edit.selected.add(target.dataset.filterValue); else edit.selected.delete(target.dataset.filterValue);
         const count = document.querySelector(".filter-count");
-        if (count) count.textContent = num(edit.selected.size) + " ticked" + (edit.truncated ? " · more values exist: search to find them" : "");
+        if (count) count.textContent = filterCountText(edit);
+        return true;
+    }
+    if (target.closest("[data-filter-all]")) {
+        edit.values.forEach(value => edit.selected.add(value));
+        renderFilterList();
         return true;
     }
     if (target.closest("[data-filter-clear]")) {
@@ -841,16 +890,13 @@ function onFilterClick(target) {
         return true;
     }
     if (target.closest("[data-filter-cancel]")) {
-        state.filterEdit = null;
-        document.getElementById("modal-root").innerHTML = "";
+        closeFilterMenu();
         return true;
     }
     if (target.closest("[data-filter-apply]")) {
         state.templateDraft.fields[edit.index].filterValues = [...edit.selected];
-        state.filterEdit = null;
-        document.getElementById("modal-root").innerHTML = "";
-        renderTemplatesKeepingFilter();
-        if (state.templateStep === "data") loadGroupPreview();
+        closeFilterMenu();
+        applyFilterChange();
         return true;
     }
     return false;
@@ -861,6 +907,7 @@ function onFilterClick(target) {
 
 async function onClick(event) {
     const target = event.target;
+    if (state.page === "templates" && onFilterClick(target)) return;
     if (state.page === "export" && onExportClick(target)) return;
     if (state.page === "approvals" && onReviewClick(event)) return;
     const historyButton = target.closest("[data-history]");
@@ -968,7 +1015,6 @@ async function onClick(event) {
 
 /** Clicks on Create a List. Returns true when the click was one of its controls. */
 function onListBuilderClick(target) {
-    if (onFilterClick(target)) return true;
     const step = target.closest("[data-step]");
     if (step) {
         if (step.disabled) return true;
