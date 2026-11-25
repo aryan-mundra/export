@@ -79,7 +79,7 @@ public class DataVersionServiceImpl implements DataVersionService {
         if (selections.isEmpty()) {
             throw new BadRequestException(template.getName() + " has no columns from the table groups");
         }
-        String layout = RecordDocuments.write(layout(selections));
+        String layout = RecordDocuments.write(GroupXml.layout(selections));
         MessageDigest fingerprint = Hashing.sha256();
         fingerprint.update(layout.getBytes(StandardCharsets.UTF_8));
         Map<String, Long> counts = new LinkedHashMap<>();
@@ -156,26 +156,6 @@ public class DataVersionServiceImpl implements DataVersionService {
         return id;
     }
 
-    private static VersionLayout layout(List<GroupSelection> selections) {
-        List<VersionLayout.Group> groups = new ArrayList<>();
-        for (GroupSelection selection : selections) {
-            TableGroup group = selection.group();
-            List<VersionLayout.Table> tables = new ArrayList<>();
-            for (String table : selection.tables()) {
-                List<String> headers = selection.valueFields(table).stream().map(FormatField::getHeaderName).toList();
-                TableGroup.Link link = group.link(table).orElse(null);
-                tables.add(link == null
-                        ? new VersionLayout.Table(table, null, group.name(), group.section(), false, headers)
-                        : new VersionLayout.Table(table, link.refTable(), link.element(), link.section(), link.id() != null, headers));
-            }
-            groups.add(new VersionLayout.Group(group.name(), group.section(), selection.resolved().keyColumn(),
-                    XmlNames.element(group.root().key()), group.root().table(), tables,
-                    selection.fields().stream().filter(field -> field.getFilterValues() != null && !field.getFilterValues().isEmpty())
-                            .map(field -> new VersionLayout.Filter(field.getSourceTable(), field.getSourceColumn(), field.getFilterValues())).toList()));
-        }
-        return new VersionLayout(groups);
-    }
-
     // ------------------------------------------------------------------ reading
 
     @Override
@@ -217,58 +197,26 @@ public class DataVersionServiceImpl implements DataVersionService {
         DataVersion version = get(id);
         VersionLayout layout = layout(id);
         try {
-            out.write("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
-            out.write("<Export list=\"" + XmlNames.escape(version.listName()) + "\" dataVersion=\"" + version.number()
-                    + "\" generatedAt=\"" + version.createdAt().withNano(0) + "\">\n");
+            GroupXml.open(out, version.listName(), version.templateVersion(), version.number(), version.createdAt().withNano(0).toString(), version.records());
             long total = 0;
             for (VersionLayout.Group group : layout.groups()) {
-                out.write("  <" + group.section() + " count=\"" + version.groups().getOrDefault(group.name(), 0L) + "\">\n");
+                GroupXml.openGroup(out, group, version.groups().getOrDefault(group.name(), 0L));
                 String last = null;
                 List<String[]> page;
                 do {
                     page = versions.page(id, group.name(), last, PAGE);
                     for (String[] record : page) {
-                        StringBuilder xml = new StringBuilder(512);
-                        xml.append("    <").append(group.name()).append(' ').append(group.keyAttribute()).append("=\"")
-                                .append(XmlNames.escape(record[0])).append("\">\n");
-                        writeNode(group, group.rootTable(), RecordDocuments.read(record[1]), xml, "      ");
-                        xml.append("    </").append(group.name()).append(">\n");
-                        out.append(xml);
+                        out.append(GroupXml.record(group, record[0], RecordDocuments.read(record[1])));
                         total++;
                         last = record[0];
                     }
                 } while (page.size() == PAGE);
-                out.write("  </" + group.section() + ">\n");
+                GroupXml.closeGroup(out, group);
             }
-            out.write("</Export>\n");
+            GroupXml.close(out);
             return total;
         } catch (IOException ex) {
             throw new UncheckedIOException("Unable to write the XML file: " + ex.getMessage(), ex);
-        }
-    }
-
-    private static void writeNode(VersionLayout.Group group, String table, Map<String, Object> node, StringBuilder xml, String indent) {
-        Map<String, Object> values = RecordDocuments.values(node);
-        for (String header : group.table(table).headers()) {
-            Object value = values.get(header);
-            if (value != null) {
-                String element = XmlNames.element(header);
-                xml.append(indent).append('<').append(element).append('>').append(XmlNames.escape(value))
-                        .append("</").append(element).append(">\n");
-            }
-        }
-        for (VersionLayout.Table child : group.childrenOf(table)) {
-            List<Map<String, Object>> rows = RecordDocuments.rows(node, child.table());
-            if (rows.isEmpty()) {
-                continue;
-            }
-            xml.append(indent).append('<').append(child.section()).append(">\n");
-            for (Map<String, Object> row : rows) {
-                xml.append(indent).append("  <").append(child.element()).append(">\n");
-                writeNode(group, child.table(), row, xml, indent + "    ");
-                xml.append(indent).append("  </").append(child.element()).append(">\n");
-            }
-            xml.append(indent).append("</").append(child.section()).append(">\n");
         }
     }
 

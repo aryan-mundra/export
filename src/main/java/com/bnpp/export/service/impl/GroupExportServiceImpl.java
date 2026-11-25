@@ -12,6 +12,7 @@ import com.bnpp.export.exception.BadRequestException;
 import com.bnpp.export.exception.ResourceNotFoundException;
 import com.bnpp.export.model.GroupRow;
 import com.bnpp.export.model.GroupSelection;
+import com.bnpp.export.model.VersionLayout;
 import com.bnpp.export.model.TableGroup;
 import com.bnpp.export.repository.FormatTemplateRepository;
 import com.bnpp.export.repository.GroupRecordRepository;
@@ -33,6 +34,7 @@ import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 /**
@@ -166,70 +168,36 @@ public class GroupExportServiceImpl implements GroupExportService {
 
     @Override
     public long writeXml(String listName, Integer listVersion, List<FormatField> fields, Writer out) {
+        List<GroupSelection> selections = tableGroups.selections(fields);
+        VersionLayout layout = GroupXml.layout(selections);
         try {
-            out.write("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
-            out.write("<Export list=\"" + XmlNames.escape(listName) + "\"" + (listVersion == null ? "" : " version=\"" + listVersion + "\"")
-                    + " generatedAt=\"" + LocalDateTime.now().withNano(0) + "\">\n");
+            long[] counts = new long[selections.size()];
+            long expected = 0;
+            for (int i = 0; i < counts.length; i++) {
+                counts[i] = records.count(selections.get(i));
+                expected += counts[i];
+            }
+            GroupXml.open(out, listName, listVersion, null, LocalDateTime.now().withNano(0).toString(), expected);
             long total = 0;
-            for (GroupSelection selection : tableGroups.selections(fields)) {
-                TableGroup group = selection.group();
+            for (int i = 0; i < selections.size(); i++) {
+                GroupSelection selection = selections.get(i);
+                VersionLayout.Group group = layout.groups().get(i);
                 String key = selection.resolved().keyColumn();
-                String attribute = XmlNames.element(group.root().key());
-                out.write("  <" + group.section() + " count=\"" + records.count(selection) + "\">\n");
+                GroupXml.openGroup(out, group, counts[i]);
                 long[] written = new long[1];
                 records.stream(selection, record -> {
-                    StringBuilder xml = new StringBuilder(512);
-                    xml.append("    <").append(group.name()).append(' ').append(attribute).append("=\"")
-                            .append(XmlNames.escape(text(record.get(key)))).append("\">\n");
-                    writeValues(selection, group.root().table(), record, xml, "      ");
-                    writeChildren(selection, group.root().table(), record, xml, "      ");
-                    xml.append("    </").append(group.name()).append(">\n");
-                    write(out, xml);
+                    // The same canonical document a data version stores, so the live file and a sent file read alike.
+                    Map<String, Object> doc = RecordDocuments.build(selection, selection.group().root().table(), record);
+                    GroupXml.write(out, GroupXml.record(group, text(record.get(key)), doc));
                     written[0]++;
                 });
-                out.write("  </" + group.section() + ">\n");
+                GroupXml.closeGroup(out, group);
                 total += written[0];
             }
-            out.write("</Export>\n");
+            GroupXml.close(out);
             return total;
         } catch (IOException ex) {
             throw new UncheckedIOException("Unable to write the XML file: " + ex.getMessage(), ex);
-        }
-    }
-
-    private static void writeValues(GroupSelection selection, String table, GroupRow row, StringBuilder xml, String indent) {
-        for (FormatField field : selection.valueFields(table)) {
-            String value = text(row.get(selection.column(table, field.getSourceColumn())));
-            if (!value.isEmpty()) {
-                String element = XmlNames.element(field.getHeaderName());
-                xml.append(indent).append('<').append(element).append('>').append(XmlNames.escape(value))
-                        .append("</").append(element).append(">\n");
-            }
-        }
-    }
-
-    private static void writeChildren(GroupSelection selection, String table, GroupRow row, StringBuilder xml, String indent) {
-        for (TableGroup.Link link : selection.group().childrenOf(table)) {
-            List<GroupRow> children = row.children(link.table());
-            if (children.isEmpty()) {
-                continue;
-            }
-            xml.append(indent).append('<').append(link.section()).append(">\n");
-            for (GroupRow child : children) {
-                xml.append(indent).append("  <").append(link.element()).append(">\n");
-                writeValues(selection, link.table(), child, xml, indent + "    ");
-                writeChildren(selection, link.table(), child, xml, indent + "    ");
-                xml.append(indent).append("  </").append(link.element()).append(">\n");
-            }
-            xml.append(indent).append("</").append(link.section()).append(">\n");
-        }
-    }
-
-    private static void write(Writer out, CharSequence text) {
-        try {
-            out.append(text);
-        } catch (IOException ex) {
-            throw new UncheckedIOException(ex);
         }
     }
 

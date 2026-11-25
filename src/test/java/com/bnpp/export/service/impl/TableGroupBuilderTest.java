@@ -113,4 +113,36 @@ class TableGroupBuilderTest {
     void noKeysNoGroups() {
         assertTrue(TableGroupBuilder.build(List.of()).isEmpty());
     }
+
+    @Test
+    void xmlNamesDropThePrefixEveryTableShares() {
+        pk("cfg_dj_person", "person_id");
+        pk("cfg_dj_entityaddress", "address_no");
+        fk("cfg_dj_entityaddress", "owner_id", "cfg_dj_person", "person_id");
+        pk("cfg_dj_entity", "entity_id");
+
+        List<TableGroup> groups = TableGroupBuilder.build(rows);
+
+        assertEquals(List.of("entity", "person"), groups.stream().map(TableGroup::name).toList());
+        assertEquals("persons", groups.get(1).section());
+        assertEquals("entityaddress", groups.get(1).links().get(0).element());
+        assertEquals("cfg_dj_person", groups.get(1).root().table(), "the real table name is kept for the queries");
+    }
+
+    @Test
+    void noPrefixIsDroppedWhenTablesShareNone() {
+        pk("person", "id");
+        pk("entity", "id");
+
+        assertEquals(List.of("entity", "person"), TableGroupBuilder.build(rows).stream().map(TableGroup::name).toList());
+    }
+
+    @Test
+    void aPrefixIsNeverDroppedDownToNothing() {
+        pk("a_", "id");
+        pk("a_x", "id");
+
+        // "a_" would be left with an empty name, so the prefix stays: a_x is not shortened to x (a trailing _ is cleaned by XmlNames).
+        assertEquals(List.of("a", "a_x"), TableGroupBuilder.build(rows).stream().map(TableGroup::name).toList());
+    }
 }

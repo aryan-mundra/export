@@ -39,8 +39,10 @@ public record VersionLayout(List<Group> groups) {
      * @param element the XML element of one row (for the root: the group's record element)
      * @param section the XML element around its rows (for the root: the group's section)
      * @param hasId   whether its rows carry an id (matched on it when versions are compared)
-     * @param headers its columns on the list, in order (the key excluded)
+     * @param headers  its columns on the list, in order (the key excluded)
+     * @param idColumn the one-column primary key that identifies its rows (null: none; versions taken before it was kept have none)
      */
-    public record Table(String table, String parent, String element, String section, boolean hasId, List<String> headers) {
+    public record Table(String table, String parent, String element, String section, boolean hasId, List<String> headers,
+                        String idColumn) {
     }
 }

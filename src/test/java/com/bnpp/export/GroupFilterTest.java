@@ -69,38 +69,38 @@ class GroupFilterTest {
     @Test
     void aRecordWithNoMatchingRelatedRowIsLeftOut() throws Exception {
         String none = preview(fields("[]", "[]", "[]", "[]"));
-        assertEquals(List.of("tg_entity", "tg_person"), JsonPath.read(none, "$[*].group"));
-        assertEquals(2, ((Number) JsonPath.read(none, "$[1].total")).intValue(), "no filter: both persons");
+        assertEquals(List.of("person", "entity"), JsonPath.read(none, "$[*].group"));
+        assertEquals(2, ((Number) JsonPath.read(none, "$[0].total")).intValue(), "no filter: both persons");
 
         // city = Paris: person 2 has no address, so she is left out; person 1 keeps only the Paris address.
         String paris = preview(fields("[\"Paris\"]", "[]", "[]", "[]"));
-        assertEquals(1, ((Number) JsonPath.read(paris, "$[1].total")).intValue());
-        assertEquals(List.of("1"), JsonPath.read(paris, "$[1].rows[*].key"));
-        assertEquals(List.of("1970", "John; Johnny", "Paris", "FR"), JsonPath.read(paris, "$[1].rows[0].values"),
+        assertEquals(1, ((Number) JsonPath.read(paris, "$[0].total")).intValue());
+        assertEquals(List.of("1"), JsonPath.read(paris, "$[0].rows[*].key"));
+        assertEquals(List.of("1970", "John; Johnny", "Paris", "FR"), JsonPath.read(paris, "$[0].rows[0].values"),
                 "only the matching address, with its own country");
-        assertEquals(1, ((Number) JsonPath.read(paris, "$[0].total")).intValue(), "the other group is not touched");
+        assertEquals(1, ((Number) JsonPath.read(paris, "$[1].total")).intValue(), "the other group is not touched");
 
         // Several values of one column are an OR.
-        assertEquals(1, ((Number) JsonPath.read(preview(fields("[\"Paris\",\"London\"]", "[]", "[]", "[]")), "$[1].total")).intValue());
-        assertEquals(0, ((Number) JsonPath.read(preview(fields("[\"Mumbai\"]", "[]", "[]", "[]")), "$[1].total")).intValue(), "a value nobody has");
+        assertEquals(1, ((Number) JsonPath.read(preview(fields("[\"Paris\",\"London\"]", "[]", "[]", "[]")), "$[0].total")).intValue());
+        assertEquals(0, ((Number) JsonPath.read(preview(fields("[\"Mumbai\"]", "[]", "[]", "[]")), "$[0].total")).intValue(), "a value nobody has");
 
         // A filter two levels down (country) leaves out the persons, and the addresses, without such a country.
         String fr = preview(fields("[]", "[\"FR\"]", "[]", "[]"));
-        assertEquals(1, ((Number) JsonPath.read(fr, "$[1].total")).intValue());
-        assertEquals("Paris", ((List<?>) JsonPath.read(fr, "$[1].rows[0].values")).get(2), "the London address has no FR country: left out");
+        assertEquals(1, ((Number) JsonPath.read(fr, "$[0].total")).intValue());
+        assertEquals("Paris", ((List<?>) JsonPath.read(fr, "$[0].rows[0].values")).get(2), "the London address has no FR country: left out");
 
         // Filters on two columns are an AND.
-        assertEquals(0, ((Number) JsonPath.read(preview(fields("[\"London\"]", "[\"FR\"]", "[]", "[]")), "$[1].total")).intValue(),
+        assertEquals(0, ((Number) JsonPath.read(preview(fields("[\"London\"]", "[\"FR\"]", "[]", "[]")), "$[0].total")).intValue(),
                 "London is a GB address");
-        assertEquals(1, ((Number) JsonPath.read(preview(fields("[\"London\"]", "[\"GB\"]", "[]", "[]")), "$[1].total")).intValue());
+        assertEquals(1, ((Number) JsonPath.read(preview(fields("[\"London\"]", "[\"GB\"]", "[]", "[]")), "$[0].total")).intValue());
 
         // A filter on the root's own column; a person without a value never matches.
-        assertEquals(1, ((Number) JsonPath.read(preview(fields("[]", "[]", "[\"1970\"]", "[]")), "$[1].total")).intValue());
+        assertEquals(1, ((Number) JsonPath.read(preview(fields("[]", "[]", "[\"1970\"]", "[]")), "$[0].total")).intValue());
 
         // Each group is filtered on its own columns.
         String entity = preview(fields("[]", "[]", "[]", "[\"ISIN2\"]"));
-        assertEquals(2, ((Number) JsonPath.read(entity, "$[1].total")).intValue(), "persons are not filtered by an entity filter");
-        assertEquals(List.of("ISIN2"), JsonPath.read(entity, "$[0].rows[0].values"));
+        assertEquals(2, ((Number) JsonPath.read(entity, "$[0].total")).intValue(), "persons are not filtered by an entity filter");
+        assertEquals(List.of("ISIN2"), JsonPath.read(entity, "$[1].rows[0].values"));
     }
 
     @Test
@@ -118,14 +118,14 @@ class GroupFilterTest {
 
         // The live XML and a stored data version both contain only what the filters keep.
         String xml = download(get("/api/format-templates/" + id + "/xml"));
-        assertTrue(xml.contains("<city>Paris</city>") && !xml.contains("London") && xml.contains("<tg_persons count=\"1\">"), xml);
+        assertTrue(xml.contains("<city>Paris</city>") && !xml.contains("London") && xml.contains("<persons count=\"1\">"), xml);
         String taken = asMaker(post("/api/data-versions?familyId=" + family));
-        assertEquals(1, ((Number) JsonPath.read(taken, "$.version.groups.tg_person")).intValue());
-        assertEquals(1, ((Number) JsonPath.read(taken, "$.version.groups.tg_entity")).intValue());
+        assertEquals(1, ((Number) JsonPath.read(taken, "$.version.groups.person")).intValue());
+        assertEquals(1, ((Number) JsonPath.read(taken, "$.version.groups.entity")).intValue());
         Number version = JsonPath.read(taken, "$.version.id");
         String stored = download(get("/api/data-versions/" + version + "/xml"));
         assertTrue(stored.contains("<city>Paris</city>") && !stored.contains("London") && !stored.contains("Maria"), stored);
-        assertFalse(stored.contains("tg_person person_id=\"2\""), "the person without a matching address is not in the version");
+        assertFalse(stored.contains("person person_id=\"2\""), "the person without a matching address is not in the version");
     }
 
     private String asMaker(MockHttpServletRequestBuilder request) throws Exception {

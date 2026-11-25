@@ -25,8 +25,8 @@ import java.util.TreeMap;
  *   <li>A <b>related</b> table is one whose foreign key points at a table of the group. Following the foreign keys
  *       downwards gives several levels. A table belongs to one group only: when it points at tables of two groups,
  *       the first group (in name order) takes it.</li>
- *   <li>XML names come from the table names: the group and its rows use the table name, sections add a plural
- *       ending. A related table's primary key (when it is one column) identifies its rows, so Synthesis can say
+ *   <li>XML names come from the table names, without the prefix all the tables share (cfg_dj_person and
+ *       cfg_dj_entityaddress are written <person> and <entityaddress>); the group's section adds a plural ending. A related table's primary key (when it is one column) identifies its rows, so Synthesis can say
  *       "this row changed" instead of "one row removed, one added".</li>
  *   <li>Left out, and logged: foreign keys of several columns, foreign keys into another schema or to something that
  *       is not a primary or unique key (their table is then a child that cannot be followed, never a group of its own), a table
@@ -72,7 +72,7 @@ public final class TableGroupBuilder {
                 groups.add(group(root, entry.getValue().get(0), schemaOf.get(root), primaryKey, fksOf, claimed));
             }
         }
-        return List.copyOf(groups);
+        return friendlyNames(groups);
     }
 
     /** The foreign keys the module can follow, by table: one column, to another table of the same schema. */
@@ -131,5 +131,46 @@ public final class TableGroupBuilder {
         }
         String name = XmlNames.element(root);
         return new TableGroup(name, XmlNames.plural(name), schema, new TableGroup.Root(root, rootKey), List.copyOf(links));
+    }
+
+    /**
+     * Gives the groups and rows their XML names: the table name without the prefix every table of the groups shares, up to
+     * an underscore (cfg_dj_person, cfg_dj_entity → person, entity). Nothing is removed when it would leave a name empty.
+     */
+    private static List<TableGroup> friendlyNames(List<TableGroup> groups) {
+        List<String> tables = groups.stream().flatMap(group -> group.tables().stream()).map(table -> table.toLowerCase(Locale.ROOT)).toList();
+        int cut = sharedPrefix(tables);
+        List<TableGroup> named = new ArrayList<>();
+        for (TableGroup group : groups) {
+            String name = XmlNames.element(group.root().table().substring(cut));
+            List<TableGroup.Link> links = group.links().stream().map(link -> {
+                String element = XmlNames.element(link.table().substring(cut));
+                return new TableGroup.Link(link.table(), link.key(), link.refTable(), link.refColumn(), element, XmlNames.plural(element), link.id());
+            }).toList();
+            named.add(new TableGroup(name, XmlNames.plural(name), group.schema(), group.root(), links));
+        }
+        return List.copyOf(named);
+    }
+
+    /** The length of the longest prefix of every name that ends in an underscore and leaves each name something. */
+    private static int sharedPrefix(List<String> names) {
+        if (names.isEmpty()) {
+            return 0;
+        }
+        String first = names.get(0);
+        int common = first.length();
+        for (String name : names) {
+            int i = 0;
+            while (i < common && i < name.length() && name.charAt(i) == first.charAt(i)) {
+                i++;
+            }
+            common = i;
+        }
+        int cut = first.lastIndexOf('_', common - 1) + 1;
+        if (cut <= 0) {
+            return 0;
+        }
+        final int length = cut;
+        return names.stream().allMatch(name -> name.length() > length) ? length : 0;
     }
 }

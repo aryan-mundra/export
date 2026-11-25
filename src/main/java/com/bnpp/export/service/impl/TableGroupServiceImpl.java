@@ -139,7 +139,19 @@ public class TableGroupServiceImpl implements TableGroupService {
             List<String> ordered = group.tables().stream().filter(table -> needed.contains(table.toLowerCase(Locale.ROOT))).toList();
             selections.add(new GroupSelection(resolved, byTable, ordered));
         }
+        // The groups come in the order the list's columns first use them (the first column picked decides the first group).
+        selections.sort(java.util.Comparator.comparingInt(selection -> firstColumn(selection, fields)));
         return selections;
+    }
+
+    /** The place of the first column of the list that belongs to this group. */
+    private static int firstColumn(GroupSelection selection, List<FormatField> fields) {
+        for (int i = 0; i < fields.size(); i++) {
+            if (selection.group().has(fields.get(i).getSourceTable())) {
+                return i;
+            }
+        }
+        return Integer.MAX_VALUE;
     }
 
     private static void requireColumn(Map<String, SourceTable> tables, String table, String column, String what, List<String> problems) {

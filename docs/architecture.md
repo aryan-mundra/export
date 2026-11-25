@@ -37,8 +37,8 @@ com.bnpp.export
    matching address) and only the matching related rows are kept. Previews, the list XML and data versions all use them.
 3. **Preview and XML** (`GroupExportService`, `GroupRecordRepository`): a group's records are read root table first,
    in key order, 500 at a time; each related table is read once per batch with `WHERE foreign_key IN (...)` and
-   attached to its parent rows. The XML has one section per group, one element per record with its key as an
-   attribute, and related rows nested under it.
+   attached to its parent rows. The XML (`GroupXml`, described in `docs/xml-format.md`) has one section per group, one element per
+   record with its key as an attribute, and the related rows repeated inside it.
 4. **Data versions** (`DataVersionService`): a list's data at a moment. Each record is stored once as canonical JSON
    with a SHA-256 hash; a new version is stored only when the data changed.
 5. **Synthesis** (`SynthesisService`): two versions compared — records added, removed or changed counted in SQL by

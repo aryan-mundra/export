@@ -354,7 +354,7 @@ const API = {
 "tpl.xml": {
   module: "Lists", name: "Download a list as XML", method: "GET", path: "/api/format-templates/{id}/xml",
   headers: FILE, pathParams: { id: "list version id, e.g. 1" }, query: {}, req: null,
-  res: "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<Export list=\"Sanctions Screening\" version=\"1\" generatedAt=\"2026-11-25T10:00:00\">\n  <Persons count=\"3\">\n    <Person person_id=\"101\">…</Person>\n  </Persons>\n</Export>",
+  res: "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<Export list=\"Sanctions Screening\" listVersion=\"1\" generatedAt=\"2026-11-25T10:00:00\" records=\"5\">\n  <persons count=\"3\">\n    <person person_id=\"101\">…</person>\n  </persons>\n</Export>",
   status: [[200, "Attachment: Sanctions_Screening_v1_<timestamp>.xml"], [404, '"List version not found"'], [400, '"This list version has no columns"'], ST401],
   trig: "Click the 'XML' button in the saved-lists table.", comp: "app.js → <a download href=…> in templatesHtml() (browser navigation, no fetch)",
   ctl: "FormatTemplateController.xml(@PathVariable id) → FileResponses.temporary()", ifc: "GroupExportService.xml(templateId)", impl: "GroupExportServiceImpl.xml() / writeXml()",
@@ -503,7 +503,7 @@ const API = {
 },
 "dv.xml": {
   module: "Export", name: "Download a data version as XML", method: "GET", path: "/api/data-versions/{id}/xml",
-  headers: FILE, pathParams: { id: "data version id" }, query: {}, req: null, res: "<?xml …?>\n<Export list=\"Sanctions Screening\" dataVersion=\"2\" generatedAt=\"2026-11-25T09:40:00\">\n  <Persons count=\"3\"> … </Persons>\n  <Entities count=\"2\"> … </Entities>\n</Export>",
+  headers: FILE, pathParams: { id: "data version id" }, query: {}, req: null, res: "<?xml …?>\n<Export list=\"Sanctions Screening\" listVersion=\"1\" dataVersion=\"2\" generatedAt=\"2026-11-25T09:40:00\" records=\"5\">\n  <persons count=\"3\"> … </persons>\n  <entities count=\"2\"> … </entities>\n</Export>",
   status: [[200, "Attachment <List>_data_v<N>.xml"], [404, '"Data version not found"'], ST401],
   trig: "Click 'XML', 'Download XML', 'XML before' or 'XML after'.", comp: "app.js → <a download href=…>",
   ctl: "DataVersionController.xml(id) → FileResponses.temporary()", ifc: "DataVersionService.xml(id) / writeXml(id, out)", impl: "DataVersionServiceImpl.xml() / writeXml()",
@@ -908,7 +908,7 @@ function buildDoc(sel, table, row) {
 function layoutOf(sels) {
   return { groups: sels.map(sel => ({ name: sel.g.name, section: sel.g.section, keyColumn: sel.g.key, keyAttribute: sel.g.key, rootTable: sel.g.root,
     tables: sel.tables.map(t => { const link = sel.g.links.find(l => l.table === t); const headers = (sel.byTable[t] || []).filter(f => !isKey(sel.g, f)).map(f => f.headerName);
-      return link ? { table: t, parent: link.ref.split(".")[0], element: link.element, section: link.section, hasId: !!link.id, headers } : { table: t, parent: null, element: sel.g.name, section: sel.g.section, hasId: false, headers }; }) })) };
+      return link ? { table: t, parent: link.ref.split(".")[0], element: link.element, section: link.section, hasId: !!link.id, idColumn: link.id || null, headers } : { table: t, parent: null, element: sel.g.name, section: sel.g.section, hasId: false, headers }; }) })) };
 }
 
 /* ---- audit */
@@ -989,12 +989,18 @@ const elementName = n => (n || "").trim().replace(/[^A-Za-z0-9_.-]+/g, "_").repl
 function writeNode(lg, table, node, ind) {
   let x = "";
   const t = lg.tables.find(t => t.table === table);
+  const cols = new Set(t.headers.map(h => elementName(h).toLowerCase()));
   for (const h of t.headers) { const v = (node.values || {})[h]; if (v != null) x += `${ind}<${elementName(h)}>${xmlEsc(v)}</${elementName(h)}>\n`; }
-  lg.tables.filter(c => c.parent === table).forEach(c => { const rows = (node.tables || {})[c.table] || []; if (!rows.length) return; x += `${ind}<${c.section}>\n`; rows.forEach(r => { x += `${ind}  <${c.element}>\n${writeNode(lg, c.table, r, ind + "    ")}${ind}  </${c.element}>\n`; }); x += `${ind}</${c.section}>\n`; });
+  lg.tables.filter(c => c.parent === table).forEach(c => {
+    const el = cols.has(c.element.toLowerCase()) ? c.element + "_row" : c.element;
+    ((node.tables || {})[c.table] || []).forEach(r => {
+      x += `${ind}<${el}${r._id != null ? ` ${c.idColumn || "id"}="${xmlEsc(r._id)}"` : ""}>\n${writeNode(lg, c.table, r, ind + "  ")}${ind}</${el}>\n`;
+    });
+  });
   return x;
 }
 function versionXml(v) {
-  let x = `<?xml version="1.0" encoding="UTF-8"?>\n<Export list="${xmlEsc(v.listName)}" dataVersion="${v.number}" generatedAt="${v.createdAt}">\n`;
+  let x = `<?xml version="1.0" encoding="UTF-8"?>\n<Export list="${xmlEsc(v.listName)}" listVersion="${v.templateVersion}" dataVersion="${v.number}" generatedAt="${v.createdAt}" records="${v.records}">\n`;
   v.layout.groups.forEach(lg => {
     x += `  <${lg.section} count="${v.groups[lg.name] || 0}">\n`;
     Object.keys(v.docs[lg.name] || {}).sort((a, b) => a.localeCompare(b, undefined, { numeric: true })).forEach(k => { x += `    <${lg.name} ${lg.keyAttribute}="${xmlEsc(k)}">\n${writeNode(lg, lg.rootTable, v.docs[lg.name][k].doc, "      ")}    </${lg.name}>\n`; });
@@ -1003,9 +1009,9 @@ function versionXml(v) {
   return x + "</Export>\n";
 }
 function liveXml(t) {
-  const fields = t.fields, sels = selections(fields);
-  const lay = layoutOf(sels);
-  let x = `<?xml version="1.0" encoding="UTF-8"?>\n<Export list="${xmlEsc(t.name)}" version="${t.versionNumber}" generatedAt="${nowIso()}">\n`;
+  const sels = selections(t.fields), lay = layoutOf(sels);
+  const total = sels.reduce((n, sel) => n + DB.source[sel.g.root].length, 0);
+  let x = `<?xml version="1.0" encoding="UTF-8"?>\n<Export list="${xmlEsc(t.name)}" listVersion="${t.versionNumber}" generatedAt="${nowIso()}" records="${total}">\n`;
   sels.forEach((sel, i) => { const lg = lay.groups[i]; const roots = DB.source[sel.g.root].slice().sort(byKey(sel.g)); x += `  <${lg.section} count="${roots.length}">\n`; roots.forEach(r => { x += `    <${lg.name} ${lg.keyAttribute}="${xmlEsc(r[sel.g.key])}">\n${writeNode(lg, lg.rootTable, buildDoc(sel, sel.g.root, r), "      ")}    </${lg.name}>\n`; }); x += `  </${lg.section}>\n`; });
   return x + "</Export>\n";
 }
