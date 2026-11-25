@@ -530,10 +530,8 @@ function tablePickerHtml(draft) {
         const buttons = group.tables.map(source => {
             const key = tableKey(source.table);
             const count = source.columns.filter(column => picked.has(fieldKey(source.table, column.name))).length;
-            const meta = source.root ? "root · key " + source.groupKey : "joined on " + source.keyColumn + " → " + source.joinsTo;
             return `<button type="button" class="table-option ${source.root ? "root" : "related"} ${key === state.activeTable ? "active" : ""}" data-pick-table="${esc(key)}" data-table-name="${esc((group.name + " " + source.table).toLowerCase())}">
                 <span class="table-name">${esc(source.table)}</span>
-                <span class="table-meta">${esc(meta)}</span>
                 ${count ? `<span class="table-count">${count}</span>` : ""}
             </button>`;
         }).join("");
