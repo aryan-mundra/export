@@ -65,6 +65,9 @@ Every per-machine setting is in the `config/` folder (see `config/README.md`): `
 
 - **A new group:** create its tables with their primary and foreign keys in the source schema. No code change and no
   file to edit; the List page shows it within a minute (`export.source.cache-seconds`).
+- **Demo subscribers:** with `export.demo-data: true` and no subscriber in the database, six demo subscribers (SUN, SHINE,
+  Vigilance, Actimize, NetReveal, Compliance Team) are added at start-up (`MockSubscriberSeeder`). Turn it off with
+  `export.demo-data: false`.
 - **A new endpoint:** add a method to the service interface, implement it in the Impl class, add a DTO for its
   response, and a one-line controller method.
 - **A new error case:** throw the matching exception from the service.

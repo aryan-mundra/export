@@ -11,6 +11,16 @@ import java.util.List;
  */
 public interface SubscriberService {
 
+    /** The formats the module can write. XML is the only one today. */
+    List<String> FORMATS = List.of("XML");
+
+    /** What a subscriber's scope and mode can be. */
+    List<String> SCOPES = List.of("ALL", "SANCTIONS", "WORLDCHECK", "PFA");
+    List<String> MODES = List.of("FULL", "DELTA");
+
+    /** The formats a subscriber can be given. */
+    List<String> formats();
+
     /** Every subscriber, optionally searched by name, endpoint or list. */
     List<SubscriberResponse> list(String query);
 

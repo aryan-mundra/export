@@ -27,7 +27,7 @@ script itself at start-up.
 | Table | One row per | Holds |
 |---|---|---|
 | `ver_export_user` | user | sign-in name, display name, password hash, role (MAKER / APPROVER) |
-| `ver_export_subscriber` | subscriber | name, delivery endpoint and its approval, the list it receives, active |
+| `ver_export_subscriber` | subscriber | name, format, scope, mode, business line, region, delivery endpoint and its approval, the list it receives, active |
 | `ver_export_template` | list version | name, version number, status (PENDING, APPROVED…), who submitted and reviewed it |
 | `ver_export_template_field` | column of a list version | group table and column, its name in the file, how the table joins its group |
 | `ver_export_template_filter` | value kept for a column | list version, table, column and one chosen value (several rows per column) |

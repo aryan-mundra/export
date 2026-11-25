@@ -34,6 +34,9 @@ leave it alone). **Right-click → Properties → Connection** shows host (`loca
 To start again from empty module tables later, run `db/postgres/reset-export-tables.sql`, then the schema script again.
 Neither touches the source tables.
 
+Run it again after updating the module: it only adds what is missing (a table, or the subscriber columns format, scope,
+mode, business line and region) and never touches data.
+
 ### 3. Put the dump in `db/dumps`
 
 Copy the dump file into `db/dumps` in the project folder, next to its `README.md`. Dumps are never committed (they hold

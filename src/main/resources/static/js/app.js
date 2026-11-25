@@ -20,7 +20,12 @@ const state = {
     templateStep: "columns",
     groupPreview: null,
     /** The open filter dialog: which column, the values offered, and the ones ticked. */
-    filterEdit: null
+    filterEdit: null,
+    /** The formats a subscriber can be given. */
+    formats: null,
+    /** The open send page of the Export section (null: the tabs are shown). */
+    xpDialog: null,
+    exportMessage: null
 };
 
 const pages = ["dashboard", "export", "history", "subscribers", "templates", "approvals"];
@@ -48,6 +53,10 @@ function pageFromHash() {
 
 async function navigate() {
     state.page = pageFromHash();
+    if (state.page !== "export") {
+        state.xpDialog = null;
+        state.exportMessage = null;
+    }
     document.querySelectorAll(".nav a").forEach(link => {
         const current = link.dataset.page === state.page
             || (state.page === "subscriber-new" && link.dataset.page === "subscribers");
@@ -61,7 +70,7 @@ async function navigate() {
     try {
         await refresh();
         render();
-        if (state.page === "export") startExportPage();
+        if (state.page === "export" && !state.xpDialog) startExportPage();
         void main.offsetWidth;
         main.classList.add("is-entering");
         schedulePoll();
@@ -74,10 +83,10 @@ async function refresh() {
     if (state.page === "dashboard") {
         state.dashboard = await api("/api/dashboard");
     } else if (state.page === "subscribers") {
-        [state.subscribers, state.templates] = await Promise.all([
-            api("/api/subscribers?q=" + encodeURIComponent(state.search.subscribers)), api("/api/format-templates")]);
+        [state.subscribers, state.templates, state.formats] = await Promise.all([
+            api("/api/subscribers?q=" + encodeURIComponent(state.search.subscribers)), api("/api/format-templates"), api("/api/subscribers/formats")]);
     } else if (state.page === "subscriber-new") {
-        state.templates = await api("/api/format-templates");
+        [state.templates, state.formats] = await Promise.all([api("/api/format-templates"), api("/api/subscribers/formats")]);
     } else if (state.page === "history") {
         state.jobs = await loadJobs();
         if (state.openJobId) state.jobDetail = await api("/api/jobs/" + state.openJobId);
@@ -294,10 +303,46 @@ function fileActions(detail, file) {
 
 /* ---------- Subscribers ---------- */
 
+const SUBSCRIBER_SCOPES = ["ALL", "SANCTIONS", "WORLDCHECK", "PFA"];
+const SUBSCRIBER_MODES = ["FULL", "DELTA"];
+
+/** The formats a subscriber can be given (loaded from the server; XML is the one the module writes). */
+function formatChoices() {
+    return state.formats && state.formats.length ? state.formats : ["XML"];
+}
+
+/** A subscriber's formats, one or more, such as XML or CSV,XML. */
+function ownFormats(value) {
+    return String(value || "").split(",").map(part => part.trim()).filter(Boolean);
+}
+
+function formatCell(value) {
+    return `<span class="fmt-cell">${ownFormats(value).map(format => `<span class="fmt-${esc(format)}">${esc(format)}</span>`).join("")}</span>`;
+}
+
+function formatBoxes(name, selected) {
+    const on = new Set(ownFormats(selected));
+    return `<span class="add-formats" role="group" aria-label="Formats">${formatChoices().map(format => {
+        const ticked = on.has(format) || (!on.size && format === formatChoices()[0]);
+        return `<label class="xp-fmt fmt-${esc(format)}${ticked ? " on" : ""}"><input type="checkbox" name="${name}" value="${esc(format)}" ${ticked ? "checked" : ""}> ${esc(format)}</label>`;
+    }).join("")}</span>`;
+}
+
+function select(name, values, selected) {
+    return `<select name="${name}">${values.map(value => `<option ${value === selected ? "selected" : ""}>${esc(value)}</option>`).join("")}</select>`;
+}
+
+const SUBSCRIBER_NOTE = "Format, mode, scope, business line and region are recorded for each subscriber. Today every subscriber receives the whole list, every record of every group, as an XML file.";
+
 function subscribersHtml() {
     const rows = state.subscribers.map(subscriber => `<tr>
         <td>${subscriber.id}</td>
         <td>${esc(subscriber.name)}</td>
+        <td>${formatCell(subscriber.formatType)}</td>
+        <td>${esc(subscriber.exportMode)}</td>
+        <td>${esc(subscriber.scope)}</td>
+        <td>${esc(subscriber.businessLine || "—")}</td>
+        <td>${esc(subscriber.region || "—")}</td>
         <td>${esc(subscriber.cftEndpoint || "—")}</td>
         <td>${subscriber.templateName ? esc(subscriber.templateName) : '<span class="error-text">None</span>'}</td>
         <td>${subscriber.lastFileName ? `<a class="file-link" href="/api/subscribers/${subscriber.id}/last-file" download="${esc(subscriber.lastFileName)}">${esc(subscriber.lastFileName)}</a>` : "—"}</td>
@@ -312,10 +357,10 @@ function subscribersHtml() {
             <a class="btn-primary" href="#/subscribers/new">Add subscriber</a>
         </div>`;
     return `
-        ${head("Recipients", "Subscribers", "Who receives a list and where it is delivered. Each subscriber receives the whole list, as XML.", tools)}
+        ${head("Recipients", "Subscribers", "Who receives a file, in which formats, and where it is delivered.", tools)}
         <section class="table-card">
             <table>
-                <thead><tr><th>ID</th><th>Name</th><th>Delivery</th><th>List</th><th>Last file</th><th>Active</th><th></th></tr></thead>
+                <thead><tr><th>ID</th><th>Name</th><th>Format</th><th>Mode</th><th>Scope</th><th>Business line</th><th>Region</th><th>Delivery</th><th>List</th><th>Last file</th><th>Active</th><th></th></tr></thead>
                 <tbody>${rows}</tbody>
             </table>
             ${state.subscribers.length ? "" : '<div class="empty">No subscribers found.</div>'}
@@ -324,14 +369,22 @@ function subscribersHtml() {
 
 function subscriberNewHtml() {
     return `
-        ${head("Recipients", "Add subscriber", "Choose the list it receives and where the file is delivered.", `<a class="btn-ghost" href="#/subscribers">Back to subscribers</a>`)}
+        ${head("Recipients", "Add subscriber", "Choose the formats, the list, and where the file is delivered.", `<a class="btn-ghost" href="#/subscribers">Back to subscribers</a>`)}
         <section class="export-card subscriber-card">
             <form id="add-form" class="subscriber-form">
                 <div class="subscriber-grid">
                     <label class="span-2">Subscriber name<input name="name" placeholder="Subscriber name" required autofocus></label>
-                    <label class="span-2">List<select name="templateId" required>${templateOptions(null)}</select></label>
+                    <div class="field">
+                        <span class="field-label">Formats</span>
+                        ${formatBoxes("formatType", formatChoices()[0])}
+                    </div>
+                    <label>List<select name="templateId" required>${templateOptions(null)}</select></label>
+                    <label>Scope${select("scope", SUBSCRIBER_SCOPES, "ALL")}</label>
+                    <label>Mode${select("exportMode", SUBSCRIBER_MODES, "FULL")}</label>
+                    <label>Business line<input name="businessLine" placeholder="Business line"></label>
+                    <label>Region<input name="region" placeholder="Region"></label>
                     <label class="span-2">Delivery endpoint<input name="cftEndpoint" placeholder="Delivery endpoint"></label>
-                    <p class="muted span-2" style="margin:0">The subscriber receives the whole list, every record of every group, as XML.</p>
+                    <p class="muted span-2" style="margin:0">${SUBSCRIBER_NOTE}</p>
                 </div>
                 <div class="modal-actions">
                     <a class="btn-ghost" href="#/subscribers">Cancel</a>
@@ -343,15 +396,22 @@ function subscriberNewHtml() {
 
 function openEdit(subscriber) {
     if (!subscriber) return;
+    const options = (values, selected) => values.map(value => `<option ${value === selected ? "selected" : ""}>${esc(value)}</option>`).join("");
     document.getElementById("modal-root").innerHTML = `
         <div class="modal-back" id="modal-back">
             <form class="modal" id="edit-form">
                 <h2>Edit subscriber</h2>
                 <input type="hidden" name="id" value="${subscriber.id}">
                 <label>Name<input name="name" value="${esc(subscriber.name)}" required></label>
+                <label>Usual formats${formatBoxes("formatType", subscriber.formatType)}</label>
                 <label>List<select name="templateId" required>${templateOptions(subscriber.templateFamilyId)}</select></label>
+                <label>Scope<select name="scope">${options(SUBSCRIBER_SCOPES, subscriber.scope)}</select></label>
+                <label>Mode<select name="exportMode">${options(SUBSCRIBER_MODES, subscriber.exportMode)}</select></label>
+                <label>Business line<input name="businessLine" value="${esc(subscriber.businessLine || "")}"></label>
+                <label>Region<input name="region" value="${esc(subscriber.region || "")}"></label>
                 <label>Delivery endpoint<input name="cftEndpoint" value="${esc(subscriber.cftEndpoint || "")}"></label>
                 <label class="check"><input type="checkbox" name="active" ${subscriber.active ? "checked" : ""}> Active</label>
+                <p class="muted small-note">${SUBSCRIBER_NOTE}</p>
                 <div class="modal-actions">
                     <button class="btn-ghost" id="edit-cancel" type="button">Cancel</button>
                     <button class="btn-primary" type="submit">Save</button>
@@ -1105,6 +1165,11 @@ async function onSubmit(event) {
                 method: adding ? "POST" : "PUT",
                 body: {
                     name: form.get("name"),
+                    formatType: form.getAll("formatType").join(","),
+                    scope: form.get("scope"),
+                    exportMode: form.get("exportMode"),
+                    businessLine: form.get("businessLine"),
+                    region: form.get("region"),
                     cftEndpoint: form.get("cftEndpoint"),
                     templateId: Number(form.get("templateId")) || null,
                     active: adding ? true : form.get("active") === "on"
@@ -1695,24 +1760,27 @@ function xp() {
 }
 
 function exportHtml() {
+    if (state.xpDialog) return dialogHtml();
     const view = xp();
     const tab = (name, text) => `<button type="button" role="tab" class="xp-tab ${view.tab === name ? "active" : ""}" aria-selected="${view.tab === name}" data-xp-tab="${name}">${text}</button>`;
     return `
-        ${head("Delivery", "Export", "Send the latest data of a list, or any of its stored versions, and compare versions.")}
+        ${head("Delivery", "Export", "Export the latest data of a list, or any of its earlier versions, and compare versions.")}
+        ${state.exportMessage ? `<div class="banner">${state.exportMessage}</div>` : ""}
         <nav class="xp-tabs" role="tablist">${tab("latest", "Export Latest")}${tab("previous", "Previous Versions")}${tab("synthesis", "Synthesis")}</nav>
         <div id="xp-body">${xpBodyHtml()}</div>`;
 }
 
 function xpBodyHtml() {
     const view = xp();
-    if (view.tab === "previous") return sendPanelHtml() + previousHtml();
+    if (view.tab === "previous") return previousHtml();
     if (view.tab === "synthesis") return synthesisHtml();
-    return sendPanelHtml() + latestHtml();
+    return latestHtml();
 }
 
 function renderXp() {
     const body = document.getElementById("xp-body");
-    if (body) body.innerHTML = xpBodyHtml();
+    if (state.xpDialog) renderDialog();
+    else if (body) body.innerHTML = xpBodyHtml();
 }
 
 async function startExportPage() {
@@ -1751,10 +1819,10 @@ function latestHtml() {
     const rows = view.lists.map(list => `<tr>
             <td><strong>${esc(list.name)}</strong></td>
             <td class="muted">${list.latest ? "v" + list.latest.number + " · " + when(list.latest.createdAt) + " · " + num(list.latest.records) + " records" : "No data version yet"}</td>
-            <td class="actions"><button type="button" class="btn-primary btn-small" data-export-now="${list.familyId}" ${view.busy ? "disabled" : ""}>Export now</button></td>
+            <td class="actions"><button type="button" class="btn-primary btn-small" data-xp-export="${list.familyId}">Export</button></td>
         </tr>`).join("");
     return `<section class="table-card xp-card">
-            <p class="muted" style="padding:12px 16px 0">Export now reads the list's current data from its table groups and stores it as a data version (or reuses the newest one when nothing changed), then lets you choose who receives it.</p>
+            <p class="muted" style="padding:12px 16px 0">Export reads the list's current data from its table groups and stores it as a data version (or reuses the newest one when nothing changed), then lets you tick the subscribers who receive it.</p>
             <table><thead><tr><th>List</th><th>Newest data version</th><th></th></tr></thead>
             <tbody>${rows || '<tr><td colspan="3" class="muted">No list yet. Create one on the List page.</td></tr>'}</tbody></table>
         </section>`;
@@ -1770,7 +1838,7 @@ function previousHtml() {
             <td>${groupCounts(version)}</td>
             <td class="actions">
                 <a class="btn-ghost btn-small" href="/api/data-versions/${version.id}/xml" download>XML</a>
-                <button type="button" class="btn-primary btn-small" data-send-version="${version.id}">Send</button>
+                <button type="button" class="btn-primary btn-small" data-xp-send="${version.id}">Send</button>
             </td>
         </tr>`).join("");
     return `<section class="table-card xp-card">
@@ -1787,56 +1855,193 @@ function groupCounts(version) {
 }
 
 /** The send panel: who receives the version (ticked: the subscribers of its list), the review, then Send. */
-function sendPanelHtml() {
-    const send = xp().send;
-    if (!send) return "";
-    const v = send.version;
-    const subscribers = (xp().subscribers || []).map(s => `<label class="column-option">
-            <input type="checkbox" data-send-subscriber="${s.id}" ${send.chosen.has(s.id) ? "checked" : ""}>
-            <span class="column-name">${esc(s.name)}</span>
-            <span class="column-type">${s.templateFamilyId === v.familyId ? "this list" : esc(s.templateName || "other list")}</span>
-        </label>`).join("");
-    const review = send.review ? `<table>
-            <thead><tr><th>Subscriber</th><th>File</th><th>Records</th><th>Endpoint</th></tr></thead>
-            <tbody>${send.review.subscribers.map(row => `<tr><td>${esc(row.name)}</td><td>XML</td><td>${num(row.records)}</td><td class="muted">${esc(row.endpoint || "—")}</td></tr>`).join("")}</tbody>
-        </table>` : "";
-    return `<section class="export-card send-panel">
-            <div class="syn-title">
-                <h2>Send ${esc(v.listName)} · data version ${v.number}</h2>
-                <span class="muted">${num(v.records)} records · ${groupCounts(v)}</span>
-                <span class="spacer"></span>
-                <a class="btn-ghost btn-small" href="/api/data-versions/${v.id}/xml" download>Download XML</a>
-                <button type="button" class="btn-ghost btn-small" data-send-cancel>Cancel</button>
+const SEND_PAGE = 10;
+
+/** The send page: the version that was prepared, then every active subscriber to tick, then one Send button. */
+function dialogHtml() {
+    const d = state.xpDialog;
+    if (!d) return "";
+    const previous = d.kind === "previous";
+    const backLabel = previous ? "Back to versions" : "Back to lists";
+    let lede = "Tick the subscribers who receive this version, or download it.";
+    if (d.step === "checking") lede = "Reading the current data and preparing a version.";
+    if (d.step === "error") lede = "This export could not be prepared.";
+    let body;
+    if (d.step === "checking") {
+        body = `<div class="xp-checking"><span class="spinner" aria-hidden="true"></span> Checking ${esc(d.name || "this list")} for data changes…</div>`;
+    } else if (d.step === "error") {
+        body = `<div class="banner banner-error">${esc(d.error)}</div>`;
+    } else {
+        const v = d.version;
+        const outcome = d.kind === "latest"
+            ? (d.created && v.number === 1
+                ? `<div class="review-callout good"><strong>First export of this list.</strong> Data version ${v.number} was created.</div>`
+                : d.created
+                ? `<div class="review-callout good"><strong>The data changed.</strong> New data version ${v.number} was created.</div>`
+                : `<div class="review-callout"><strong>No change in the data.</strong> The existing data version ${v.number} is exported again.</div>`)
+            : "";
+        body = `${outcome}
+            <div class="xp-version-card">
+                <span class="ver-chip big">v${v.number}</span>
+                <span>${num(v.records)} records · ${groupCounts(v)} · created ${when(v.createdAt)}</span>
             </div>
-            <div class="field-label" style="margin-top:12px">Subscribers · ${num(send.chosen.size)} chosen · each receives the whole list as XML</div>
-            <div class="column-list send-subscribers">${subscribers || '<div class="empty">No active subscriber.</div>'}</div>
-            ${review}
-            <div class="builder-foot">
-                <span class="muted">${send.review ? "Reviewed: " + num(send.review.subscribers.length) + " file(s) of " + num(v.records) + " records" : "Review the send before it goes out."}</span>
-                <span class="spacer"></span>
-                <button type="button" class="btn-ghost" data-send-review ${send.chosen.size && !send.busy ? "" : "disabled"}>Review</button>
-                <button type="button" class="btn-primary" data-send-go ${send.review && !send.busy ? "" : "disabled"}>${send.busy ? "Sending…" : "Send to " + num(send.chosen.size) + " subscriber" + (send.chosen.size === 1 ? "" : "s")}</button>
-            </div>
-        </section>`;
+            <div class="xp-download"><span>Download</span><a class="btn-ghost btn-small" href="/api/data-versions/${v.id}/xml" download>XML</a></div>
+            ${sendSectionHtml()}`;
+    }
+    return `${head(previous ? "Previous versions" : "Export latest", esc(d.title), lede, `<button type="button" class="btn-ghost xp-back" data-xp-close>${backLabel}</button>`)}
+        <section class="panel xp-page">${body}</section>`;
 }
 
-async function openSend(versionId) {
+function sendSectionHtml() {
+    const d = state.xpDialog;
+    const send = d.send;
+    if (!send) return "";
+    if (send.loading) return '<div class="empty">Loading subscribers…</div>';
+    if (send.error) return `<div class="banner banner-error">${esc(send.error)}</div>`;
+    const rows = send.rows;
+    const onList = rows.filter(row => row.onList);
+    const matching = rows.filter(row => !send.q || row.name.toLowerCase().includes(send.q.toLowerCase()));
+    const page = matching.slice(send.page * SEND_PAGE, (send.page + 1) * SEND_PAGE);
+    const pages = Math.max(1, Math.ceil(matching.length / SEND_PAGE));
+    const list = page.map(row => {
+        const on = send.chosen.has(row.id);
+        return `<div class="xp-sub ${on ? "selected" : ""}">
+            <input type="checkbox" id="xp-sub-${row.id}" data-xp-sub="${row.id}" ${on ? "checked" : ""}>
+            <label class="xp-sub-name" for="xp-sub-${row.id}">${esc(row.name)}</label>
+            <span class="muted">${esc(row.scope)} · ${esc(row.exportMode)} · ${row.onList ? '<span class="tag tag-new">This list</span>' : esc(row.templateName || "No list")}</span>
+            <span class="xp-sub-format">${formatCell(row.formatType)}</span>
+        </div>`;
+    }).join("");
+    const allChosen = rows.length && send.chosen.size === rows.length;
+    const v = d.version;
+    return `<div class="xp-send">
+            <div class="xp-send-head">
+                <strong>Send to subscribers</strong>
+                <span class="muted">${num(send.chosen.size)} of ${num(rows.length)} selected</span>
+            </div>
+            <p class="xp-format-note">Each subscriber receives the whole version as one XML file. ${SUBSCRIBER_NOTE.split(". ")[0]}.</p>
+            <div class="xp-quick">
+                <button type="button" class="btn-ghost btn-small ${allChosen ? "on" : ""}" data-xp-sub-all="all">Select all (${num(rows.length)})</button>
+                <button type="button" class="btn-ghost btn-small" data-xp-sub-all="list" ${onList.length ? "" : "disabled"}>Only this list's (${num(onList.length)})</button>
+                <button type="button" class="btn-ghost btn-small" data-xp-sub-all="none" ${send.chosen.size ? "" : "disabled"}>Clear</button>
+            </div>
+            <div class="xp-send-options">
+                <label class="xp-format">Find a subscriber
+                    <input class="search" id="xp-sub-search" placeholder="Name" value="${esc(send.q)}" autocomplete="off" aria-label="Find a subscriber">
+                </label>
+            </div>
+            <div class="xp-subs">${list || '<div class="muted xp-add-none">No subscriber matches.</div>'}</div>
+            ${pages > 1 ? `<div class="pager"><span class="muted">Page ${send.page + 1} of ${pages} · ${num(matching.length)} subscribers</span>
+                <button type="button" class="btn-ghost btn-small" data-xp-sub-page="-1" ${send.page === 0 ? "disabled" : ""}>‹</button>
+                <button type="button" class="btn-ghost btn-small" data-xp-sub-page="1" ${send.page + 1 >= pages ? "disabled" : ""}>›</button></div>` : ""}
+            ${send.chosen.size ? `<div class="muted xp-send-summary">${num(send.chosen.size)} XML file${send.chosen.size === 1 ? "" : "s"} of ${num(v.records)} records</div>` : ""}
+            <div class="modal-actions">
+                <button type="button" class="btn-ghost" data-xp-close>${d.kind === "previous" ? "Back to versions" : "Back to lists"}</button>
+                <button type="button" class="btn-primary" data-xp-confirm ${send.chosen.size && !send.busy ? "" : "disabled"}>${send.busy ? "Sending…" : `Send v${v.number} to ${num(send.chosen.size)} subscriber${send.chosen.size === 1 ? "" : "s"}`}</button>
+            </div>
+        </div>`;
+}
+
+function renderDialog() {
+    const main = document.getElementById("main");
+    // Keep the cursor where it was when the page redraws (the search box).
+    const focused = document.activeElement && main.contains(document.activeElement) ? document.activeElement.id : null;
+    const caret = focused && document.activeElement.selectionStart;
+    main.innerHTML = dialogHtml();
+    const again = focused && document.getElementById(focused);
+    if (again) {
+        again.focus();
+        if (typeof caret === "number" && again.setSelectionRange) again.setSelectionRange(caret, caret);
+    }
+}
+
+function closeDialog() {
+    state.xpDialog = null;
+    if (state.page === "export") {
+        render();
+        startExportPage();
+    }
+}
+
+/** Export: reads the list's current data into a data version (or reuses the newest), then opens the send page. */
+async function openExportLatest(familyId) {
     const view = xp();
+    const list = view.lists.find(entry => entry.familyId === familyId);
+    const d = { kind: "latest", step: "checking", name: list.name, title: "Export " + list.name };
+    state.xpDialog = d;
+    state.exportMessage = null;
+    renderDialog();
     try {
-        if (!view.subscribers) view.subscribers = (await api("/api/subscribers")).filter(s => s.active);
-        const review = await api(`/api/data-versions/${versionId}/send/review`, { method: "POST", body: {} });
-        view.send = { version: review.version, chosen: new Set(review.defaultSubscribers), review: null, busy: false };
-        renderXp();
-        document.getElementById("xp-body").scrollIntoView({ block: "start", behavior: "smooth" });
+        const taken = await api("/api/data-versions?familyId=" + familyId, { method: "POST" });
+        if (state.xpDialog !== d) return;
+        Object.assign(d, { step: "ready", version: taken.version, created: taken.created });
+        view.lists = null;
+        view.versions = null;
+        renderDialog();
+        await loadSendRows();
+    } catch (error) {
+        if (state.xpDialog !== d) return;
+        Object.assign(d, { step: "error", error: error.message });
+        renderDialog();
+    }
+}
+
+/** Previous Versions → Send: opens the send page for a stored version. */
+async function openSendVersion(versionId) {
+    const view = xp();
+    const version = (view.versions || []).find(entry => entry.id === versionId);
+    if (!version) return;
+    state.xpDialog = { kind: "previous", step: "ready", version, title: `Send ${version.listName} data version ${version.number}` };
+    state.exportMessage = null;
+    renderDialog();
+    await loadSendRows();
+}
+
+/** Every active subscriber: those on the version's list first (ticked), then the others. */
+async function loadSendRows() {
+    const d = state.xpDialog;
+    d.send = { loading: true };
+    renderDialog();
+    try {
+        if (!state.formats) state.formats = await api("/api/subscribers/formats");
+        const all = (await api("/api/subscribers")).filter(item => item.active);
+        if (state.xpDialog !== d) return;
+        const rows = all.map(item => ({
+            id: item.id, name: item.name, formatType: item.formatType, scope: item.scope, exportMode: item.exportMode,
+            templateName: item.templateName, onList: item.templateFamilyId === d.version.familyId
+        })).sort((a, b) => (b.onList - a.onList) || a.name.localeCompare(b.name));
+        d.send = { rows, chosen: new Set(rows.filter(row => row.onList).map(row => row.id)), q: "", page: 0, busy: false };
+    } catch (error) {
+        if (state.xpDialog !== d) return;
+        d.send = { error: error.message };
+    }
+    renderDialog();
+}
+
+/** Reviews what the ticked subscribers get (nothing is sent yet), then sends it: one click for the user. */
+async function confirmSend() {
+    const d = state.xpDialog;
+    const send = d.send;
+    send.busy = true;
+    renderDialog();
+    try {
+        const ids = [...send.chosen];
+        const review = await api(`/api/data-versions/${d.version.id}/send/review`, { method: "POST", body: { subscriberIds: ids } });
+        const job = await api(`/api/data-versions/${d.version.id}/send`, { method: "POST", body: { subscriberIds: ids, reviewToken: review.reviewToken } });
+        state.exportMessage = `Send #${job.id} is sending ${esc(d.version.listName)} data version ${d.version.number} to ${num(ids.length)} subscriber${ids.length === 1 ? "" : "s"} (${num(d.version.records)} records each). <a href="#/history">View history</a>`;
+        toast("Send " + job.id + " started", "success");
+        closeDialog();
     } catch (error) {
         toast(error.message, "error");
+        send.busy = false;
+        if (state.xpDialog === d) renderDialog();
     }
 }
 
 /** Clicks on the Export page. Returns true when the click was one of its controls. */
 function onExportClick(target) {
-    const handled = "[data-xp-tab],[data-export-now],[data-send-version],[data-send-cancel],[data-send-subscriber],[data-send-review],"
-        + "[data-send-go],[data-syn-list],[data-syn-back],[data-syn-take],[data-syn-group],[data-syn-change],[data-syn-page],"
+    const handled = "[data-xp-tab],[data-xp-export],[data-xp-send],[data-xp-close],[data-xp-sub],[data-xp-sub-all],[data-xp-sub-page],"
+        + "[data-xp-confirm],[data-syn-list],[data-syn-back],[data-syn-take],[data-syn-group],[data-syn-change],[data-syn-page],"
         + "[data-syn-record],[data-syn-close]";
     if (!target.closest(handled)) return false;
     handleExportClick(target);
@@ -1852,69 +2057,43 @@ async function handleExportClick(target) {
         startExportPage();
         return;
     }
-    const exportNow = target.closest("[data-export-now]");
-    if (exportNow) {
-        view.busy = true;
-        renderXp();
-        try {
-            const taken = await api("/api/data-versions?familyId=" + exportNow.dataset.exportNow, { method: "POST" });
-            toast(taken.created ? "Data version " + taken.version.number + " stored" : "No change since version " + taken.version.number + ": sending that one", "info");
-            view.lists = null;
-            view.versions = null;
-            await loadLists();
-            view.busy = false;
-            await openSend(taken.version.id);
-        } catch (error) {
-            view.busy = false;
-            renderXp();
-            toast(error.message, "error");
+    const exportButton = target.closest("[data-xp-export]");
+    if (exportButton) return openExportLatest(Number(exportButton.dataset.xpExport));
+    const sendButton = target.closest("[data-xp-send]");
+    if (sendButton) return openSendVersion(Number(sendButton.dataset.xpSend));
+    if (target.closest("[data-xp-close]")) return closeDialog();
+    const send = state.xpDialog && state.xpDialog.send;
+    if (send && send.rows) {
+        const box = target.closest("[data-xp-sub]");
+        if (box) {
+            const id = Number(box.dataset.xpSub);
+            if (box.checked) send.chosen.add(id); else send.chosen.delete(id);
+            return renderDialog();
         }
-        return;
-    }
-    const sendVersion = target.closest("[data-send-version]");
-    if (sendVersion) return openSend(Number(sendVersion.dataset.sendVersion));
-    if (target.closest("[data-send-cancel]")) {
-        view.send = null;
-        return renderXp();
-    }
-    const box = target.closest("[data-send-subscriber]");
-    if (box && view.send) {
-        const id = Number(box.dataset.sendSubscriber);
-        if (box.checked) view.send.chosen.add(id); else view.send.chosen.delete(id);
-        view.send.review = null;
-        return renderXp();
-    }
-    if (target.closest("[data-send-review]") && view.send) {
-        try {
-            view.send.review = await api(`/api/data-versions/${view.send.version.id}/send/review`, { method: "POST", body: { subscriberIds: [...view.send.chosen] } });
-        } catch (error) {
-            toast(error.message, "error");
+        const all = target.closest("[data-xp-sub-all]");
+        if (all) {
+            const mode = all.dataset.xpSubAll;
+            send.chosen = new Set(mode === "all" ? send.rows.map(row => row.id) : mode === "list" ? send.rows.filter(row => row.onList).map(row => row.id) : []);
+            return renderDialog();
         }
-        return renderXp();
-    }
-    if (target.closest("[data-send-go]") && view.send && view.send.review) {
-        view.send.busy = true;
-        renderXp();
-        try {
-            const job = await api(`/api/data-versions/${view.send.version.id}/send`, {
-                method: "POST",
-                body: { subscriberIds: view.send.review.subscribers.map(row => row.subscriberId), reviewToken: view.send.review.reviewToken }
-            });
-            view.send = null;
-            renderXp();
-            toast("Send " + job.id + " started: follow it in History", "success");
-        } catch (error) {
-            view.send.busy = false;
-            renderXp();
-            toast(error.message, "error");
+        const pager = target.closest("[data-xp-sub-page]");
+        if (pager) {
+            send.page = Math.max(0, send.page + Number(pager.dataset.xpSubPage));
+            return renderDialog();
         }
-        return;
+        if (target.closest("[data-xp-confirm]") && !send.busy) return confirmSend();
     }
     onSynthesisClick(target);
 }
 
 /** Inputs on the Export page. Returns true when the input was one of its controls. */
 function onExportInput(target) {
+    if (target.id === "xp-sub-search" && state.xpDialog && state.xpDialog.send) {
+        state.xpDialog.send.q = target.value;
+        state.xpDialog.send.page = 0;
+        renderDialog();
+        return true;
+    }
     if (target.matches("[data-xp-family]")) {
         const view = xp();
         view.familyId = Number(target.value);

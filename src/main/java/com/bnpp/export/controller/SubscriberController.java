@@ -32,6 +32,12 @@ public class SubscriberController {
         this.jobs = jobs;
     }
 
+    /** The formats a subscriber can be given. */
+    @GetMapping("/formats")
+    public List<String> formats() {
+        return subscribers.formats();
+    }
+
     @GetMapping
     public List<SubscriberResponse> list(@RequestParam(required = false) String q) {
         return subscribers.list(q);

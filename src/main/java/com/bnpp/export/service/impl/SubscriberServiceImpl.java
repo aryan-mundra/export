@@ -4,6 +4,7 @@ import com.bnpp.export.dto.SubscriberRequest;
 import com.bnpp.export.dto.SubscriberResponse;
 import com.bnpp.export.entity.DeliveryRecord;
 import com.bnpp.export.entity.SubscriberProfile;
+import com.bnpp.export.exception.BadRequestException;
 import com.bnpp.export.exception.ConflictException;
 import com.bnpp.export.exception.ResourceNotFoundException;
 import com.bnpp.export.repository.DeliveryRepository;
@@ -15,6 +16,7 @@ import com.bnpp.export.service.SubscriberService;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.stereotype.Service;
 
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
@@ -52,7 +54,8 @@ public class SubscriberServiceImpl implements SubscriberService {
         return subscribers.findAllByOrderByIdAsc().stream()
                 .map(subscriber -> SubscriberResponse.from(subscriber, names.get(subscriber.getTemplateFamilyId()), lastDelivery.get(subscriber.getId())))
                 .filter(subscriber -> text.isEmpty() || contains(subscriber.name(), text) || contains(subscriber.cftEndpoint(), text)
-                        || contains(subscriber.templateName(), text))
+                        || contains(subscriber.templateName(), text) || contains(subscriber.businessLine(), text) || contains(subscriber.region(), text)
+                        || contains(subscriber.scope(), text))
                 .toList();
     }
 
@@ -64,6 +67,7 @@ public class SubscriberServiceImpl implements SubscriberService {
         }
         SubscriberProfile profile = new SubscriberProfile();
         profile.setName(name);
+        applySettings(profile, request);
         profile.setCftEndpoint(StringUtils.trimToNull(request.cftEndpoint()));
         profile.setTemplateFamilyId(request.templateId());
         templates.checkChoice(profile.getTemplateFamilyId());
@@ -84,6 +88,7 @@ public class SubscriberServiceImpl implements SubscriberService {
         String previousEndpoint = profile.getCftEndpoint();
         String before = summary(profile);
         profile.setName(name);
+        applySettings(profile, request);
         profile.setCftEndpoint(StringUtils.trimToNull(request.cftEndpoint()));
         if (request.templateId() != null) {
             profile.setTemplateFamilyId(request.templateId());
@@ -124,6 +129,43 @@ public class SubscriberServiceImpl implements SubscriberService {
         subscribers.deleteById(id);
     }
 
+    @Override
+    public List<String> formats() {
+        return FORMATS;
+    }
+
+    /**
+     * Format, scope, mode, business line and region of a request. A value that is not given keeps the subscriber's
+     * current one (XML, ALL and FULL for a new subscriber); one that is given must be a known value.
+     */
+    private static void applySettings(SubscriberProfile profile, SubscriberRequest request) {
+        if (StringUtils.isNotBlank(request.formatType())) {
+            List<String> chosen = Arrays.stream(request.formatType().split(",")).map(String::trim).filter(part -> !part.isEmpty())
+                    .map(part -> part.toUpperCase(Locale.ROOT)).distinct().toList();
+            for (String format : chosen) {
+                if (!FORMATS.contains(format)) {
+                    throw new BadRequestException("Format " + format + " is not available. Choose from " + String.join(", ", FORMATS));
+                }
+            }
+            profile.setFormatType(String.join(",", chosen));
+        }
+        profile.setScope(oneOf(request.scope(), SCOPES, profile.getScope(), "Scope"));
+        profile.setExportMode(oneOf(request.exportMode(), MODES, profile.getExportMode(), "Mode"));
+        profile.setBusinessLine(StringUtils.trimToNull(request.businessLine()));
+        profile.setRegion(StringUtils.trimToNull(request.region()));
+    }
+
+    private static String oneOf(String value, List<String> allowed, String current, String what) {
+        if (StringUtils.isBlank(value)) {
+            return current;
+        }
+        String upper = value.trim().toUpperCase(Locale.ROOT);
+        if (!allowed.contains(upper)) {
+            throw new BadRequestException(what + " " + value.trim() + " is not valid. Choose from " + String.join(", ", allowed));
+        }
+        return upper;
+    }
+
     private SubscriberProfile require(Long id) {
         return subscribers.findById(id).orElseThrow(() -> new ResourceNotFoundException("Subscriber not found"));
     }
@@ -135,7 +177,9 @@ public class SubscriberServiceImpl implements SubscriberService {
 
     /** The subscriber in one line, for the audit log. */
     private String summary(SubscriberProfile profile) {
-        return profile.getName() + ": endpoint " + (profile.getCftEndpoint() == null ? "none"
+        return profile.getName() + ": " + profile.getFormatType() + ", " + profile.getScope() + ", " + profile.getExportMode()
+                + (profile.getBusinessLine() == null ? "" : ", " + profile.getBusinessLine())
+                + (profile.getRegion() == null ? "" : ", " + profile.getRegion()) + ", endpoint " + (profile.getCftEndpoint() == null ? "none"
                 : profile.getCftEndpoint() + " (" + profile.getEndpointStatus() + ")")
                 + ", list " + Objects.toString(templates.templateName(profile.getTemplateFamilyId()), "none")
                 + (profile.isActive() ? ", active" : ", inactive");

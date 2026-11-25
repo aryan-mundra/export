@@ -12,7 +12,10 @@ import lombok.Data;
 
 import java.time.LocalDateTime;
 
-/** Who receives a list and where its file is delivered. Every subscriber receives the whole list, as XML. */
+/**
+ * Who receives a list and where its file is delivered, with the settings recorded for it (format, scope, mode, business line
+ * and region). Every subscriber receives the whole list, as XML.
+ */
 @Data
 @Entity
 @Table(name = "ver_export_subscriber")
@@ -24,6 +27,22 @@ public class SubscriberProfile {
 
     @Column(nullable = false, unique = true)
     private String name;
+
+    /** The formats it usually receives, comma-separated (the module writes XML). */
+    @Column(nullable = false)
+    private String formatType = "XML";
+
+    /** ALL, SANCTIONS, WORLDCHECK or PFA. */
+    @Column(nullable = false)
+    private String scope = "ALL";
+
+    /** FULL or DELTA. */
+    @Column(nullable = false)
+    private String exportMode = "FULL";
+
+    private String businessLine;
+
+    private String region;
 
     private String cftEndpoint;
 

@@ -126,6 +126,90 @@ pre.j{background:#10201a;color:#c9ecd9;border-radius:8px;padding:10px 12px;overf
 .cat-tools{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px}.cat-tools select,.cat-tools input{width:auto;min-width:200px;margin:0}
 .er{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:10px}.er div{border:1px solid var(--line);border-radius:10px;padding:8px 10px;background:#fff;font-size:13px}.er b{display:block;font-family:ui-monospace,Menlo,monospace;color:var(--g2)}
 @media(max-width:900px){.shell{grid-template-columns:1fr}.sidebar{position:static;height:auto;flex-direction:row;flex-wrap:wrap}.sidebar-foot{margin:0;width:100%}.nav{display:flex;flex-wrap:wrap;gap:4px}.nav-label,.brand .prod{display:none}.login{grid-template-columns:1fr}.login-aside{padding:18px}.picker,.two,.syn-docs{grid-template-columns:1fr}.lane{grid-template-columns:1fr}main{padding:14px 12px 100px}.kv{grid-template-columns:1fr}}
+
+/* restored send page and format chips (the app's variable names, mapped) */
+:root{--green:var(--g);--green-soft:var(--gl);--muted:var(--mut)}
+
+/* --- Export send page and subscriber formats (restored) --- */
+.add-formats { display: inline-flex; align-items: center; gap: 6px; }
+.fmt-cell { display: inline-flex; align-items: center; gap: 8px; }
+.fmt-XML { color: #1d4ed8; font-weight: 700; }
+.fmt-CSV { color: #047857; font-weight: 700; }
+.subscriber-form .add-formats { min-height: 42px; align-items: center; }
+.spinner {
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    border: 2px solid #cfe7da;
+    border-top-color: var(--green);
+    animation: spin .7s linear infinite;
+}
+.tag-new { background: #e7f0fb; color: #1d4f91; }
+.ver-chip {
+    display: inline-block;
+    min-width: 36px;
+    padding: 2px 8px;
+    border-radius: 8px;
+    background: var(--green-soft);
+    border: 1px solid #c4ead4;
+    color: var(--green-dark);
+    font-family: var(--display);
+    font-weight: 700;
+    font-size: 14px;
+    text-align: center;
+}
+.ver-chip.big { font-size: 22px; padding: 4px 12px; }
+#xp-prev-list .xp-pager { padding: 6px 0; border: 0; }
+.xp-page .modal-actions { margin-top: 4px; }
+.xp-checking { display: flex; align-items: center; gap: 10px; padding: 8px 0; color: var(--muted); }
+.xp-version-card { display: flex; align-items: center; gap: 14px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 12px; background: #fbfcfb; }
+.xp-download { display: flex; align-items: center; gap: 8px; font-weight: 700; font-size: 14px; }
+.xp-download a { text-decoration: none; }
+.xp-send { display: flex; flex-direction: column; gap: 8px; border-top: 1px solid var(--line); padding-top: 12px; }
+.xp-send-head { display: flex; align-items: center; gap: 10px; }
+.xp-send-head .muted { margin-right: auto; }
+.xp-subs { display: flex; flex-direction: column; border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+.xp-sub {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1.2fr) minmax(0, 1fr) auto;
+    gap: 10px;
+    align-items: center;
+    padding: 8px 12px;
+    border-bottom: 1px solid #eef3f0;
+    font-size: 14px;
+    cursor: pointer;
+}
+.xp-sub:last-child { border-bottom: 0; }
+.xp-sub.selected { background: var(--green-soft); }
+.xp-sub input { accent-color: var(--green); margin: 0; }
+.xp-sub-name { font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.xp-send-options { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.3fr); gap: 10px; align-items: end; }
+.xp-format { display: flex; flex-direction: column; gap: 4px; font-size: 12px; font-weight: 700; color: var(--muted); }
+.xp-add-none { padding: 10px 12px; font-size: 13px; }
+.xp-quick { display: flex; gap: 6px; flex-wrap: wrap; }
+.xp-quick .btn-small.on { border-color: var(--green); background: var(--green-soft); }
+.xp-sub { grid-template-columns: auto minmax(0, 1fr) minmax(0, 1.3fr) auto; cursor: default; }
+.xp-sub .xp-sub-name { cursor: pointer; }
+.xp-sub-format { display: flex; align-items: center; gap: 6px; justify-content: flex-end; }
+.xp-format-note { margin: 0; font-size: 13px; color: var(--muted); }
+.xp-fmt {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    border: 1px solid #d3e2da;
+    border-radius: 999px;
+    padding: 3px 8px;
+    font-size: 12px;
+    font-weight: 700;
+    background: #fff;
+    color: #8aa094;
+    cursor: pointer;
+}
+.xp-fmt input { margin: 0; }
+.xp-fmt.on.fmt-CSV { color: #047857; border-color: #86c9a8; background: #f0faf4; }
+.xp-fmt.on.fmt-XML { color: #1d4ed8; border-color: #bfdbfe; background: #eff6ff; }
+.xp-send-summary { font-size: 13px; }
+.xp-page{padding:0}.good{background:var(--gl)}
 </style>
 </head>
 <body class="signed-out">
@@ -491,13 +575,13 @@ const API = {
   headers: HG, pathParams: {}, query: { familyId: "list family id (required)" }, req: null,
   res: { version: { id: 3, familyId: 1, number: 3, records: 5, groups: { Person: 3, Entity: 2 }, listName: "Sanctions Screening" }, created: true },
   status: [[200, "created=true (new version) or created=false (data unchanged: the newest version is returned)"], [400, '"… has no columns from the table groups" / duplicate root key'], [404, '"List not found"'], [503, "No group found / keys do not match the tables"], ST401],
-  trig: "Click 'Export now' (Export Latest) or 'Take a version now' (Synthesis).", comp: "app.js → handleExportClick() / takeSynthesisVersion()",
+  trig: "Click 'Export' (Export Latest) or 'Take a version now' (Synthesis).", comp: "app.js → openExportLatest() / takeSynthesisVersion()",
   ctl: "DataVersionController.take(@RequestParam familyId)", ifc: "DataVersionService.take(familyId)", impl: "DataVersionServiceImpl.take()",
   steps: ["templates.inUse(familyId) or else latest(familyId) → 404.", "tableGroups.selections(fields) → the groups and tables the list uses; empty → 400.", "Layout JSON built (groups, tables, XML names, headers) and fed into a SHA-256 fingerprint.", "For each group GroupRecordRepository.stream() reads root rows in key order, 500 at a time, children attached via IN(...) queries. Every record becomes a canonical JSON document (sorted keys, empty values dropped, child rows sorted by id or content), hashed with SHA-256; the hash is added to the fingerprint and the record is staged in a temp file (memory stays flat).", "If the fingerprint equals the newest version's fingerprint → return it with created=false and store NOTHING.", "Otherwise in ONE transaction: INSERT the version header (number = MAX+1 per list), batch-INSERT records 500 at a time; a repeated (group, key) → 400 'the root key must be unique'.", "Audit DATA_VERSION_CREATED."],
   repo: ["FormatTemplateService.inUse / latest / fields", "TableGroupService.selections", "GroupRecordRepository.stream (source tables)", "DataVersionRepository.findLatest / fingerprint / nextNumber / insert / insertRecords", "AuditService.template"],
   tbl: [["ver_export_template(+_field)", "SELECT"], ["cfg_dj_* source tables", "SELECT (read-only)"], ["ver_export_data_version", "SELECT latest, INSERT header"], ["ver_export_data_record", "INSERT one row per record (group_name, record_key, record_hash, doc)"], ["ver_export_audit", "INSERT"]],
   build: "TakeVersionResponse(DataVersionResponse, created).",
-  fe: "Toast 'Data version N stored' or 'No change since version N: sending that one'. Export Latest then opens the send panel for that version; Synthesis reloads its versions and summary.",
+  fe: "Export Latest opens the send page with 'First export…', 'The data changed…' or 'No change in the data…' and the subscribers to tick; Synthesis reloads its versions and summary.",
   logic: ["All groups of a list land in the same two tables: header row in ver_export_data_version; each Person / Entity record in ver_export_data_record keyed by (version_id, group_name, record_key). A record's related rows are nested inside its JSON 'doc'.", "Idempotent: taking a version twice without a data change stores nothing.", "Stored versions are immutable, so later source changes never alter what was sent."],
   rel: ["ver_export_data_record.version_id → ver_export_data_version.id (FK)", "ver_export_data_version.template_id → the list version whose columns were read (logical)", "UNIQUE (family_id, version_number)"], down: ["GET /api/format-templates + GET /api/data-versions (loadLists)", "POST /api/data-versions/{id}/send/review"]
 },
@@ -550,7 +634,7 @@ const API = {
   headers: HJ, pathParams: { id: "data version id" }, query: {}, req: { subscriberIds: [1, 2] },
   res: { version: { id: 2, number: 2, records: 5, listName: "Sanctions Screening" }, subscribers: [{ subscriberId: 1, name: "Credit Suisse CFT", records: 5, endpoint: "cft://cs.example/inbox", onThisList: true }], defaultSubscribers: [1, 2], reviewToken: "9c1f0e5b7a…(sha-256)" },
   status: [[200, "Review + token"], [400, '"<name> is not active"'], [404, "Data version / subscriber not found"], ST401],
-  trig: "Export now / Send on a stored version (default selection, empty body) and 'Review' in the send panel (chosen ids).", comp: "app.js → openSend() / handleExportClick()",
+  trig: "The user clicks Send on the send page: the review is requested with the ticked subscribers, then the send follows.", comp: "app.js → confirmSend()",
   ctl: "DataVersionController.review(id, @RequestBody(required=false) SendRequest)", ifc: "SendService.review(dataVersionId, subscriberIds)", impl: "SendServiceImpl.review()",
   steps: ["dataVersions.get(id) → 404.", "Default recipients = ACTIVE subscribers whose template_family_id equals the version's family.", "Chosen ids are de-duplicated and sorted; each must exist (404) and be active (400).", "One row per subscriber: the whole version's record count, endpoint, onThisList.", "reviewToken = SHA-256('send|versionId|number|records|id:endpoint|…') — it changes if the version, the recipients or any endpoint changes."],
   repo: ["DataVersionRepository.find", "SubscriberRepository.findByActiveTrueOrderByIdAsc / findById"], tbl: [["ver_export_data_version", "SELECT"], ["ver_export_subscriber", "SELECT"]],
@@ -562,7 +646,7 @@ const API = {
   headers: HJ, pathParams: { id: "data version id" }, query: {}, req: { subscriberIds: [1, 2], reviewToken: "9c1f0e5b7a…" },
   res: { id: 3, familyId: 1, listName: "Sanctions Screening", dataVersionId: 2, dataVersionNumber: 2, subscriberIds: "1,2", triggeredBy: "List Manager", status: "PENDING", totalSubscribers: 2, createdAt: "2026-11-25T10:05:00" },
   status: [[200, "Queued; runs in the background"], [400, '"Choose at least one subscriber"'], [409, '"The review is out of date. Review the send again."'], ST401],
-  trig: "Click 'Send to N subscribers'.", comp: "app.js → handleExportClick() branch [data-send-go]",
+  trig: "Click 'Send vN to N subscribers' (right after the review call).", comp: "app.js → confirmSend()",
   ctl: "DataVersionController.send(id, @RequestBody SendRequest)", ifc: "SendService.send(dataVersionId, request)", impl: "SendServiceImpl.send()",
   steps: ["Re-runs review() with the submitted ids and compares reviewToken → 409 when different.", "No subscribers → 400.", "INSERT ExportJob: status PENDING, subscriber_ids 'a,b', total_subscribers, triggered_by = signed-in display name, data_version_id/number, template id/version.", "Audit EXPORT_QUEUED.", "runService.run(jobId) is called through the Spring proxy, so @Async executes it on the 'export-job-' thread pool; the signed-in user is propagated (DelegatingSecurityContextAsyncTaskExecutor).", "Returns immediately with the PENDING job."],
   repo: ["ExportJobRepository.save", "AuditService.job", "ExportRunService.run(jobId)  (@Async)"], tbl: [["ver_export_job", "INSERT"], ["ver_export_audit", "INSERT"]],
@@ -706,14 +790,15 @@ const ACTIONS = {
 
 /* --- Export ------------------------------------------------------------------------------------------ */
 "xp.tab": { t: "Export tab (Export Latest / Previous Versions / Synthesis)", ty: "Click", trig: "Click a tab.", comp: "handleExportClick() → render() → startExportPage()", apis: ["tpl.list", "dv.list"], par: true, fe: "Lists and versions are loaded only if not yet cached in state.xp (first visit); Previous Versions additionally loads the versions of the selected list (GET /api/data-versions?familyId=…).", note: "On later clicks the tab switch is frontend-only (cached state)." },
-"xp.exportNow": { t: "Export now", ty: "Click", trig: "Click 'Export now' for a list.", comp: "handleExportClick() branch [data-export-now]", apis: ["dv.take", "tpl.list", "dv.list", "send.review"], fe: "1) take: toast 'Data version N stored' or 'No change…'. 2) loadLists(): tpl.list + dv.list in parallel. 3) openSend(): review with the default subscribers → the send panel opens with them ticked.", note: "Steps 2's two calls run in parallel; everything else is sequential." },
+"xp.exportNow": { t: "Export", ty: "Click", trig: "Click 'Export' for a list.", comp: "openExportLatest()", apis: ["dv.take", "sub.list"], fe: "1) take: the page shows 'First export…', 'The data changed…' or 'No change in the data…'. 2) loadSendRows(): every active subscriber is listed, those on the list first and ticked.", note: "The lists and versions are reloaded when you go back to the tabs (GET /api/format-templates and GET /api/data-versions)." },
 "xp.family": { t: "List selector (Previous Versions)", ty: "Change", trig: "Choose a list.", comp: "onExportInput() [data-xp-family]", apis: ["dv.list"], fe: "Shows 'Loading versions…' then the table of data versions of that list." },
-"xp.sendVersion": { t: "Send (a stored version)", ty: "Click", trig: "Click 'Send' on a row.", comp: "openSend(versionId)", apis: ["send.review"], fe: "The subscriber list is fetched once if needed (GET /api/subscribers) and the send panel opens with the version's default subscribers ticked.", note: "First time only: sub.list is called to fill the panel." },
+"xp.sendVersion": { t: "Send (a stored version)", ty: "Click", trig: "Click 'Send' on a row.", comp: "openSendVersion()", apis: ["sub.list"], fe: "The send page opens for that stored version with the subscribers of its list ticked." },
 "xp.xml": { t: "XML / Download XML", ty: "Click", trig: "Click.", comp: "<a download>", apis: ["dv.xml"], fe: "Browser downloads the frozen XML of that data version. (The mock shows a preview.)" },
-"send.cancel": { t: "Cancel send panel", ty: "Click", trig: "Click Cancel.", comp: "[data-send-cancel]", apis: [], only: "Sets state.xp.send = null and re-renders." },
-"send.subscriber": { t: "Subscriber checkbox", ty: "Click", trig: "Tick/untick.", comp: "[data-send-subscriber]", apis: [], only: "Updates the chosen set and clears the previous review, so the review token cannot be reused for a different selection." },
-"send.review": { t: "Review", ty: "Click", trig: "Click 'Review'.", comp: "[data-send-review]", apis: ["send.review"], fe: "Fills the review table and enables 'Send to N subscribers'." },
-"send.go": { t: "Send to N subscribers", ty: "Click", trig: "Click.", comp: "[data-send-go]", apis: ["send.send", "job.run"], fe: "Toast 'Send N started'. The second step is the background worker, not an HTTP call; follow it in History.", note: "Sequence: HTTP request returns PENDING immediately; the worker then runs asynchronously." },
+"send.cancel": { t: "Back to lists / versions", ty: "Click", trig: "Click.", comp: "closeDialog()", apis: ["tpl.list", "dv.list"], par: true, fe: "Closes the send page and reloads the tabs." },
+"send.subscriber": { t: "Subscriber checkbox", ty: "Click", trig: "Tick/untick.", comp: "[data-xp-sub]", apis: [], only: "Updates the set of chosen subscribers and redraws the page; the button text shows how many files will be sent." },
+"send.quick": { t: "Select all / Only this list's / Clear", ty: "Click", trig: "Click.", comp: "[data-xp-sub-all]", apis: [], only: "Changes which subscribers are ticked, from the list already loaded." },
+"send.search": { t: "Find a subscriber", ty: "Input", trig: "Typing.", comp: "onExportInput() #xp-sub-search", apis: [], only: "Filters the loaded subscribers by name in the browser." },
+"send.go": { t: "Send vN to N subscribers", ty: "Click", trig: "Click.", comp: "confirmSend()", apis: ["send.review", "send.send", "job.run"], fe: "One click for the user: the review is requested first (its token proves the send matches), then the send is started. A banner links to History. The last step is the background worker, not an HTTP call.", note: "Sequence: review → send → the worker runs asynchronously." },
 "syn.list": { t: "Pick a list for Synthesis", ty: "Click", trig: "Click a row.", comp: "selectSynthesisList() → loadSynthesisVersions() → loadSynthesisSummary()", apis: ["dv.list", "dv.summary", "dv.records"], fe: "Versions load, the two newest are preselected (after = newest, before = previous), then the summary and the first group's changed records load one after the other." },
 "syn.back": { t: "Back to lists", ty: "Click", trig: "Click.", comp: "[data-syn-back]", apis: [], only: "Sets syn.familyId = null and re-renders the list table from cached state." },
 "syn.take": { t: "Take a version now", ty: "Click", trig: "Click.", comp: "takeSynthesisVersion()", apis: ["dv.take", "tpl.list", "dv.list", "dv.summary", "dv.records"], fe: "Toast; lists reload; versions reload; the newest two are compared again.", par: false },
@@ -793,7 +878,7 @@ const F = (t, c, h) => ({ sourceTable: t, sourceColumn: c, headerName: h || c })
 const nowIso = (offsetMin = 0) => new Date(Date.now() - offsetMin * 60000).toISOString().slice(0, 19);
 
 function resetDb() {
-  SEQ = { tpl: 10, sub: 10, dv: 10, job: 10, file: 10, audit: 1 };
+  SEQ = { tpl: 10, sub: 20, dv: 10, job: 10, file: 10, audit: 1 };
   DB = {
     users: [{ username: "maker", password: "Regliss-maker", displayName: "List Manager", role: "MAKER" }, { username: "approver", password: "Regliss-approver", displayName: "List Owner", role: "APPROVER" }],
     source: seedSource(), templates: [], subscribers: [], versions: [], jobs: [], files: [], deliveries: [], audit: [], mode: "h2"
@@ -803,10 +888,14 @@ function resetDb() {
       fields: [F("cfg_dj_person", "person_id"), F("cfg_dj_person", "birth_year"), F("cfg_dj_entityname", "first_name"), F("cfg_dj_entityaddress", "city"), F("cfg_dj_addresscountry", "country"), F("cfg_dj_entity", "entity_id"), F("cfg_dj_entity", "legal_name"), F("cfg_dj_entitysanctionsreferencevalue", "sanction_code")] },
     { id: 3, familyId: 3, name: "Watchlist Persons", versionNumber: 1, active: false, status: "PENDING", createdBy: "maker", createdByName: "List Manager", createdAt: nowIso(60), reviewedBy: null, reviewedByName: null, reviewedAt: null, reviewComment: null,
       fields: [F("cfg_dj_person", "person_id"), F("cfg_dj_person", "nationality"), F("cfg_dj_entityname", "last_name")] });
+  const demo = (id, name, scope, mode, line, region, list, extra = {}) => ({ id, name, formatType: "XML", scope, exportMode: mode, businessLine: line, region, cftEndpoint: "http://cft.local/inbox/" + name.toLowerCase().replace(/ /g, "-"), templateFamilyId: list, endpointStatus: "APPROVED", active: true, createdAt: nowIso(4000), updatedAt: nowIso(4000), failNext: false, ...extra });
   DB.subscribers.push(
-    { id: 1, name: "Credit Suisse CFT", cftEndpoint: "cft://cs.example/inbox", templateFamilyId: 1, endpointStatus: "APPROVED", active: true, createdAt: nowIso(4000), updatedAt: nowIso(4000), failNext: false },
-    { id: 2, name: "BNP Compliance Hub", cftEndpoint: "cft://bnp.example/hub", templateFamilyId: 1, endpointStatus: "APPROVED", active: true, createdAt: nowIso(4000), updatedAt: nowIso(4000), failNext: false },
-    { id: 3, name: "Nordea Screening", cftEndpoint: "cft://nordea.example/in", templateFamilyId: 1, endpointStatus: "PENDING", active: false, createdAt: nowIso(30), updatedAt: nowIso(30), failNext: false });
+    demo(1, "SUN", "ALL", "FULL", "CIB", "EMEA", 1, { failNext: false }),
+    demo(2, "SHINE", "SANCTIONS", "DELTA", "Retail", "APAC", 1),
+    demo(3, "Vigilance", "WORLDCHECK", "FULL", "Compliance", "Europe", null),
+    demo(4, "Actimize", "PFA", "FULL", "Financial Security", "Americas", null),
+    demo(5, "NetReveal", "SANCTIONS", "FULL", "Financial Security", "EMEA", null),
+    demo(6, "Compliance Team", "ALL", "FULL", "Compliance", "Global", null, { cftEndpoint: "cft://compliance.example/in", endpointStatus: "PENDING", active: false }));
   // Version 1 from the seed data, then source data changes, then version 2 (so Synthesis has something to compare).
   const v1 = takeVersion(1, "List Manager", nowIso(2000));
   mutateSource(true);
@@ -1107,11 +1196,11 @@ function synthesisRecord(afterId, beforeId, group, key) {
 function subResponse(s) {
   const last = DB.deliveries.filter(d => d.subscriberId === s.id).slice(-1)[0];
   const tpl = latestTpl(s.templateFamilyId);
-  return { id: s.id, name: s.name, cftEndpoint: s.cftEndpoint, templateFamilyId: s.templateFamilyId, templateName: tpl ? tpl.name : null, endpointStatus: s.endpointStatus, active: s.active, lastDeliveryStatus: last ? last.status : null, lastFileName: last ? last.fileName : null, lastDeliveredAt: last ? last.deliveredAt : null, createdAt: s.createdAt, updatedAt: s.updatedAt };
+  return { id: s.id, name: s.name, formatType: s.formatType, scope: s.scope, exportMode: s.exportMode, businessLine: s.businessLine, region: s.region, cftEndpoint: s.cftEndpoint, templateFamilyId: s.templateFamilyId, templateName: tpl ? tpl.name : null, endpointStatus: s.endpointStatus, active: s.active, lastDeliveryStatus: last ? last.status : null, lastFileName: last ? last.fileName : null, lastDeliveredAt: last ? last.deliveredAt : null, createdAt: s.createdAt, updatedAt: s.updatedAt };
 }
 function listSubscribers(q) {
   const n = (q || "").trim().toLowerCase();
-  return DB.subscribers.map(subResponse).filter(s => !n || [s.name, s.cftEndpoint, s.templateName].some(v => v && v.toLowerCase().includes(n)));
+  return DB.subscribers.map(subResponse).filter(s => !n || [s.name, s.cftEndpoint, s.templateName, s.businessLine, s.region, s.scope].some(v => v && v.toLowerCase().includes(n)));
 }
 function checkChoice(fid) {
   if (!fid) throw new ApiErr(400, "Choose a list for this subscriber");
@@ -1125,12 +1214,17 @@ function gateEndpoint(p, prev) {
   if (DB.subscribers.some(s => s !== p && s.cftEndpoint && s.cftEndpoint.toLowerCase() === e.toLowerCase() && s.endpointStatus === "APPROVED")) p.endpointStatus = "APPROVED";
   else { p.endpointStatus = "PENDING"; p.active = false; }
 }
+function settings(r, cur) {
+  const pick = (v, list, d, what) => { if (!v) return d; const u = String(v).trim().toUpperCase(); if (!list.includes(u)) throw new ApiErr(400, what + " " + v + " is not valid. Choose from " + list.join(", ")); return u; };
+  return { formatType: pick(r.formatType, ["XML"], cur.formatType || "XML", "Format"), scope: pick(r.scope, ["ALL", "SANCTIONS", "WORLDCHECK", "PFA"], cur.scope || "ALL", "Scope"),
+    exportMode: pick(r.exportMode, ["FULL", "DELTA"], cur.exportMode || "FULL", "Mode"), businessLine: (r.businessLine || "").trim() || null, region: (r.region || "").trim() || null };
+}
 function createSubscriber(r) {
   if (!r.name || !r.name.trim()) throw new ApiErr(400, "name must not be blank");
   const name = r.name.trim();
   if (DB.subscribers.some(s => s.name.toLowerCase() === name.toLowerCase())) throw new ApiErr(409, "A subscriber named " + name + " already exists");
   checkChoice(r.templateId);
-  const p = { id: SEQ.sub++, name, cftEndpoint: (r.cftEndpoint || "").trim() || null, templateFamilyId: r.templateId, endpointStatus: "APPROVED", active: r.active !== false, createdAt: nowIso(), updatedAt: nowIso(), failNext: /fail/i.test(name) };
+  const p = { id: SEQ.sub++, name, ...settings(r, {}), cftEndpoint: (r.cftEndpoint || "").trim() || null, templateFamilyId: r.templateId, endpointStatus: "APPROVED", active: r.active !== false, createdAt: nowIso(), updatedAt: nowIso(), failNext: /fail/i.test(name) };
   gateEndpoint(p, null); DB.subscribers.push(p);
   audit("SUBSCRIBER", p.id, "SUBSCRIBER_CREATED", p.name, null, p.id);
   return subResponse(p);
@@ -1139,7 +1233,7 @@ function updateSubscriber(id, r) {
   const p = DB.subscribers.find(s => s.id === Number(id)); if (!p) throw new ApiErr(404, "Subscriber not found");
   const name = (r.name || "").trim(); if (!name) throw new ApiErr(400, "name must not be blank");
   if (DB.subscribers.some(s => s.id !== p.id && s.name.toLowerCase() === name.toLowerCase())) throw new ApiErr(409, "A subscriber named " + name + " already exists");
-  const prev = p.cftEndpoint; p.name = name; p.cftEndpoint = (r.cftEndpoint || "").trim() || null;
+  const prev = p.cftEndpoint; p.name = name; Object.assign(p, settings(r, p)); p.cftEndpoint = (r.cftEndpoint || "").trim() || null;
   if (r.templateId) { checkChoice(r.templateId); p.templateFamilyId = r.templateId; }
   if (r.active != null) p.active = r.active;
   gateEndpoint(p, prev); p.updatedAt = nowIso();
@@ -1343,18 +1437,24 @@ function templateOptions(sel) {
   const fs = templateFamilies(); if (!fs.length) return '<option value="">No list yet</option>';
   return `<option value="">Choose a list…</option>` + fs.map(f => `<option value="${f.id}" ${String(f.id) === String(sel) ? "selected" : ""} ${f.inUse ? "" : "disabled"}>${esc(f.name)}${f.inUse ? "" : " (" + ({ PENDING: "waiting for approval", CHANGES_REQUESTED: "changes requested", REJECTED: "rejected" }[f.latest.status] || "not approved") + ")"}</option>`).join("");
 }
+const FMT = v => `<span class="fmt-cell"><span class="fmt-XML">${esc(v || "XML")}</span></span>`;
+const opts = (list, sel) => list.map(v => `<option ${v === sel ? "selected" : ""}>${v}</option>`).join("");
+const SCOPES = ["ALL", "SANCTIONS", "WORLDCHECK", "PFA"], MODES = ["FULL", "DELTA"];
+const SUB_NOTE = "Format, mode, scope, business line and region are recorded for each subscriber. Today every subscriber receives the whole list, every record of every group, as an XML file.";
 function subscribersHtml() {
-  const rows = listSubscribers(S.search.subscribers).map(s => `<tr><td>${s.id}</td><td>${esc(s.name)}</td><td>${esc(s.cftEndpoint || "—")}</td><td>${s.templateName ? esc(s.templateName) : '<span class="error-text">None</span>'}</td><td>${s.lastFileName ? `<a class="file-link" data-act="sub.lastFile" data-id="${s.id}">${esc(s.lastFileName)}</a>` : "—"}</td><td><span class="pill ${s.active ? "pill-on" : "pill-off"}">${s.endpointStatus === "PENDING" ? "Endpoint pending" : s.active ? "Active" : "Inactive"}</span></td><td class="actions"><button class="btn-edit btn-small" data-act="sub.edit" data-id="${s.id}">Edit</button> <button class="btn-delete btn-small" data-act="sub.delete" data-id="${s.id}">Delete</button></td></tr>`).join("");
-  return head("Recipients", "Subscribers", "Who receives a list and where it is delivered. Each subscriber receives the whole list, as XML.", `<div class="page-tools"><input class="search" data-act="sub.search" placeholder="Search subscribers..." value="${esc(S.search.subscribers)}"><button class="btn-primary" data-act="sub.add">Add subscriber</button></div>`) +
-    `<section class="table-card"><table><thead><tr><th>ID</th><th>Name</th><th>Delivery</th><th>List</th><th>Last file</th><th>Active</th><th></th></tr></thead><tbody>${rows}</tbody></table>${rows ? "" : '<div class="empty">No subscribers found.</div>'}</section>`;
+  const rows = listSubscribers(S.search.subscribers).map(s => `<tr><td>${s.id}</td><td>${esc(s.name)}</td><td>${FMT(s.formatType)}</td><td>${esc(s.exportMode)}</td><td>${esc(s.scope)}</td><td>${esc(s.businessLine || "—")}</td><td>${esc(s.region || "—")}</td><td>${esc(s.cftEndpoint || "—")}</td><td>${s.templateName ? esc(s.templateName) : '<span class="error-text">None</span>'}</td><td>${s.lastFileName ? `<a class="file-link" data-act="sub.lastFile" data-id="${s.id}">${esc(s.lastFileName)}</a>` : "—"}</td><td><span class="pill ${s.active ? "pill-on" : "pill-off"}">${s.endpointStatus === "PENDING" ? "Endpoint pending" : s.active ? "Active" : "Inactive"}</span></td><td class="actions"><button class="btn-edit btn-small" data-act="sub.edit" data-id="${s.id}">Edit</button> <button class="btn-delete btn-small" data-act="sub.delete" data-id="${s.id}">Delete</button></td></tr>`).join("");
+  return head("Recipients", "Subscribers", "Who receives a file, in which formats, and where it is delivered.", `<div class="page-tools"><input class="search" data-act="sub.search" placeholder="Search subscribers..." value="${esc(S.search.subscribers)}"><button class="btn-primary" data-act="sub.add">Add subscriber</button></div>`) +
+    `<section class="table-card"><table><thead><tr><th>ID</th><th>Name</th><th>Format</th><th>Mode</th><th>Scope</th><th>Business line</th><th>Region</th><th>Delivery</th><th>List</th><th>Last file</th><th>Active</th><th></th></tr></thead><tbody>${rows}</tbody></table>${rows ? "" : '<div class="empty">No subscribers found.</div>'}</section>`;
 }
 function subscriberNewHtml() {
-  return head("Recipients", "Add subscriber", "Choose the list it receives and where the file is delivered.", `<button class="btn-ghost" data-act="sub.addCancel">Back to subscribers</button>`) +
-    `<section class="export-card" style="max-width:640px"><label>Subscriber name<input id="f-name" data-act="sub.form" placeholder="Subscriber name (include 'fail' to simulate a failing endpoint)"></label><label>List<select id="f-list" data-act="sub.form">${templateOptions(null)}</select></label><label>Delivery endpoint<input id="f-endpoint" data-act="sub.form" placeholder="cft://host/inbox"></label>
-    <p class="muted">The subscriber receives the whole list, every record of every group, as XML. A new endpoint stays "pending" until a List Owner approves it.</p><div class="modal-actions"><button class="btn-ghost" data-act="sub.addCancel">Cancel</button><button class="btn-primary" data-act="sub.create">Add subscriber</button></div></section>`;
+  return head("Recipients", "Add subscriber", "Choose the formats, the list, and where the file is delivered.", `<button class="btn-ghost" data-act="sub.addCancel">Back to subscribers</button>`) +
+    `<section class="export-card" style="max-width:720px"><label>Subscriber name<input id="f-name" data-act="sub.form" placeholder="Subscriber name (include 'fail' to simulate a failing endpoint)"></label><label>Formats<span class="add-formats"><label class="xp-fmt fmt-XML on"><input type="checkbox" id="f-format" data-act="sub.form" checked> XML</label></span></label>
+    <label>List<select id="f-list" data-act="sub.form">${templateOptions(null)}</select></label><label>Scope<select id="f-scope" data-act="sub.form">${opts(SCOPES, "ALL")}</select></label><label>Mode<select id="f-mode" data-act="sub.form">${opts(MODES, "FULL")}</select></label>
+    <label>Business line<input id="f-line" data-act="sub.form" placeholder="Business line"></label><label>Region<input id="f-region" data-act="sub.form" placeholder="Region"></label><label>Delivery endpoint<input id="f-endpoint" data-act="sub.form" placeholder="cft://host/inbox"></label>
+    <p class="muted">${SUB_NOTE} A new endpoint stays "pending" until a List Owner approves it.</p><div class="modal-actions"><button class="btn-ghost" data-act="sub.addCancel">Cancel</button><button class="btn-primary" data-act="sub.create">Add subscriber</button></div></section>`;
 }
 function editModal(s) {
-  $("#modal-root").innerHTML = `<div class="modal-back"><div class="modal"><h2>Edit subscriber</h2><label>Name<input id="e-name" data-act="sub.form" value="${esc(s.name)}"></label><label>List<select id="e-list" data-act="sub.form">${templateOptions(s.templateFamilyId)}</select></label><label>Delivery endpoint<input id="e-endpoint" data-act="sub.form" value="${esc(s.cftEndpoint || "")}"></label><label style="display:flex;gap:8px;align-items:center"><input type="checkbox" id="e-active" data-act="sub.form" ${s.active ? "checked" : ""}> Active</label><div class="modal-actions"><button class="btn-ghost" data-act="sub.editCancel">Cancel</button><button class="btn-primary" data-act="sub.editSave">Save</button></div></div></div>`;
+  $("#modal-root").innerHTML = `<div class="modal-back"><div class="modal"><h2>Edit subscriber</h2><label>Name<input id="e-name" data-act="sub.form" value="${esc(s.name)}"></label><label>Usual formats<span class="add-formats"><label class="xp-fmt fmt-XML on"><input type="checkbox" id="e-format" data-act="sub.form" checked> XML</label></span></label><label>List<select id="e-list" data-act="sub.form">${templateOptions(s.templateFamilyId)}</select></label><label>Scope<select id="e-scope" data-act="sub.form">${opts(SCOPES, s.scope)}</select></label><label>Mode<select id="e-mode" data-act="sub.form">${opts(MODES, s.exportMode)}</select></label><label>Business line<input id="e-line" data-act="sub.form" value="${esc(s.businessLine || "")}"></label><label>Region<input id="e-region" data-act="sub.form" value="${esc(s.region || "")}"></label><label>Delivery endpoint<input id="e-endpoint" data-act="sub.form" value="${esc(s.cftEndpoint || "")}"></label><label style="display:flex;gap:8px;align-items:center"><input type="checkbox" id="e-active" data-act="sub.form" ${s.active ? "checked" : ""}> Active</label><div class="modal-actions"><button class="btn-ghost" data-act="sub.editCancel">Cancel</button><button class="btn-primary" data-act="sub.editSave">Save</button></div></div></div>`;
 }
 
 /* ------------------------------------------------------------------ Approvals */
@@ -1434,27 +1534,40 @@ function groupPreviewHtml() {
 /* ------------------------------------------------------------------ Export page */
 const groupCounts = v => Object.entries(v.groups || {}).map(([g, c]) => esc(g) + " " + num(c)).join(" · ");
 function exportHtml() {
+  if (S.xp.send) return sendPageHtml();
   const x = S.xp, tab = (n, t) => `<button class="xp-tab ${x.tab === n ? "active" : ""}" data-act="xp.tab" data-tab="${n}" data-label="Tab: ${t}">${t}</button>`;
-  return head("Delivery", "Export", "Send the latest data of a list, or any of its stored versions, and compare versions.") + `<nav class="xp-tabs">${tab("latest", "Export Latest")}${tab("previous", "Previous Versions")}${tab("synthesis", "Synthesis")}</nav>` + (x.tab === "synthesis" ? synthesisHtml() : sendPanelHtml() + (x.tab === "previous" ? previousHtml() : latestHtml()));
+  return head("Delivery", "Export", "Export the latest data of a list, or any of its earlier versions, and compare versions.") + (S.exportMessage ? `<div class="banner">${S.exportMessage}</div>` : "") + `<nav class="xp-tabs">${tab("latest", "Export Latest")}${tab("previous", "Previous Versions")}${tab("synthesis", "Synthesis")}</nav>` + (x.tab === "synthesis" ? synthesisHtml() : (x.tab === "previous" ? previousHtml() : latestHtml()));
 }
 function lists() { const fam = {}; DB.templates.forEach(t => { if (!fam[t.familyId] || t.versionNumber > fam[t.familyId].versionNumber) fam[t.familyId] = t; }); return Object.values(fam).sort((a, b) => a.name.localeCompare(b.name)).map(t => { const own = listVersions(t.familyId); return { familyId: t.familyId, name: t.name, versions: own.length, latest: own[0] || null, approved: !!inUse(t.familyId) }; }); }
 function latestHtml() {
-  const rows = lists().map(l => `<tr><td><strong>${esc(l.name)}</strong></td><td class="muted">${l.latest ? "v" + l.latest.number + " · " + when(l.latest.createdAt) + " · " + num(l.latest.records) + " records" : "No data version yet"}${l.approved ? "" : ' <span class="pill pill-wait">not approved yet · uses newest version</span>'}</td><td class="actions"><button class="btn-primary btn-small" data-act="xp.exportNow" data-id="${l.familyId}" data-label="Export now: ${esc(l.name)}">Export now</button></td></tr>`).join("");
-  return `<section class="table-card"><p class="muted" style="padding:12px 16px 0">Export now reads the list's current data from its table groups and stores it as a data version (or reuses the newest one when nothing changed), then lets you choose who receives it.</p><table><thead><tr><th>List</th><th>Newest data version</th><th></th></tr></thead><tbody>${rows}</tbody></table></section>`;
+  const rows = lists().map(l => `<tr><td><strong>${esc(l.name)}</strong></td><td class="muted">${l.latest ? "v" + l.latest.number + " · " + when(l.latest.createdAt) + " · " + num(l.latest.records) + " records" : "No data version yet"}${l.approved ? "" : ' <span class="pill pill-wait">not approved yet · uses newest version</span>'}</td><td class="actions"><button class="btn-primary btn-small" data-act="xp.exportNow" data-id="${l.familyId}" data-label="Export: ${esc(l.name)}">Export</button></td></tr>`).join("");
+  return `<section class="table-card"><p class="muted" style="padding:12px 16px 0">Export reads the list's current data from its table groups and stores it as a data version (or reuses the newest one when nothing changed), then lets you tick the subscribers who receive it.</p><table><thead><tr><th>List</th><th>Newest data version</th><th></th></tr></thead><tbody>${rows}</tbody></table></section>`;
 }
 function previousHtml() {
   const ls = lists(), x = S.xp; if (!x.familyId && ls.length) x.familyId = ls[0].familyId;
   const rows = listVersions(x.familyId).map(v => `<tr><td><strong>v${v.number}</strong></td><td class="muted">${when(v.createdAt)} · ${esc(v.createdBy)}</td><td>${groupCounts(v)}</td><td class="actions"><button class="btn-ghost btn-small" data-act="xp.xml" data-id="${v.id}">XML</button> <button class="btn-primary btn-small" data-act="xp.sendVersion" data-id="${v.id}">Send</button></td></tr>`).join("");
   return `<section class="table-card"><div class="xp-toolbar"><select data-act="xp.family" aria-label="List">${ls.map(l => `<option value="${l.familyId}" ${l.familyId === x.familyId ? "selected" : ""}>${esc(l.name)}</option>`).join("")}</select></div><table><thead><tr><th>Version</th><th>Stored</th><th>Records</th><th></th></tr></thead><tbody>${rows || '<tr><td colspan="4" class="muted">No data version yet. Use Export Latest to take one.</td></tr>'}</tbody></table></section>`;
 }
-function sendPanelHtml() {
-  const s = S.xp.send; if (!s) return ""; const v = s.version;
-  const subs = DB.subscribers.filter(x => x.active).map(x => `<label class="column-option"><input type="checkbox" data-act="send.subscriber" data-id="${x.id}" data-label="Subscriber ${esc(x.name)}" ${s.chosen.has(x.id) ? "checked" : ""}><span class="column-name">${esc(x.name)}</span><span class="column-type">${x.templateFamilyId === v.familyId ? "this list" : "other list"}</span></label>`).join("");
-  const review = s.review ? `<table><thead><tr><th>Subscriber</th><th>File</th><th>Records</th><th>Endpoint</th></tr></thead><tbody>${s.review.subscribers.map(r => `<tr><td>${esc(r.name)}</td><td>XML</td><td>${num(r.records)}</td><td class="muted">${esc(r.endpoint || "—")}</td></tr>`).join("")}</tbody></table>` : "";
-  return `<section class="export-card"><div class="syn-title" style="padding:0"><h2>Send ${esc(v.listName)} · data version ${v.number}</h2><span class="muted">${num(v.records)} records · ${groupCounts(v)}</span><span class="spacer"></span><button class="btn-ghost btn-small" data-act="xp.xml" data-id="${v.id}">Download XML</button><button class="btn-ghost btn-small" data-act="send.cancel">Cancel</button></div><div class="field-label">Subscribers · ${s.chosen.size} chosen</div><div class="column-list">${subs || '<div class="empty">No active subscriber.</div>'}</div>${review}
-  <div class="builder-foot"><span class="muted">${s.review ? "Reviewed: " + s.review.subscribers.length + " file(s) of " + num(v.records) + " records" : "Review the send before it goes out."}</span><span class="spacer"></span><button class="btn-ghost" data-act="send.review" ${s.chosen.size ? "" : "disabled"}>Review</button><button class="btn-primary" data-act="send.go" ${s.review ? "" : "disabled"}>Send to ${s.chosen.size} subscriber${s.chosen.size === 1 ? "" : "s"}</button></div></section>`;
+const SEND_PAGE = 10;
+function sendRows() { const v = S.xp.send.version; return DB.subscribers.filter(x => x.active).map(x => ({ ...subResponse(x), onList: x.templateFamilyId === v.familyId })).sort((a, b) => (b.onList - a.onList) || a.name.localeCompare(b.name)); }
+function sendPageHtml() {
+  const s = S.xp.send, v = s.version, rows = sendRows();
+  const shown = rows.filter(r => !s.q || r.name.toLowerCase().includes(s.q.toLowerCase()));
+  const outcome = s.kind === "latest" ? (s.created && v.number === 1 ? `<div class="review-callout good"><strong>First export of this list.</strong> Data version ${v.number} was created.</div>` : s.created ? `<div class="review-callout good"><strong>The data changed.</strong> New data version ${v.number} was created.</div>` : `<div class="review-callout"><strong>No change in the data.</strong> The existing data version ${v.number} is exported again.</div>`) : "";
+  const list = shown.slice(0, SEND_PAGE).map(r => `<div class="xp-sub ${s.chosen.has(r.id) ? "selected" : ""}"><input type="checkbox" id="xp-sub-${r.id}" data-act="send.subscriber" data-id="${r.id}" data-label="Subscriber ${esc(r.name)}" ${s.chosen.has(r.id) ? "checked" : ""}><label class="xp-sub-name" for="xp-sub-${r.id}">${esc(r.name)}</label><span class="muted">${esc(r.scope)} · ${esc(r.exportMode)} · ${r.onList ? '<span class="tag tag-new">This list</span>' : esc(r.templateName || "No list")}</span><span class="xp-sub-format">${FMT(r.formatType)}</span></div>`).join("");
+  const back = s.kind === "previous" ? "Back to versions" : "Back to lists";
+  return head(s.kind === "previous" ? "Previous versions" : "Export latest", s.kind === "previous" ? `Send ${esc(v.listName)} data version ${v.number}` : "Export " + esc(v.listName), "Tick the subscribers who receive this version, or download it.", `<button class="btn-ghost" data-act="send.cancel">${back}</button>`) +
+    `<section class="panel">${outcome}<div class="xp-version-card"><span class="ver-chip big">v${v.number}</span><span>${num(v.records)} records · ${groupCounts(v)} · created ${when(v.createdAt)}</span></div>
+    <div class="xp-download"><span>Download</span><button class="btn-ghost btn-small" data-act="xp.xml" data-id="${v.id}">XML</button></div>
+    <div class="xp-send"><div class="xp-send-head"><strong>Send to subscribers</strong><span class="muted">${s.chosen.size} of ${rows.length} selected</span></div>
+    <p class="xp-format-note">Each subscriber receives the whole version as one XML file. ${SUB_NOTE.split(". ")[0]}.</p>
+    <div class="xp-quick"><button class="btn-ghost btn-small" data-act="send.quick" data-m="all">Select all (${rows.length})</button><button class="btn-ghost btn-small" data-act="send.quick" data-m="list">Only this list's (${rows.filter(r => r.onList).length})</button><button class="btn-ghost btn-small" data-act="send.quick" data-m="none">Clear</button></div>
+    <div class="xp-send-options"><label class="xp-format">Find a subscriber<input class="search" id="xp-sub-search" data-act="send.search" placeholder="Name" value="${esc(s.q || "")}" autocomplete="off"></label></div>
+    <div class="xp-subs">${list || '<div class="muted xp-add-none">No subscriber matches.</div>'}</div>
+    ${s.chosen.size ? `<div class="muted xp-send-summary">${s.chosen.size} XML file${s.chosen.size === 1 ? "" : "s"} of ${num(v.records)} records</div>` : ""}
+    <div class="modal-actions"><button class="btn-ghost" data-act="send.cancel">${back}</button><button class="btn-primary" data-act="send.go" ${s.chosen.size ? "" : "disabled"}>Send v${v.number} to ${s.chosen.size} subscriber${s.chosen.size === 1 ? "" : "s"}</button></div></div></section>`;
 }
-function openSend(versionId) { const r = reviewSend(versionId); S.xp.send = { version: r.version, chosen: new Set(r.defaultSubscribers), review: null }; }
+function openSend(versionId, kind, created) { const r = reviewSend(versionId); S.xp.send = { version: r.version, chosen: new Set(r.defaultSubscribers), q: "", kind, created }; }
 
 /* --- Synthesis */
 function syn() { return S.xp.syn || (S.xp.syn = { familyId: null, after: null, before: null, summary: null, group: null, change: "CHANGES", q: "", offset: 0, page: null, detail: null, error: null }); }
@@ -1507,7 +1620,7 @@ function catalogHtml() {
 }
 
 /* ------------------------------------------------------------------ Handlers (simulated frontend behaviour) */
-function go(page) { S.page = page; render(); window.scrollTo(0, 0); }
+function go(page) { S.page = page; if (page !== "export") { S.exportMessage = null; S.xp.send = null; } render(); window.scrollTo(0, 0); }
 function fail(e) { if (e instanceof ApiErr) { toast(e.message, "error"); return "error"; } throw e; }
 const H = {
   "login.submit"() { const u = $("#l-user").value.trim().toLowerCase(), p = $("#l-pass").value; const err = $("#login-error"); err.hidden = true;
@@ -1548,14 +1661,15 @@ const H = {
   "appr.endpoint"(el) { try { approveEndpoint(el.dataset.id); toast("Delivery endpoint approved", "success"); render(); } catch (e) { return fail(e); } },
   /* export */
   "xp.tab"(el) { S.xp.tab = el.dataset.tab; render(); },
-  "xp.exportNow"(el) { try { const r = takeVersion(Number(el.dataset.id)); toast(r.created ? "Data version " + r.version.number + " stored" : "No change since version " + r.version.number + ": sending that one", "info"); openSend(r.version.id); render(); window.scrollTo(0, 0); } catch (e) { return fail(e); } },
+  "xp.exportNow"(el) { try { const r = takeVersion(Number(el.dataset.id)); S.exportMessage = null; openSend(r.version.id, "latest", r.created); render(); window.scrollTo(0, 0); } catch (e) { return fail(e); } },
   "xp.family"(el) { S.xp.familyId = Number(el.value); render(); },
-  "xp.sendVersion"(el) { try { openSend(Number(el.dataset.id)); render(); window.scrollTo(0, 0); } catch (e) { return fail(e); } },
+  "xp.sendVersion"(el) { try { openSend(Number(el.dataset.id), "previous", false); S.exportMessage = null; render(); window.scrollTo(0, 0); } catch (e) { return fail(e); } },
   "xp.xml"(el) { const v = getVersion(el.dataset.id); showXml("Downloaded: " + v.listName.replace(/\s+/g, "_") + "_data_v" + v.number + ".xml  (frozen data version)", versionXml(v)); },
   "send.cancel"() { S.xp.send = null; render(); },
-  "send.subscriber"(el) { const s = S.xp.send, id = Number(el.dataset.id); if (el.checked) s.chosen.add(id); else s.chosen.delete(id); s.review = null; render(); },
-  "send.review"() { const s = S.xp.send; try { s.review = reviewSend(s.version.id, [...s.chosen]); render(); } catch (e) { return fail(e); } },
-  "send.go"() { const s = S.xp.send; try { const j = send(s.version.id, s.review.subscribers.map(r => r.subscriberId), s.review.reviewToken, () => { if (["history", "dashboard"].includes(S.page) && S.user) { const y = window.scrollY; render(); window.scrollTo(0, y); } }); S.xp.send = null; toast("Send " + j.id + " started: follow it in History", "success"); render(); } catch (e) { return fail(e); } },
+  "send.subscriber"(el) { const s = S.xp.send, id = Number(el.dataset.id); if (el.checked) s.chosen.add(id); else s.chosen.delete(id); render(); },
+  "send.quick"(el) { const s = S.xp.send, rows = sendRows(); s.chosen = new Set(el.dataset.m === "all" ? rows.map(r => r.id) : el.dataset.m === "list" ? rows.filter(r => r.onList).map(r => r.id) : []); render(); },
+  "send.search"(el, e) { if (e.type === "input") { S.xp.send.q = el.value; const pos = el.selectionStart; render(); const n = $("#xp-sub-search"); n.focus(); n.setSelectionRange(pos, pos); } },
+  "send.go"() { const s = S.xp.send; try { const ids = [...s.chosen], r = reviewSend(s.version.id, ids); const j = send(s.version.id, ids, r.reviewToken, () => { if (["history", "dashboard"].includes(S.page) && S.user) { const y = window.scrollY; render(); window.scrollTo(0, y); } }); S.exportMessage = `Send #${j.id} is sending ${esc(s.version.listName)} data version ${s.version.number} to ${ids.length} subscriber${ids.length === 1 ? "" : "s"} (${num(s.version.records)} records each). <a href="#/history" data-act="nav.history" data-label="View history">View history</a>`; S.xp.send = null; toast("Send " + j.id + " started", "success"); render(); } catch (e) { return fail(e); } },
   "syn.list"(el) { const s = syn(); Object.assign(s, { familyId: Number(el.dataset.id), group: null, change: "CHANGES", q: "", offset: 0 }); synVersions(); render(); },
   "syn.back"() { syn().familyId = null; render(); },
   "syn.take"() { try { const s = syn(), r = takeVersion(s.familyId); toast(r.created ? "Data version " + r.version.number + " stored (" + r.version.records + " records)" : "The data has not changed since version " + r.version.number + ": nothing new was stored", r.created ? "success" : "info"); synVersions(); render(); } catch (e) { return fail(e); } },
@@ -1577,9 +1691,9 @@ const H = {
   /* subscribers */
   "sub.search"(el, e) { if (e.type === "input") { S.search.subscribers = el.value; const pos = el.selectionStart; render(); const n = document.querySelector('[data-act="sub.search"]'); n.focus(); n.setSelectionRange(pos, pos); } },
   "sub.add"() { go("subscriber-new"); }, "sub.addCancel"() { go("subscribers"); }, "sub.form"() { },
-  "sub.create"() { try { createSubscriber({ name: $("#f-name").value, cftEndpoint: $("#f-endpoint").value, templateId: Number($("#f-list").value) || null }); toast("Subscriber added", "success"); S.search.subscribers = ""; go("subscribers"); } catch (e) { return fail(e); } },
+  "sub.create"() { try { createSubscriber({ name: $("#f-name").value, formatType: "XML", scope: $("#f-scope").value, exportMode: $("#f-mode").value, businessLine: $("#f-line").value, region: $("#f-region").value, cftEndpoint: $("#f-endpoint").value, templateId: Number($("#f-list").value) || null }); toast("Subscriber added", "success"); S.search.subscribers = ""; go("subscribers"); } catch (e) { return fail(e); } },
   "sub.edit"(el) { S.editId = Number(el.dataset.id); editModal(subResponse(DB.subscribers.find(s => s.id === S.editId))); },
-  "sub.editSave"() { try { updateSubscriber(S.editId, { name: $("#e-name").value, cftEndpoint: $("#e-endpoint").value, templateId: Number($("#e-list").value) || null, active: $("#e-active").checked }); closeModal(); toast("Subscriber updated", "success"); render(); } catch (e) { return fail(e); } },
+  "sub.editSave"() { try { updateSubscriber(S.editId, { name: $("#e-name").value, formatType: "XML", scope: $("#e-scope").value, exportMode: $("#e-mode").value, businessLine: $("#e-line").value, region: $("#e-region").value, cftEndpoint: $("#e-endpoint").value, templateId: Number($("#e-list").value) || null, active: $("#e-active").checked }); closeModal(); toast("Subscriber updated", "success"); render(); } catch (e) { return fail(e); } },
   "sub.editCancel"() { closeModal(); },
   "sub.delete"(el) { const s = DB.subscribers.find(x => x.id === Number(el.dataset.id)); if (!confirm("Delete subscriber " + s.name + "?")) return "cancel"; try { deleteSubscriber(s.id); toast(s.name + " deleted", "success"); render(); } catch (e) { return fail(e); } },
   "sub.lastFile"(el) { const d = DB.deliveries.filter(x => x.subscriberId === Number(el.dataset.id)).slice(-1)[0]; const v = getVersion(d.dataVersionId); showXml("Downloaded: " + d.fileName, versionXml(v)); },
