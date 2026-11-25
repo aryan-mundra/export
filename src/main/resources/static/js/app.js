@@ -797,17 +797,27 @@ function applyTableFilter(value) {
     });
 }
 
-function renderTemplatesKeepingFilter() {
+/**
+ * Draws the List page again without losing the user's place: the table list, the column list and the page keep their scroll
+ * position, and the table filter keeps its text. {@code newTable}: a different table was opened, so its columns start at the top.
+ */
+function renderTemplatesKeepingFilter(newTable = false) {
+    const tableList = document.querySelector(".table-list");
     const columnList = document.querySelector(".column-list");
-    const scroll = columnList ? columnList.scrollTop : 0;
+    const tablesAt = tableList ? tableList.scrollTop : 0;
+    const columnsAt = columnList && !newTable ? columnList.scrollTop : 0;
+    const pageAt = window.scrollY;
     render();
     const filter = document.querySelector("[data-table-filter]");
     if (filter && state.tableFilter) {
         filter.value = state.tableFilter;
         applyTableFilter(state.tableFilter);
     }
-    const again = document.querySelector(".column-list");
-    if (again) again.scrollTop = scroll;
+    const tablesAgain = document.querySelector(".table-list");
+    if (tablesAgain) tablesAgain.scrollTop = tablesAt;
+    const columnsAgain = document.querySelector(".column-list");
+    if (columnsAgain) columnsAgain.scrollTop = columnsAt;
+    window.scrollTo(0, pageAt);
 }
 
 
@@ -1086,7 +1096,7 @@ function onListBuilderClick(target) {
     if (pickTable) {
         readDraftFromForm();
         state.activeTable = pickTable.dataset.pickTable;
-        renderTemplatesKeepingFilter();
+        renderTemplatesKeepingFilter(true);
         return true;
     }
     if (target.matches && target.matches("input[data-pick-column]")) {
