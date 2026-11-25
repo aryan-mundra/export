@@ -1288,7 +1288,7 @@ async function loadDemoAccounts() {
         if (!box || !config.demo) return;
         box.hidden = false;
         box.innerHTML = `<div class="database-label">Demo accounts</div>` + (config.accounts || []).map(account =>
-            `<button type="button" data-username="${esc(account.username)}" data-password="${esc(account.password)}">${esc(account.role)} · ${esc(account.username)} / ${esc(account.password)}</button>`
+            `<button type="button" data-username="${esc(account.username)}" data-password="${esc(account.password)}">${esc(account.role)}</button>`
         ).join("");
     } catch (error) {
         /* sign-in still works by typing a username and password */

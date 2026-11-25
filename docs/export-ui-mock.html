@@ -1401,7 +1401,7 @@ function badges() {
   set('[data-page="templates"]', S.user.role !== "APPROVER" ? Object.values(latest).filter(t => t.status === "CHANGES_REQUESTED" && t.createdBy === S.user.username).length : 0);
 }
 function renderLogin() {
-  const demo = $("#demo"); demo.innerHTML = '<div class="nav-label" style="padding:0">Demo accounts</div>' + DB.users.map(u => `<button type="button" data-act="login.demo" data-u="${esc(u.username)}" data-p="${esc(u.password)}">${esc(u.displayName)} · ${esc(u.username)} / ${esc(u.password)}</button>`).join("");
+  const demo = $("#demo"); demo.innerHTML = '<div class="nav-label" style="padding:0">Demo accounts</div>' + DB.users.map(u => `<button type="button" data-act="login.demo" data-u="${esc(u.username)}" data-p="${esc(u.password)}">${esc(u.displayName)}</button>`).join("");
 }
 function head(kicker, title, lede, extra = "") { return `<div class="page-head"><div class="page-title"><p class="kicker">${kicker}</p><h1>${title}</h1><p class="lede">${lede}</p></div>${extra}</div>`; }
 
