@@ -3,6 +3,7 @@ package com.bnpp.export.repository;
 import com.bnpp.export.entity.FormatField;
 import com.bnpp.export.model.GroupRow;
 import com.bnpp.export.model.GroupSelection;
+import com.bnpp.export.model.SourceTable;
 import com.bnpp.export.model.TableGroup;
 import com.bnpp.export.util.SqlUtils;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -44,7 +45,10 @@ public class GroupRecordRepository {
 
     /** The number of records (root rows) of a group. */
     public long count(GroupSelection selection) {
-        Long total = jdbc.queryForObject("SELECT COUNT(*) FROM " + qualified(selection, selection.group().root().table()), Long.class);
+        String root = selection.group().root().table();
+        List<Object> binds = new ArrayList<>();
+        String where = where(predicate(selection, root, "t0", 0, binds));
+        Long total = jdbc.queryForObject("SELECT COUNT(*) FROM " + qualified(selection, root) + " t0" + where, Long.class, binds.toArray());
         return total == null ? 0 : total;
     }
 
@@ -52,8 +56,12 @@ public class GroupRecordRepository {
     public List<GroupRow> page(GroupSelection selection, int offset, int limit) {
         String root = selection.group().root().table();
         String key = SqlUtils.quote(selection.resolved().keyColumn());
-        List<GroupRow> rows = query("SELECT " + selectList(selection, root) + " FROM " + qualified(selection, root)
-                + " ORDER BY " + key + " OFFSET ? ROWS FETCH NEXT ? ROWS ONLY", List.of(offset, limit));
+        List<Object> binds = new ArrayList<>();
+        String where = where(predicate(selection, root, "t0", 0, binds));
+        binds.add(offset);
+        binds.add(limit);
+        List<GroupRow> rows = query("SELECT " + selectList(selection, root) + " FROM " + qualified(selection, root) + " t0" + where
+                + " ORDER BY " + key + " OFFSET ? ROWS FETCH NEXT ? ROWS ONLY", binds);
         attachChildren(selection, root, rows);
         return rows;
     }
@@ -63,12 +71,19 @@ public class GroupRecordRepository {
         String root = selection.group().root().table();
         String keyColumn = selection.resolved().keyColumn();
         String key = SqlUtils.quote(keyColumn);
-        String select = "SELECT " + selectList(selection, root) + " FROM " + qualified(selection, root);
+        String select = "SELECT " + selectList(selection, root) + " FROM " + qualified(selection, root) + " t0";
+        List<Object> filterBinds = new ArrayList<>();
+        String filter = predicate(selection, root, "t0", 0, filterBinds);
         Object last = null;
         while (true) {
-            List<GroupRow> batch = last == null
-                    ? query(select + " ORDER BY " + key + " FETCH FIRST " + BATCH + " ROWS ONLY", List.of())
-                    : query(select + " WHERE " + key + " > ? ORDER BY " + key + " FETCH FIRST " + BATCH + " ROWS ONLY", List.of(last));
+            List<Object> binds = new ArrayList<>();
+            String condition = filter;
+            if (last != null) {
+                binds.add(last);
+                condition = "t0." + key + " > ?" + (filter.isEmpty() ? "" : " AND " + filter);
+            }
+            binds.addAll(filterBinds);
+            List<GroupRow> batch = query(select + where(condition) + " ORDER BY " + key + " FETCH FIRST " + BATCH + " ROWS ONLY", binds);
             if (batch.isEmpty()) {
                 return;
             }
@@ -108,12 +123,17 @@ public class GroupRecordRepository {
                 }
                 sameValue.add(parent);
             }
+            // Only the rows that keep the list's filters (on this table and, through EXISTS, on the tables below it).
+            List<Object> filterBinds = new ArrayList<>();
+            String filter = predicate(selection, link.table(), "t0", 0, filterBinds);
             List<GroupRow> children = new ArrayList<>();
             for (int start = 0; start < values.size(); start += BATCH) {
                 List<Object> chunk = values.subList(start, Math.min(values.size(), start + BATCH));
-                children.addAll(query("SELECT " + selectList(selection, link.table()) + " FROM " + qualified(selection, link.table())
-                        + " WHERE " + SqlUtils.quote(foreignKey) + " IN (" + String.join(", ", Collections.nCopies(chunk.size(), "?"))
-                        + ") ORDER BY " + SqlUtils.quote(foreignKey), chunk));
+                List<Object> binds = new ArrayList<>(chunk);
+                binds.addAll(filterBinds);
+                children.addAll(query("SELECT " + selectList(selection, link.table()) + " FROM " + qualified(selection, link.table()) + " t0"
+                        + " WHERE " + SqlUtils.quote(foreignKey) + " IN (" + String.join(", ", Collections.nCopies(chunk.size(), "?")) + ")"
+                        + (filter.isEmpty() ? "" : " AND " + filter) + " ORDER BY " + SqlUtils.quote(foreignKey), binds));
             }
             String childKey = link.table().toLowerCase(Locale.ROOT);
             for (GroupRow child : children) {
@@ -123,6 +143,58 @@ public class GroupRecordRepository {
             }
             attachChildren(selection, link.table(), children);
         }
+    }
+
+    // ------------------------------------------------------------------ the list's filters
+
+    private static String where(String condition) {
+        return condition.isEmpty() ? "" : " WHERE " + condition;
+    }
+
+    /**
+     * The condition a row of {@code table} (aliased {@code alias}) must meet: each filtered column holds one of the chosen
+     * values, and for every table below it that has a filter there is at least one related row that meets that table's
+     * condition ({@code EXISTS}): a record with no matching related row is left out. Values are bound in {@code binds}, in
+     * the order they appear. The column is compared as trimmed text, the same text the choices were read as.
+     */
+    private String predicate(GroupSelection selection, String table, String alias, int depth, List<Object> binds) {
+        List<String> parts = new ArrayList<>();
+        for (FormatField field : selection.filters(table)) {
+            List<String> chosen = field.getFilterValues();
+            parts.add(textOf(alias + "." + SqlUtils.quote(selection.column(table, field.getSourceColumn())))
+                    + " IN (" + String.join(", ", Collections.nCopies(chosen.size(), "?")) + ")");
+            binds.addAll(chosen);
+        }
+        for (TableGroup.Link link : selection.group().childrenOf(table)) {
+            if (!selection.reads(link.table()) || !selection.filtersBelow(link.table())) {
+                continue;
+            }
+            String child = "t" + (depth + 1);
+            String inner = predicate(selection, link.table(), child, depth + 1, binds);
+            parts.add("EXISTS (SELECT 1 FROM " + qualified(selection, link.table()) + " " + child + " WHERE "
+                    + child + "." + SqlUtils.quote(selection.column(link.table(), link.key())) + " = "
+                    + alias + "." + SqlUtils.quote(selection.column(table, link.refColumn()))
+                    + (inner.isEmpty() ? "" : " AND " + inner) + ")");
+        }
+        return String.join(" AND ", parts);
+    }
+
+    private static String textOf(String column) {
+        return "TRIM(CAST(" + column + " AS VARCHAR))";
+    }
+
+    /** The distinct values of a column as trimmed text (empty and null left out), sorted, to offer as filter choices. */
+    public List<String> distinctValues(SourceTable table, String column, String contains, int limit) {
+        String text = textOf(SqlUtils.quote(column));
+        List<Object> binds = new ArrayList<>();
+        String search = "";
+        if (contains != null && !contains.isBlank()) {
+            search = " AND LOWER(" + text + ") LIKE ? ESCAPE '\\'";
+            binds.add("%" + SqlUtils.likeEscape(contains.trim().toLowerCase(Locale.ROOT)) + "%");
+        }
+        return jdbc.query("SELECT DISTINCT " + text + " AS v FROM " + table.qualifiedName() + " WHERE " + SqlUtils.quote(column)
+                + " IS NOT NULL AND " + text + " <> ''" + search + " ORDER BY v FETCH FIRST " + limit + " ROWS ONLY",
+                (rs, i) -> rs.getString(1), binds.toArray());
     }
 
     /** A table's join column, its row id, the columns its children reference, and the list's columns. */

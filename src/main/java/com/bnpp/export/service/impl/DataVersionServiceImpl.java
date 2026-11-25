@@ -169,7 +169,9 @@ public class DataVersionServiceImpl implements DataVersionService {
                         : new VersionLayout.Table(table, link.refTable(), link.element(), link.section(), link.id() != null, headers));
             }
             groups.add(new VersionLayout.Group(group.name(), group.section(), selection.resolved().keyColumn(),
-                    XmlNames.element(group.root().key()), group.root().table(), tables));
+                    XmlNames.element(group.root().key()), group.root().table(), tables,
+                    selection.fields().stream().filter(field -> field.getFilterValues() != null && !field.getFilterValues().isEmpty())
+                            .map(field -> new VersionLayout.Filter(field.getSourceTable(), field.getSourceColumn(), field.getFilterValues())).toList()));
         }
         return new VersionLayout(groups);
     }

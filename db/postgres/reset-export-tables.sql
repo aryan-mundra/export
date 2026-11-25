@@ -15,7 +15,6 @@ BEGIN
 END $$;
 DROP TABLE IF EXISTS ver_export_snapshot;
 DROP TABLE IF EXISTS ver_export_snapshot_series;
-DROP TABLE IF EXISTS ver_export_template_filter;
 DROP TABLE IF EXISTS ver_export_file_record;
 DROP TABLE IF EXISTS ver_export_file;
 DROP TABLE IF EXISTS ver_export_quarantine;
@@ -29,6 +28,7 @@ DROP TABLE IF EXISTS ver_export_delivery;
 DROP TABLE IF EXISTS ver_export_audit;
 DROP TABLE IF EXISTS ver_export_job_subscriber;
 DROP TABLE IF EXISTS ver_export_job;
+DROP TABLE IF EXISTS ver_export_template_filter;
 DROP TABLE IF EXISTS ver_export_template_field;
 DROP TABLE IF EXISTS ver_export_template;
 DROP TABLE IF EXISTS ver_export_subscriber;

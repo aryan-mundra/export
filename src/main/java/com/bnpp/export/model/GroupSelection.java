@@ -40,6 +40,17 @@ public record GroupSelection(ResolvedGroup resolved, Map<String, List<FormatFiel
         return tables.stream().anyMatch(name -> name.equalsIgnoreCase(table));
     }
 
+    /** The list's columns on one table that carry a filter (values to keep). */
+    public List<FormatField> filters(String table) {
+        return fields(table).stream().filter(field -> field.getFilterValues() != null && !field.getFilterValues().isEmpty()).toList();
+    }
+
+    /** Whether this table or any table read below it has a filter. */
+    public boolean filtersBelow(String table) {
+        return !filters(table).isEmpty()
+                || group().childrenOf(table).stream().filter(link -> reads(link.table())).anyMatch(link -> filtersBelow(link.table()));
+    }
+
     /** The real name of a column of one of the group's tables. */
     public String column(String table, String column) {
         return resolved.column(table, column);

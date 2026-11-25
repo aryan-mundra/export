@@ -1,5 +1,6 @@
 package com.bnpp.export.controller;
 
+import com.bnpp.export.dto.ColumnValuesResponse;
 import com.bnpp.export.dto.FormatFieldRequest;
 import com.bnpp.export.dto.FormatTemplateRequest;
 import com.bnpp.export.dto.FormatTemplateResponse;
@@ -16,6 +17,7 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody;
 
@@ -45,6 +47,12 @@ public class FormatTemplateController {
     @GetMapping("/tables")
     public List<GroupTableResponse> tables() {
         return tableGroups.tables();
+    }
+
+    /** The distinct values of a column (up to 200, optionally narrowed by {@code q}): the choices of a filter. */
+    @GetMapping("/column-values")
+    public ColumnValuesResponse columnValues(@RequestParam String table, @RequestParam String column, @RequestParam(required = false) String q) {
+        return groupExport.columnValues(table, column, q);
     }
 
     /** One preview per group the columns use. */

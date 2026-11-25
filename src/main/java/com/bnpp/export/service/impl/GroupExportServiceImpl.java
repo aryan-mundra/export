@@ -1,6 +1,9 @@
 package com.bnpp.export.service.impl;
 
 import com.bnpp.export.dto.FileDownload;
+import com.bnpp.export.model.SourceTable;
+import com.bnpp.export.model.ResolvedGroup;
+import com.bnpp.export.dto.ColumnValuesResponse;
 import com.bnpp.export.dto.FormatFieldRequest;
 import com.bnpp.export.dto.GroupPreviewResponse;
 import com.bnpp.export.entity.FormatField;
@@ -95,6 +98,18 @@ public class GroupExportServiceImpl implements GroupExportService {
                     records.count(selection), start, rows));
         }
         return previews;
+    }
+
+    @Override
+    public ColumnValuesResponse columnValues(String table, String column, String contains) {
+        String wantedTable = table == null ? "" : table.trim();
+        ResolvedGroup resolved = tableGroups.groups().stream().filter(candidate -> candidate.group().has(wantedTable)).findFirst()
+                .orElseThrow(() -> new BadRequestException("Table " + wantedTable + " is not in any table group of the source schema"));
+        SourceTable source = resolved.table(wantedTable);
+        SourceTable.Column found = source.column(column == null ? "" : column.trim())
+                .orElseThrow(() -> new BadRequestException("Unknown column " + column + " on " + source.name()));
+        List<String> values = records.distinctValues(source, found.name(), contains, MAX_VALUES + 1);
+        return new ColumnValuesResponse(values.size() > MAX_VALUES ? values.subList(0, MAX_VALUES) : values, values.size() > MAX_VALUES);
     }
 
     /** A column's value for one record: the root's own value, or every value of the related rows, "; "-separated. */

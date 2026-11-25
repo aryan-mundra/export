@@ -15,8 +15,10 @@ public record VersionLayout(List<Group> groups) {
     /**
      * @param keyColumn    the group's key column (database name)
      * @param keyAttribute the XML attribute holding the key, e.g. person_id in {@code <Person person_id="101">}
+     * @param filters      the values the version was filtered on (null in versions taken before filters existed)
      */
-    public record Group(String name, String section, String keyColumn, String keyAttribute, String rootTable, List<Table> tables) {
+    public record Group(String name, String section, String keyColumn, String keyAttribute, String rootTable, List<Table> tables,
+                        List<Filter> filters) {
 
         public Table table(String name) {
             return tables.stream().filter(table -> table.table().equalsIgnoreCase(name)).findFirst().orElse(null);
@@ -26,6 +28,10 @@ public record VersionLayout(List<Group> groups) {
         public List<Table> childrenOf(String table) {
             return tables.stream().filter(candidate -> candidate.parent() != null && candidate.parent().equalsIgnoreCase(table)).toList();
         }
+    }
+
+    /** A column the version was filtered on, and the values it kept. */
+    public record Filter(String table, String column, List<String> values) {
     }
 
     /**

@@ -6,7 +6,10 @@ import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
+import jakarta.persistence.Transient;
 import lombok.Data;
+
+import java.util.List;
 
 /** One column of a list version: a column of a group table, and its name in the file. */
 @Data
@@ -38,4 +41,11 @@ public class FormatField {
     private String headerName;
 
     private int position;
+
+    /**
+     * The values this list keeps for the column (empty: no filter). Not a column of this table: they are stored in
+     * ver_export_template_filter and attached when the columns are read.
+     */
+    @Transient
+    private List<String> filterValues = List.of();
 }

@@ -18,7 +18,9 @@ const state = {
     tableFilter: "",
     user: null,
     templateStep: "columns",
-    groupPreview: null
+    groupPreview: null,
+    /** The open filter dialog: which column, the values offered, and the ones ticked. */
+    filterEdit: null
 };
 
 const pages = ["dashboard", "export", "history", "subscribers", "templates", "approvals"];
@@ -524,10 +526,12 @@ function exportColumnsHtml(draft) {
             <span class="col-source" title="${esc(field.sourceTable + "." + field.sourceColumn)}">${group ? `<span class="group-tag">${esc(group)}</span>` : ""}<span class="col-table">${esc(field.sourceTable)}</span><strong>${esc(field.sourceColumn)}</strong></span>
             <span class="muted">→</span>
             <input data-draft-header="${index}" value="${esc(field.headerName)}" placeholder="${esc(field.sourceColumn)}" aria-label="Export name for ${esc(field.sourceColumn)}">
+            <button class="btn-ghost btn-small ${(field.filterValues || []).length ? "filter-on" : ""}" type="button" data-filter="${index}" title="Keep only some values of this column">Filter${(field.filterValues || []).length ? " · " + field.filterValues.length : ""}</button>
             <button class="btn-ghost btn-small" type="button" data-reset-header="${index}" ${renamed ? "" : "disabled"} title="Use the column name as the export name">Keep original</button>
             <button class="btn-ghost btn-icon" type="button" data-move="${index}:-1" ${index === 0 ? "disabled" : ""} aria-label="Move up">↑</button>
             <button class="btn-ghost btn-icon" type="button" data-move="${index}:1" ${index === draft.fields.length - 1 ? "disabled" : ""} aria-label="Move down">↓</button>
             ${key ? '<span class="key-tag" title="The group\'s key: identifies each record; removed with the group\'s last column">key</span>' : `<button class="btn-delete" type="button" data-remove-field="${index}">Remove</button>`}
+            ${(field.filterValues || []).length ? `<div class="filter-summary">Keeps only: ${esc(field.filterValues.slice(0, 6).join(", "))}${field.filterValues.length > 6 ? " … +" + (field.filterValues.length - 6) : ""}</div>` : ""}
         </div>`;
     }).join("");
 }
@@ -542,6 +546,7 @@ function templatesHtml() {
         <td>${templateStatus(template)}</td>
         <td>${template.active ? esc((template.usedBy || []).join(", ") || "—") : ""}</td>
         <td>${esc(template.fields.map(field => field.headerName).join(", "))}</td>
+        <td>${filtersText(template) ? esc(filtersText(template)) : '<span class="muted">—</span>'}</td>
         <td><a class="btn-ghost btn-small" href="/api/format-templates/${template.id}/xml" download title="The list's current data, every group, as XML">XML</a></td>
     </tr>`).join("");
     let waiting = "";
@@ -588,7 +593,7 @@ function templatesHtml() {
         </section>
         <section class="table-card" style="margin-top:16px">
             <table>
-                <thead><tr><th>Name</th><th>Version</th><th>Status</th><th>Used by</th><th>Headers</th><th>File</th></tr></thead>
+                <thead><tr><th>Name</th><th>Version</th><th>Status</th><th>Used by</th><th>Headers</th><th>Filters</th><th>File</th></tr></thead>
                 <tbody>${saved}</tbody>
             </table>
             ${state.templates.length ? "" : '<div class="empty">No lists yet.</div>'}
@@ -624,7 +629,7 @@ function draftFromActive(familyId = null) {
     return {
         familyId: family.id,
         name: family.name,
-        fields: family.latest.fields.map(field => ({ sourceTable: field.sourceTable, sourceColumn: field.sourceColumn, headerName: field.headerName }))
+        fields: family.latest.fields.map(field => ({ sourceTable: field.sourceTable, sourceColumn: field.sourceColumn, headerName: field.headerName, filterValues: [...(field.filterValues || [])] }))
     };
 }
 
@@ -686,7 +691,8 @@ function draftFields(draft) {
     return draft.fields.map(field => ({
         sourceTable: field.sourceTable,
         sourceColumn: field.sourceColumn,
-        headerName: (field.headerName || "").trim() || field.sourceColumn
+        headerName: (field.headerName || "").trim() || field.sourceColumn,
+        filterValues: field.filterValues || []
     }));
 }
 
@@ -738,6 +744,116 @@ function renderTemplatesKeepingFilter() {
     }
     const again = document.querySelector(".column-list");
     if (again) again.scrollTop = scroll;
+}
+
+
+/* ---------- Filters: keep only some values of a column ---------- */
+
+/** "city: Mumbai, Delhi · country: FR" for a list version, or "" when it has no filter. */
+function filtersText(template) {
+    return template.fields.filter(field => (field.filterValues || []).length)
+        .map(field => field.headerName + ": " + field.filterValues.join(", ")).join(" · ");
+}
+
+async function openFilter(index) {
+    readDraftFromForm();
+    const field = state.templateDraft.fields[index];
+    if (!field) return;
+    state.filterEdit = { index, selected: new Set(field.filterValues || []), values: [], truncated: false, q: "", loading: true, error: null };
+    renderFilterDialog();
+    await loadFilterValues("");
+}
+
+/** The distinct values the column holds (or those containing the search text), from the data. */
+async function loadFilterValues(q) {
+    const edit = state.filterEdit;
+    if (!edit) return;
+    const field = state.templateDraft.fields[edit.index];
+    edit.q = q;
+    edit.loading = true;
+    const seq = (edit.seq || 0) + 1;
+    edit.seq = seq;
+    try {
+        const result = await api(`/api/format-templates/column-values?table=${encodeURIComponent(field.sourceTable)}&column=${encodeURIComponent(field.sourceColumn)}&q=${encodeURIComponent(q)}`);
+        if (state.filterEdit !== edit || seq !== edit.seq) return;
+        edit.values = result.values;
+        edit.truncated = result.truncated;
+        edit.error = null;
+    } catch (error) {
+        if (state.filterEdit !== edit || seq !== edit.seq) return;
+        edit.error = error.message;
+    }
+    edit.loading = false;
+    renderFilterList();
+}
+
+function renderFilterDialog() {
+    const edit = state.filterEdit;
+    const field = state.templateDraft.fields[edit.index];
+    document.getElementById("modal-root").innerHTML = `
+        <div class="modal-back"><div class="modal filter-modal" id="filter-dialog">
+            <h2>Filter ${esc(field.headerName || field.sourceColumn)}</h2>
+            <p class="muted">${esc(field.sourceTable)}.${esc(field.sourceColumn)} · tick the values to keep. A record whose value is not ticked is left out${groupOfField(field) && !isGroupKey(field) && !(sourceOf(field.sourceTable) || {}).root ? "; a record with no related row holding a ticked value is left out too" : ""}.</p>
+            <input class="search" data-filter-search placeholder="Search the values" autocomplete="off" style="width:100%">
+            <div id="filter-list"></div>
+            <div class="modal-actions">
+                <button type="button" class="btn-ghost" data-filter-clear>Clear</button>
+                <span class="spacer"></span>
+                <button type="button" class="btn-ghost" data-filter-cancel>Cancel</button>
+                <button type="button" class="btn-primary" data-filter-apply>Apply</button>
+            </div>
+        </div></div>`;
+    renderFilterList();
+    const search = document.querySelector("[data-filter-search]");
+    if (search) search.focus();
+}
+
+function renderFilterList() {
+    const edit = state.filterEdit;
+    const host = document.getElementById("filter-list");
+    if (!edit || !host) return;
+    // The ticked values stay on the list even when a search hides them.
+    const shown = [...new Set([...edit.selected, ...edit.values])].sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+    host.innerHTML = edit.error ? `<div class="banner banner-error">${esc(edit.error)}</div>`
+        : edit.loading && !shown.length ? '<div class="queue-empty">Reading the values…</div>'
+        : `<div class="filter-count muted">${num(edit.selected.size)} ticked${edit.truncated ? " · more values exist: search to find them" : ""}</div>
+           <div class="filter-values">${shown.map(value => `<label class="column-option"><input type="checkbox" data-filter-value="${esc(value)}" ${edit.selected.has(value) ? "checked" : ""}><span class="column-name">${esc(value)}</span></label>`).join("") || '<div class="empty">No value.</div>'}</div>`;
+}
+
+/** Clicks of the filter dialog and of the Filter buttons. Returns true when the click was one of them. */
+function onFilterClick(target) {
+    const open = target.closest("[data-filter]");
+    if (open) {
+        openFilter(Number(open.dataset.filter));
+        return true;
+    }
+    const edit = state.filterEdit;
+    if (!edit) return false;
+    if (target.matches && target.matches("input[data-filter-value]")) {
+        if (target.checked) edit.selected.add(target.dataset.filterValue); else edit.selected.delete(target.dataset.filterValue);
+        const count = document.querySelector(".filter-count");
+        if (count) count.textContent = num(edit.selected.size) + " ticked" + (edit.truncated ? " · more values exist: search to find them" : "");
+        return true;
+    }
+    if (target.closest("[data-filter-clear]")) {
+        edit.selected.clear();
+        renderFilterList();
+        return true;
+    }
+    if (target.closest("[data-filter-cancel]")) {
+        state.filterEdit = null;
+        document.getElementById("modal-root").innerHTML = "";
+        return true;
+    }
+    if (target.closest("[data-filter-apply]")) {
+        state.templateDraft.fields[edit.index].filterValues = [...edit.selected];
+        state.filterEdit = null;
+        document.getElementById("modal-root").innerHTML = "";
+        renderTemplatesKeepingFilter();
+        if (state.templateStep === "data") loadGroupPreview();
+        return true;
+    }
+    return false;
 }
 
 
@@ -852,6 +968,7 @@ async function onClick(event) {
 
 /** Clicks on Create a List. Returns true when the click was one of its controls. */
 function onListBuilderClick(target) {
+    if (onFilterClick(target)) return true;
     const step = target.closest("[data-step]");
     if (step) {
         if (step.disabled) return true;
@@ -988,6 +1105,11 @@ async function onSubmit(event) {
 let searchTimer;
 function onInput(event) {
     const target = event.target;
+    if (target.matches && target.matches("[data-filter-search]")) {
+        clearTimeout(searchTimer);
+        searchTimer = setTimeout(() => loadFilterValues(target.value), 250);
+        return;
+    }
     if (state.page === "export" && onExportInput(target)) return;
     if (state.page === "approvals" && onReviewInput(event)) return;
     if (target.id === "template-pick") {
@@ -1335,7 +1457,7 @@ function approvalsHtml() {
         const returned = previous && previous.status === "CHANGES_REQUESTED"
             ? `<p class="approval-note">Resubmitted after you asked: “${esc(previous.reviewComment || "")}”</p>` : "";
         const tables = [...tablesOf(template).entries()].map(([table, fields]) =>
-            `<li><strong>${esc(table)}</strong>: ${esc(fields.map(field => field.sourceColumn).join(", "))}</li>`).join("");
+            `<li><strong>${esc(table)}</strong>: ${esc(fields.map(field => field.sourceColumn + ((field.filterValues || []).length ? " [only " + field.filterValues.join(", ") + "]" : "")).join(", "))}</li>`).join("");
         const actions = own
             ? '<span class="muted">You submitted this; another List Owner must review it.</span>'
             : `<button class="btn-ghost" type="button" data-decide="request-changes" data-id="${template.id}">Request changes</button>

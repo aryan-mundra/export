@@ -13,7 +13,9 @@ import com.bnpp.export.exception.ResourceNotFoundException;
 import com.bnpp.export.model.ResolvedGroup;
 import com.bnpp.export.model.SourceTable;
 import com.bnpp.export.model.TableGroup;
+import com.bnpp.export.entity.FormatFilter;
 import com.bnpp.export.repository.FormatFieldRepository;
+import com.bnpp.export.repository.FormatFilterRepository;
 import com.bnpp.export.repository.FormatTemplateRepository;
 import com.bnpp.export.repository.SubscriberRepository;
 import com.bnpp.export.security.CurrentUser;
@@ -33,6 +35,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -41,16 +44,21 @@ import java.util.stream.Collectors;
 @Service
 public class FormatTemplateServiceImpl implements FormatTemplateService {
 
+    /** The most values one column can keep. */
+    private static final int MAX_FILTER_VALUES = 500;
+
     private final FormatTemplateRepository templateRepository;
     private final FormatFieldRepository fieldRepository;
+    private final FormatFilterRepository filterRepository;
     private final SubscriberRepository subscriberRepository;
     private final TableGroupService tableGroups;
     private final AuditService auditService;
 
-    public FormatTemplateServiceImpl(FormatTemplateRepository templateRepository, FormatFieldRepository fieldRepository,
+    public FormatTemplateServiceImpl(FormatTemplateRepository templateRepository, FormatFieldRepository fieldRepository, FormatFilterRepository filterRepository,
                                      SubscriberRepository subscriberRepository, TableGroupService tableGroups, AuditService auditService) {
         this.templateRepository = templateRepository;
         this.fieldRepository = fieldRepository;
+        this.filterRepository = filterRepository;
         this.subscriberRepository = subscriberRepository;
         this.tableGroups = tableGroups;
         this.auditService = auditService;
@@ -62,8 +70,10 @@ public class FormatTemplateServiceImpl implements FormatTemplateService {
     public List<FormatTemplateResponse> list() {
         // Every version with its columns and subscribers in three queries, however many versions there are
         // (the List and Approvals pages poll this).
+        List<FormatFilter> filters = filterRepository.findAllByOrderByTemplateIdAscIdAsc();
         Map<Long, List<FormatField>> fields = fieldRepository.findAllByOrderByTemplateIdAscPositionAsc().stream()
                 .collect(Collectors.groupingBy(FormatField::getTemplateId));
+        fields.forEach((templateId, columns) -> attachFilters(columns, filters.stream().filter(f -> templateId.equals(f.getTemplateId())).toList()));
         Map<Long, List<String>> usedBy = subscriberRepository.findByTemplateFamilyIdIsNotNullOrderByNameAsc().stream()
                 .collect(Collectors.groupingBy(SubscriberProfile::getTemplateFamilyId,
                         Collectors.mapping(SubscriberProfile::getName, Collectors.toList())));
@@ -75,7 +85,12 @@ public class FormatTemplateServiceImpl implements FormatTemplateService {
 
     @Override
     public List<FormatField> fields(Long templateId) {
-        return templateId == null ? List.of() : fieldRepository.findByTemplateIdOrderByPositionAsc(templateId);
+        if (templateId == null) {
+            return List.of();
+        }
+        List<FormatField> fields = fieldRepository.findByTemplateIdOrderByPositionAsc(templateId);
+        attachFilters(fields, filterRepository.findByTemplateIdOrderByIdAsc(templateId));
+        return fields;
     }
 
     @Override
@@ -150,6 +165,18 @@ public class FormatTemplateServiceImpl implements FormatTemplateService {
         Long templateId = template.getId();
         fields.forEach(field -> field.setTemplateId(templateId));
         fieldRepository.saveAll(fields);
+        List<FormatFilter> filters = new ArrayList<>();
+        for (FormatField field : fields) {
+            for (String value : field.getFilterValues()) {
+                FormatFilter filter = new FormatFilter();
+                filter.setTemplateId(templateId);
+                filter.setSourceTable(field.getSourceTable());
+                filter.setSourceColumn(field.getSourceColumn());
+                filter.setFilterValue(value);
+                filters.add(filter);
+            }
+        }
+        filterRepository.saveAll(filters);
         auditService.template(template.getId(), resubmission ? "TEMPLATE_RESUBMITTED" : "TEMPLATE_SUBMITTED",
                 "\"" + template.getName() + "\" v" + template.getVersionNumber() + ": " + describe(fields));
         return toResponse(template, fields, usedBy(template.getFamilyId()));
@@ -212,13 +239,40 @@ public class FormatTemplateServiceImpl implements FormatTemplateService {
                             + "> in the XML. Give them names that differ by more than spaces or symbols.");
                 }
             }
-            checked.add(field(table.name(), column.name(), header.isEmpty() ? column.name() : header,
-                    resolved.column(groupTable, group.joinColumn(groupTable)), group.joinTarget(groupTable)));
+            FormatField checkedField = field(table.name(), column.name(), header.isEmpty() ? column.name() : header,
+                    resolved.column(groupTable, group.joinColumn(groupTable)), group.joinTarget(groupTable));
+            checkedField.setFilterValues(cleanValues(request.filterValues(), table.name() + "." + column.name()));
+            checked.add(checkedField);
         }
         for (int index = 0; index < checked.size(); index++) {
             checked.get(index).setPosition(index + 1);
         }
         return checked;
+    }
+
+    /** The chosen filter values: trimmed, without blanks or repeats, and not more than a screen can offer. */
+    private static List<String> cleanValues(List<String> values, String column) {
+        if (values == null || values.isEmpty()) {
+            return List.of();
+        }
+        List<String> clean = new ArrayList<>(new LinkedHashSet<>(values.stream().filter(Objects::nonNull).map(String::trim)
+                .filter(value -> !value.isEmpty()).toList()));
+        if (clean.size() > MAX_FILTER_VALUES) {
+            throw new BadRequestException("Column " + column + " keeps more than " + MAX_FILTER_VALUES + " values: choose fewer");
+        }
+        if (clean.stream().anyMatch(value -> value.length() > 1000)) {
+            throw new BadRequestException("A value chosen for " + column + " is longer than 1,000 characters");
+        }
+        return List.copyOf(clean);
+    }
+
+    /** Puts each column's chosen values on the column (by table and column name). */
+    private static void attachFilters(List<FormatField> fields, List<FormatFilter> filters) {
+        for (FormatField field : fields) {
+            field.setFilterValues(filters.stream()
+                    .filter(f -> f.getSourceTable().equalsIgnoreCase(field.getSourceTable()) && f.getSourceColumn().equalsIgnoreCase(field.getSourceColumn()))
+                    .map(FormatFilter::getFilterValue).toList());
+        }
     }
 
     private static FormatField field(String table, String column, String header, String joinColumn, String joinTarget) {
@@ -337,7 +391,8 @@ public class FormatTemplateServiceImpl implements FormatTemplateService {
                 template.isActive(), template.getStatus(), template.getCreatedBy(), template.getCreatedByName(), template.getApprovedBy(),
                 template.getApprovedByName(), template.getApprovedAt(), template.getCreatedAt(),
                 fields.stream().map(field -> new FormatTemplateResponse.FieldResponse(field.getId(), field.getSourceTable(),
-                        field.getSourceColumn(), field.getHeaderName(), field.getPosition(), field.getJoinColumn(), field.getJoinTarget())).toList(),
+                        field.getSourceColumn(), field.getHeaderName(), field.getPosition(), field.getJoinColumn(), field.getJoinTarget(),
+                        field.getFilterValues() == null ? List.of() : field.getFilterValues())).toList(),
                 usedBy, template.getReviewedBy(), template.getReviewedByName(), template.getReviewedAt(), template.getReviewComment());
     }
 }

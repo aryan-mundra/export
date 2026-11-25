@@ -6,6 +6,7 @@ import com.bnpp.export.entity.ExportAuditLog;
 import com.bnpp.export.entity.ExportJob;
 import com.bnpp.export.entity.ExportJobSubscriberStatus;
 import com.bnpp.export.entity.FormatField;
+import com.bnpp.export.entity.FormatFilter;
 import com.bnpp.export.entity.FormatTemplate;
 import com.bnpp.export.entity.SubscriberProfile;
 import jakarta.persistence.Table;
@@ -43,7 +44,7 @@ class SchemaScriptTest {
 
     /** The module's entities (the data version tables are written with JDBC and checked by the flow test). */
     static final List<Class<?>> WRITTEN = List.of(
-            AppUser.class, SubscriberProfile.class, FormatTemplate.class, FormatField.class,
+            AppUser.class, SubscriberProfile.class, FormatTemplate.class, FormatField.class, FormatFilter.class,
             ExportJob.class, ExportJobSubscriberStatus.class, DeliveryRecord.class, ExportAuditLog.class);
 
     private static final Pattern CREATE_TABLE = Pattern.compile("^create table (\\w+) \\((.*)\\)$", Pattern.MULTILINE);

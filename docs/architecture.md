@@ -30,6 +30,11 @@ com.bnpp.export
    column against the database and keeps the result for 60 seconds. XML names come from the table names.
 2. **Lists** (`FormatTemplateService`): columns picked from the group tables. Each group's key is always on the list.
    Every version is approved by a List Owner before subscribers receive it.
+   **Filters:** any picked column can keep only some of its values. The choices are the distinct values in the data
+   (`GET /api/format-templates/column-values`); the chosen ones are saved with the list version in
+   `ver_export_template_filter`. `GroupRecordRepository` turns them into `WHERE` conditions, and for a related table
+   into `EXISTS` subqueries, so a record with no related row holding a chosen value is left out (a person with no
+   matching address) and only the matching related rows are kept. Previews, the list XML and data versions all use them.
 3. **Preview and XML** (`GroupExportService`, `GroupRecordRepository`): a group's records are read root table first,
    in key order, 500 at a time; each related table is read once per batch with `WHERE foreign_key IN (...)` and
    attached to its parent rows. The XML has one section per group, one element per record with its key as an

@@ -1318,3 +1318,13 @@ tbody tr:last-child td { border-bottom: 0; }
 .syn-tree ul { list-style: none; padding-left: 10px; }
 .send-panel { margin-bottom: 16px; }
 .send-subscribers { max-height: 260px; overflow-y: auto; }
+
+/* --- Column filters --- */
+.btn-ghost.filter-on { background: var(--green-soft, #e6f5ee); border-color: var(--green, #00965a); color: var(--green-dark, #007a49); font-weight: 700; }
+.filter-summary { flex-basis: 100%; margin: 0 0 4px 30px; font-size: 12.5px; color: var(--green-dark, #007a49); }
+.filter-modal { width: min(520px, 100%); }
+.filter-values { max-height: 320px; overflow: auto; margin-top: 6px; border: 1px solid var(--line, #dbe5df); border-radius: 10px; padding: 4px; }
+.filter-count { margin: 8px 0 2px; }
+.filter-values .column-option { display: flex; flex-direction: row; align-items: center; gap: 10px; padding: 7px 10px; margin: 0; }
+.filter-values .column-option input { width: auto; margin: 0; flex: 0 0 auto; }
+.filter-values .column-option .column-name { flex: 1; }

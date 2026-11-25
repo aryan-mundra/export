@@ -16,8 +16,9 @@ public record FormatTemplateResponse(Long id, Long familyId, String name, int ve
                                      LocalDateTime approvedAt, LocalDateTime createdAt, List<FieldResponse> fields, List<String> usedBy,
                                      String reviewedBy, String reviewedByName, LocalDateTime reviewedAt, String reviewComment) {
 
-    /** @param joinTarget the "table.column" the column's table joins to (its own key on the root table) */
+    /** @param joinTarget  the "table.column" the column's table joins to (its own key on the root table)
+     * @param filterValues the values the list keeps for this column (empty: no filter) */
     public record FieldResponse(Long id, String sourceTable, String sourceColumn, String headerName, int position,
-                                String joinColumn, String joinTarget) {
+                                String joinColumn, String joinTarget, List<String> filterValues) {
     }
 }

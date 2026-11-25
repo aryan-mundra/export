@@ -35,7 +35,7 @@ public class SystemServiceImpl implements SystemService {
     private static final Pattern HOST = Pattern.compile("[A-Za-z0-9.\\-]{1,253}");
     private static final Pattern DATABASE = Pattern.compile("[A-Za-z0-9_\\-]{1,63}");
     /** Tables ver-export-schema.sql creates; the module cannot start on PostgreSQL without them. */
-    private static final List<String> REQUIRED_TABLES = List.of("ver_export_subscriber", "ver_export_dump_import");
+    private static final List<String> REQUIRED_TABLES = List.of("ver_export_subscriber", "ver_export_dump_import", "ver_export_template_filter");
 
     private final ExportJobRepository jobs;
     private final org.springframework.core.env.Environment environment;
@@ -103,9 +103,10 @@ public class SystemServiceImpl implements SystemService {
         connection.setProperty("loginTimeout", "5");
         try (Connection db = DriverManager.getConnection(settings.jdbcUrl(), connection);
              PreparedStatement query = db.prepareStatement(
-                     "SELECT COUNT(*) FROM information_schema.tables WHERE table_name IN (?, ?)")) {
-            query.setString(1, REQUIRED_TABLES.get(0));
-            query.setString(2, REQUIRED_TABLES.get(1));
+                     "SELECT COUNT(*) FROM information_schema.tables WHERE table_name IN (?, ?, ?)")) {
+            for (int i = 0; i < REQUIRED_TABLES.size(); i++) {
+                query.setString(i + 1, REQUIRED_TABLES.get(i));
+            }
             try (ResultSet rows = query.executeQuery()) {
                 rows.next();
                 if (rows.getInt(1) < REQUIRED_TABLES.size()) {
