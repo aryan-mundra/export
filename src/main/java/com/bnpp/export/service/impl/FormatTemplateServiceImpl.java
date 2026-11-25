@@ -179,7 +179,7 @@ public class FormatTemplateServiceImpl implements FormatTemplateService {
             String wanted = StringUtils.trimToEmpty(request.sourceTable());
             String wantedColumn = StringUtils.trimToEmpty(request.sourceColumn());
             ResolvedGroup resolved = groups.stream().filter(candidate -> candidate.group().has(wanted)).findFirst()
-                    .orElseThrow(() -> new BadRequestException("Table " + wanted + " is not in any group of config/table-groups.yml"));
+                    .orElseThrow(() -> new BadRequestException("Table " + wanted + " is not in any table group of the source schema"));
             TableGroup group = resolved.group();
             String groupTable = group.tables().stream().filter(name -> name.equalsIgnoreCase(wanted)).findFirst().orElseThrow();
             SourceTable table = resolved.table(groupTable);

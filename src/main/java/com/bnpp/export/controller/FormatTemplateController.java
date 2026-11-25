@@ -41,7 +41,7 @@ public class FormatTemplateController {
         return templates.list();
     }
 
-    /** Every table of every group in config/table-groups.yml, with its columns. */
+    /** Every table of every discovered group, with its columns. */
     @GetMapping("/tables")
     public List<GroupTableResponse> tables() {
         return tableGroups.tables();

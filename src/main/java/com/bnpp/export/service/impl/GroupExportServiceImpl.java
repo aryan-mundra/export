@@ -35,7 +35,7 @@ import java.util.Set;
 /**
  * Implementation of {@link GroupExportService}.
  *
- * <p>XML layout: the groups in the order of the groups file, each in its section element; one element per record
+ * <p>XML layout: the groups in the order of their root table names, each in its section element; one element per record
  * carrying the group's key as an attribute named after the key column; the list's columns of the root table as
  * child elements; each related table as a section of row elements, nested as the foreign keys go. Empty values are
  * left out. Records are written as they are read, so memory use does not grow with the file:

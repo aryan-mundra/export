@@ -11,7 +11,7 @@ const state = {
     jobDetail: null,
     templates: [],
     templateDraft: null,
-    /** The tables of every group (config/table-groups.yml), for the list builder. */
+    /** The tables of every group (discovered from the foreign keys), for the list builder. */
     sources: [],
     sourcesError: null,
     activeTable: null,
@@ -507,7 +507,7 @@ function tablePickerHtml(draft) {
         <div class="picker-tables">
             <div class="field-label">Table groups · ${groups.length} group${groups.length === 1 ? "" : "s"}</div>
             <input class="table-filter" data-table-filter placeholder="Filter tables">
-            <div class="table-list">${list || '<p class="muted">No table group. Copy config/table-groups.example.yml to config/table-groups.yml and fill in your tables.</p>'}</div>
+            <div class="table-list">${list || '<p class="muted">No table group found. A group is a table with a one-column primary key and no foreign key, plus the tables whose foreign key points at it.</p>'}</div>
         </div>
         <div class="picker-columns">${columns}</div>
     </div>`;
@@ -554,7 +554,7 @@ function templatesHtml() {
     }
     const onPreview = state.templateStep === "data" && draft.fields.length;
     return `
-        ${head("Formats", "Create a List", "Pick columns from the table groups (Person, Entity…). Each group's key is always included; its related tables are joined by the foreign keys of config/table-groups.yml.")}
+        ${head("Formats", "Create a List", "Pick columns from the table groups (Person, Entity…). Each group's key is always included; its related tables are joined by the foreign keys declared in the database.")}
         <section class="export-card template-card">
             <h2>${current ? "Edit " + esc(current.name) : "New list"}</h2>
             <p class="muted">${current

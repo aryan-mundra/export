@@ -5,11 +5,11 @@ The module runs on two databases, with the same code and the same SQL:
 | Database | How to start | Source data |
 |---|---|---|
 | **H2** (default) | `mvn spring-boot:run`, or ▶ in IntelliJ with no profile | None: an empty in-memory database, for trying the screens. Lost when the app stops. |
-| **PostgreSQL** | the sidebar's **Database** switch (step 6), or the profile `postgres` | Your database: the tables of the groups in `config/table-groups.yml`, usually loaded from a dump in `db/dumps`. |
+| **PostgreSQL** | the sidebar's **Database** switch (step 6), or the profile `postgres` | Your database: the tables of the groups discovered from its foreign keys, usually loaded from a dump in `db/dumps`. |
 
 On PostgreSQL the module:
 
-- **reads** the tables named in `config/table-groups.yml` (and nothing else), joined by the foreign keys written there;
+- **reads** the tables of the groups discovered from the foreign keys of the source schema (and nothing else);
 - **writes** only its own `ver_export_*` tables, created once by hand with `db/postgres/ver-export-schema.sql`;
 - **imports a dump** from `db/dumps` at start-up, once (see `db/dumps/README.md`).
 
@@ -49,13 +49,15 @@ ALTER ROLE postgres IN DATABASE "reglissData" SET search_path = testdb, public;
 ```
 
 Reconnect pgAdmin and check with `SHOW search_path;` (it shows `testdb, public`). Alternatively, give each group a
-`schema:` in `config/table-groups.yml`.
+`REGLISS_SOURCE_SCHEMA` (or `export.source.schema`) to that schema, for example `dj_demo`.
 
-### 5. Describe the table groups and check the connection
+### 5. Check the foreign keys and the connection
 
-- Copy `config/table-groups.example.yml` to **`config/table-groups.yml`** and write your groups: for each group its root
-  table and key, and for each related table its foreign key and the `table.column` it references (pgAdmin:
-  table → **Properties → Constraints → Foreign Key**). The file's comments explain every setting.
+- There is no groups file. The module reads the primary and foreign keys of the source schema and builds the groups itself:
+  a table with a one-column primary key and no foreign key is the root of a group, and the tables whose foreign key points
+  at it (at any level) belong to it. Check they are declared in the database (pgAdmin: table → **Properties → Constraints →
+  Foreign Key**), or run `SELECT … FROM information_schema.table_constraints …` (see `SourceConstraintRepository`).
+  Set `REGLISS_SOURCE_SCHEMA` when they are not in the first schema of the `search_path`.
 - `config/database.properties` holds the connection for the Database switch (host, port, database, username,
   password). Only ever put a local test password in it: the file is committed.
 
@@ -76,21 +78,20 @@ The choice is remembered in `data/database.properties`. Click **H2** to go back.
   preview per group.
 - **Export → Export Latest → Export now** stores a data version and opens the send panel; **Synthesis** compares two
   versions.
-- If the List page says a table or column was not found, the message names it: fix `config/table-groups.yml` (it is
-  read again on the next page load) or the `search_path`.
+- If the List page says a table or column was not found, the message names it: check `REGLISS_SOURCE_SCHEMA` and the foreign
+  keys in the database (the groups are re-read every 60 seconds).
 
 ## When something goes wrong
 
 | Message | Cause and fix |
 |---|---|
-| `table-groups.yml was not found` | Copy `config/table-groups.example.yml` to `config/table-groups.yml` in the folder the module runs from. |
-| `does not match the database: table … was not found` | Wrong name, or the table is in another schema: check `search_path` (step 4) or add `schema:` to the group. |
-| `… cannot be an XML name` | Group names, sections and elements must be letters, digits and `_`, without spaces. |
-| `Group … has key … twice` | The root key is not unique in the root table: choose the table's primary key as `key`. |
+| `No table group found in schema …` | The schema has no table with a one-column primary key and no foreign key, or the foreign keys are not declared in the database. Set `REGLISS_SOURCE_SCHEMA` to the right schema. |
+| `The foreign keys of the source schema do not match its tables` | A table found in the keys cannot be read: check the schema and the user's rights on the tables. |
+| A table is missing from a group | Its foreign key has several columns, points into another schema, or the table points at a table of an earlier group: see the log (`TableGroupBuilder` warnings). |
 | No `Importing` line in the log | The dump is not in `db/dumps` of the folder the module runs from, or the database already holds a dump. |
 
 ## Automated checks (no PostgreSQL needed)
 
 `mvn test` runs every check on H2 in PostgreSQL mode, including a full flow on test groups
-(`src/test/resources/table-groups-test.yml`): previews, a list approved, its XML, two data versions, Synthesis, and a
+(`src/test/resources/group-tables.sql`, whose foreign keys define the groups): previews, a list approved, its XML, two data versions, Synthesis, and a
 send delivered and proved.

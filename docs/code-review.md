@@ -22,7 +22,7 @@ schema), so it was not changed.
 
 ## Third round: table groups only (2026-11-24)
 
-The module now builds every list from the table groups of `config/table-groups.yml`. What served the earlier model
+The module now builds every list from table groups (at the time of this round described by `config/table-groups.yml`; since then discovered from the foreign keys of the source schema). What served the earlier model
 was removed, and the code was reorganised into strict layers:
 
 - **Removed:** the flat source path (`gs_` tables joined on `BNP_ID`, certified versions `ver_version` /

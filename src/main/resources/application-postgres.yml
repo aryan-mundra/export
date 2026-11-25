@@ -1,10 +1,11 @@
-# PostgreSQL: the table groups (config/table-groups.yml) are read from PostgreSQL, and the module's own ver_export_
+# PostgreSQL: the table groups are discovered from the foreign keys of the schema export.source.schema (REGLISS_SOURCE_SCHEMA), and the module's own ver_export_
 # tables are written to the same database.
 #
 # Set the connection with environment variables (the sidebar's Database switch uses config/database.properties):
 #   REGLISS_DB_URL       default jdbc:postgresql://localhost:5432/regliss
 #   REGLISS_DB_USER      default regliss
 #   REGLISS_DB_PASSWORD  required
+#   REGLISS_SOURCE_SCHEMA  schema whose foreign keys define the table groups (empty = the connection's current schema)
 spring:
   datasource:
     url: ${REGLISS_DB_URL:jdbc:postgresql://localhost:5432/regliss}

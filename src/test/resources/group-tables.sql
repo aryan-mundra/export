@@ -1,4 +1,4 @@
--- Source tables for the tests: the groups of table-groups-test.yml.
+-- Source tables for the tests: the groups are discovered from their primary and foreign keys: tg_person (with name, address, address country) and tg_entity (with code).
 CREATE TABLE IF NOT EXISTS tg_person (person_id INT PRIMARY KEY, birth_year INT);
 CREATE TABLE IF NOT EXISTS tg_person_name (name_id INT PRIMARY KEY, profile_ref INT REFERENCES tg_person (person_id), first_name VARCHAR(50));
 CREATE TABLE IF NOT EXISTS tg_person_address (address_no INT PRIMARY KEY, owner_id INT REFERENCES tg_person (person_id), city VARCHAR(50));

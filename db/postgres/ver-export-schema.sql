@@ -4,7 +4,7 @@
 -- Safe to run again: every statement is CREATE ... IF NOT EXISTS. To start from empty tables, run
 -- reset-export-tables.sql first.
 --
--- The source tables (the table groups of config/table-groups.yml) belong to REGLISS: the module only reads them.
+-- The source tables (the table groups, discovered from the foreign keys of the source schema) belong to REGLISS: the module only reads them.
 -- SchemaScriptTest checks this script against the module's entities.
 
 -- Users who can sign in: List Managers (MAKER) and List Owners (APPROVER).

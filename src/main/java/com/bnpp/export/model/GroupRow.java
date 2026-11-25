@@ -6,7 +6,7 @@ import java.util.Map;
 
 /**
  * One row of a group table, with its related rows nested under it per table (lower-case table name), in the order
- * of the groups file. A record of a group is its root row.
+ * of the group's foreign keys. A record of a group is its root row.
  */
 public record GroupRow(Map<String, Object> values, Map<String, List<GroupRow>> children) {
 

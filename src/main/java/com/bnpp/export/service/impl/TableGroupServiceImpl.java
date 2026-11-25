@@ -1,6 +1,5 @@
 package com.bnpp.export.service.impl;
 
-import com.bnpp.export.config.TableGroupsConfig;
 import com.bnpp.export.dto.GroupTableResponse;
 import com.bnpp.export.entity.FormatField;
 import com.bnpp.export.exception.ServiceUnavailableException;
@@ -8,8 +7,12 @@ import com.bnpp.export.model.GroupSelection;
 import com.bnpp.export.model.ResolvedGroup;
 import com.bnpp.export.model.SourceTable;
 import com.bnpp.export.model.TableGroup;
+import com.bnpp.export.repository.SourceConstraintRepository;
 import com.bnpp.export.repository.SourceTableRepository;
 import com.bnpp.export.service.TableGroupService;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
@@ -20,23 +23,56 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 
-/** Implementation of {@link TableGroupService}. */
+/**
+ * Implementation of {@link TableGroupService}. The groups are not configured: they are discovered from the primary and
+ * foreign keys of the source schema ({@code export.source.schema}, default: the connection's current schema) by
+ * {@link TableGroupBuilder}, then checked against the tables and columns the database really has. The result is kept
+ * for {@code export.source.cache-seconds} so the catalog is not queried on every request.
+ */
 @Service
 public class TableGroupServiceImpl implements TableGroupService {
 
-    private final TableGroupsConfig config;
-    private final SourceTableRepository sourceTables;
+    private static final Logger log = LoggerFactory.getLogger(TableGroupServiceImpl.class);
 
-    public TableGroupServiceImpl(TableGroupsConfig config, SourceTableRepository sourceTables) {
-        this.config = config;
+    private final SourceConstraintRepository constraints;
+    private final SourceTableRepository sourceTables;
+    private final String configuredSchema;
+    private final long cacheMillis;
+    private List<ResolvedGroup> cached;
+    private long cachedAt;
+
+    public TableGroupServiceImpl(SourceConstraintRepository constraints, SourceTableRepository sourceTables,
+                                 @Value("${export.source.schema:}") String configuredSchema,
+                                 @Value("${export.source.cache-seconds:60}") long cacheSeconds) {
+        this.constraints = constraints;
         this.sourceTables = sourceTables;
+        this.configuredSchema = configuredSchema == null ? "" : configuredSchema.trim();
+        this.cacheMillis = Math.max(0, cacheSeconds) * 1000;
     }
 
     @Override
-    public List<ResolvedGroup> groups() {
+    public synchronized List<ResolvedGroup> groups() {
+        if (cached != null && System.currentTimeMillis() - cachedAt < cacheMillis) {
+            return cached;
+        }
+        String schema = configuredSchema.isEmpty() ? constraints.currentSchema() : configuredSchema;
+        List<TableGroup> discovered = TableGroupBuilder.build(constraints.find(schema));
+        if (discovered.isEmpty()) {
+            throw new ServiceUnavailableException("No table group found in schema " + schema + ": a group is a table with a one-column "
+                    + "primary key and no foreign key, with the tables that have a foreign key to it. Check that the schema holds such tables "
+                    + "(export.source.schema) and that the foreign keys are declared in the database");
+        }
+        log.info("Table groups discovered in schema {}: {}", schema, String.join(", ", discovered.stream()
+                .map(group -> group.name() + " (" + group.tables().size() + " tables)").toList()));
+        cached = resolve(discovered);
+        cachedAt = System.currentTimeMillis();
+        return cached;
+    }
+
+    private List<ResolvedGroup> resolve(List<TableGroup> discovered) {
         List<ResolvedGroup> resolved = new ArrayList<>();
         List<String> problems = new ArrayList<>();
-        for (TableGroup group : config.groups()) {
+        for (TableGroup group : discovered) {
             Map<String, SourceTable> tables = new LinkedHashMap<>();
             for (String name : group.tables()) {
                 sourceTables.find(group.schema(), name).ifPresentOrElse(
@@ -55,7 +91,7 @@ public class TableGroupServiceImpl implements TableGroupService {
             resolved.add(new ResolvedGroup(group, tables));
         }
         if (!problems.isEmpty()) {
-            throw new ServiceUnavailableException("config/table-groups.yml does not match the database: " + String.join("; ", problems));
+            throw new ServiceUnavailableException("The foreign keys of the source schema do not match its tables: " + String.join("; ", problems));
         }
         return resolved;
     }

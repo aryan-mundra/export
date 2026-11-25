@@ -31,7 +31,7 @@ public class FormatField {
     /** How the table joins its group: its key (root table) or its foreign key column... */
     private String joinColumn;
 
-    /** ...and the "table.column" that column points to, as written in the groups file when the list was saved. */
+    /** ...and the "table.column" that column points to, as discovered from the foreign keys when the list was saved. */
     private String joinTarget;
 
     @Column(nullable = false)

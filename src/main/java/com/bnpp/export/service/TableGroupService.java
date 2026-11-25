@@ -7,7 +7,7 @@ import com.bnpp.export.model.ResolvedGroup;
 
 import java.util.List;
 
-/** The table groups of config/table-groups.yml, checked against the database. */
+/** The table groups discovered from the foreign keys of the source schema, checked against the database. */
 public interface TableGroupService {
 
     /** Every group in file order, with its tables as found in the database. Fails listing every missing table or column. */

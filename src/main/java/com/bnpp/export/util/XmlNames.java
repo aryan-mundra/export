@@ -26,6 +26,18 @@ public final class XmlNames {
         return value.toLowerCase(Locale.ROOT).startsWith("xml") ? "_" + value : value;
     }
 
+    /** Person → Persons, Address → Addresses, Entity → Entities: the section element around a table's rows. */
+    public static String plural(String name) {
+        String lower = name.toLowerCase(Locale.ROOT);
+        if (lower.endsWith("s") || lower.endsWith("x") || lower.endsWith("z") || lower.endsWith("ch") || lower.endsWith("sh")) {
+            return name + "es";
+        }
+        if (lower.endsWith("y") && lower.length() > 1 && "aeiou".indexOf(lower.charAt(lower.length() - 2)) < 0) {
+            return name.substring(0, name.length() - 1) + "ies";
+        }
+        return name + "s";
+    }
+
     /** Text escaped for XML 1.0 element content and attribute values. */
     public static String escape(Object value) {
         return StringEscapeUtils.escapeXml10(Objects.toString(value, ""));

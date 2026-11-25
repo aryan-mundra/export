@@ -10,7 +10,7 @@ import java.util.Map;
  *
  * @param number  1, 2, 3... within the list
  * @param records records of every group
- * @param groups  records per group, in the order of the groups file
+ * @param groups  records per group, in the order of the groups (root table name)
  */
 public record DataVersionResponse(Long id, Long familyId, Long templateId, int templateVersion, String listName, int number,
                                   long records, Map<String, Long> groups, String createdBy, LocalDateTime createdAt) {

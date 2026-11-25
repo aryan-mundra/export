@@ -4,7 +4,7 @@
 
 1. **Every table the module writes is named `ver_export_<thing>`**, which keeps them together and clear of REGLISS's
    own tables.
-2. **The module never writes to source tables.** The tables of the groups in `config/table-groups.yml` are read only.
+2. **The module never writes to source tables.** The tables of the groups (discovered from the foreign keys of the source schema) are read only.
 3. **History is only added to.** Data versions, deliveries and audit entries are never changed or deleted; a retry
    adds a new delivery beside the old one. Send and file rows hold the current state of a send.
 4. **Every change names who made it.** Each write adds a row to `ver_export_audit` with the signed-in user, or

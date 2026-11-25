@@ -4,7 +4,7 @@ import java.util.List;
 
 /**
  * What a data version was built from: its groups in order, with their tables, columns and XML names at that time.
- * Stored with every version, so it can be read, compared and written as XML after the groups file changed.
+ * Stored with every version, so it can be read, compared and written as XML after the source tables or their foreign keys changed.
  */
 public record VersionLayout(List<Group> groups) {
 

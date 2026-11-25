@@ -25,14 +25,13 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /**
- * The whole flow on table groups (src/test/resources/table-groups-test.yml and group-tables.sql): the group tables
+ * The whole flow on table groups (the groups are discovered from the foreign keys of group-tables.sql): the group tables
  * offered, a preview per group, saving and approving a list, its XML, data versions, Synthesis between two versions,
  * a subscriber, and sending a version to it (file delivered, archived, in History).
  */
 @SpringBootTest(properties = {
         "spring.datasource.url=jdbc:h2:mem:group_flow;DB_CLOSE_DELAY=-1;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE;DEFAULT_NULL_ORDERING=HIGH",
-        "spring.sql.init.schema-locations=classpath:db/postgres/ver-export-schema.sql,classpath:group-tables.sql",
-        "export.groups.file=src/test/resources/table-groups-test.yml"
+        "spring.sql.init.schema-locations=classpath:db/postgres/ver-export-schema.sql,classpath:group-tables.sql"
 })
 @AutoConfigureMockMvc
 class GroupExportFlowTest {
@@ -51,22 +50,24 @@ class GroupExportFlowTest {
     private JdbcTemplate jdbc;
 
     @Test
-    void groupsFromConfigToDeliveredFile() throws Exception {
-        // ---- The group tables, with each group's key and each table's foreign key.
+    void groupsFromForeignKeysToDeliveredFile() throws Exception {
+        // ---- The groups discovered from the foreign keys: one per root table (by name), related tables level by level.
         List<Map<String, Object>> tables = JsonPath.read(asMaker(get("/api/format-templates/tables")), "$");
-        assertEquals(6, tables.size(), "4 Person tables and 2 Entity tables");
-        assertEquals(List.of("Person", "Person", "Person", "Person", "Entity", "Entity"), tables.stream().map(t -> t.get("group")).toList());
-        assertEquals(true, tables.get(0).get("root"));
-        assertEquals("person_id", tables.get(0).get("groupKey"));
-        assertEquals("addr_fk", tables.get(3).get("keyColumn"));
-        assertEquals("tg_person_address.address_no", tables.get(3).get("joinsTo"));
+        assertEquals(List.of("tg_entity", "tg_entity_code", "tg_person", "tg_person_address", "tg_person_name", "tg_address_country"),
+                tables.stream().map(t -> t.get("table")).toList(), "2 tables of tg_entity and 4 of tg_person; no ver_export_ table");
+        assertEquals(List.of("tg_entity", "tg_entity", "tg_person", "tg_person", "tg_person", "tg_person"), tables.stream().map(t -> t.get("group")).toList());
+        assertEquals(true, tables.get(2).get("root"));
+        assertEquals("person_id", tables.get(2).get("groupKey"));
+        assertEquals("addr_fk", tables.get(5).get("keyColumn"));
+        assertEquals("tg_person_address.address_no", tables.get(5).get("joinsTo"));
+        assertEquals("ent_ref", tables.get(1).get("keyColumn"));
 
         // ---- One preview per group: the key, and related values "; "-separated.
         String preview = asMaker(post("/api/format-templates/preview").contentType(MediaType.APPLICATION_JSON).content("{\"fields\":" + FIELDS + "}"));
-        assertEquals(List.of("Person", "Entity"), JsonPath.read(preview, "$[*].group"));
-        assertEquals(2, ((Number) JsonPath.read(preview, "$[0].total")).intValue());
-        assertEquals(List.of("1970", "John; Johnny", "London; Paris", "GB; FR"), JsonPath.read(preview, "$[0].rows[0].values"));
-        assertEquals(List.of("ISIN1; ISIN2"), JsonPath.read(preview, "$[1].rows[0].values"));
+        assertEquals(List.of("tg_entity", "tg_person"), JsonPath.read(preview, "$[*].group"));
+        assertEquals(2, ((Number) JsonPath.read(preview, "$[1].total")).intValue());
+        assertEquals(List.of("1970", "John; Johnny", "London; Paris", "GB; FR"), JsonPath.read(preview, "$[1].rows[0].values"));
+        assertEquals(List.of("ISIN1; ISIN2"), JsonPath.read(preview, "$[0].rows[0].values"));
 
         // ---- Saving adds each group's key; only a List Owner approves, with a reason for sending back.
         String saved = asMaker(post("/api/format-templates").contentType(MediaType.APPLICATION_JSON)
@@ -80,35 +81,45 @@ class GroupExportFlowTest {
                 .contentType(MediaType.APPLICATION_JSON).content("{\"comment\":\"short\"}")).andExpect(status().isBadRequest());
         mockMvc.perform(post("/api/format-templates/" + listVersion + "/approve").with(user("approver").roles("APPROVER"))).andExpect(status().isOk());
 
-        // ---- The list's XML: groups in file order, nested by foreign key, key as attribute.
+        // ---- The list's XML: groups by root table name, nested by foreign key, key as attribute.
         String xml = download(get("/api/format-templates/" + listVersion + "/xml"));
         assertTrue(xml.contains("""
-                    <Person person_id="1">
+                    <tg_person person_id="1">
                       <birth_year>1970</birth_year>
-                      <Names>
-                        <Name>
-                          <first_name>John</first_name>
-                        </Name>
-                        <Name>
-                          <first_name>Johnny</first_name>
-                        </Name>
-                      </Names>
-                      <Addresses>
-                        <Address>
+                      <tg_person_addresses>
+                        <tg_person_address>
                           <city>London</city>
-                          <AddressCountries>
-                            <AddressCountry>
+                          <tg_address_countries>
+                            <tg_address_country>
                               <country>GB</country>
-                            </AddressCountry>
-                          </AddressCountries>
-                        </Address>
+                            </tg_address_country>
+                          </tg_address_countries>
+                        </tg_person_address>
+                        <tg_person_address>
+                          <city>Paris</city>
+                          <tg_address_countries>
+                            <tg_address_country>
+                              <country>FR</country>
+                            </tg_address_country>
+                          </tg_address_countries>
+                        </tg_person_address>
+                      </tg_person_addresses>
+                      <tg_person_names>
+                        <tg_person_name>
+                          <first_name>John</first_name>
+                        </tg_person_name>
+                        <tg_person_name>
+                          <first_name>Johnny</first_name>
+                        </tg_person_name>
+                      </tg_person_names>
+                    </tg_person>
                 """), xml);
-        assertTrue(xml.indexOf("<Persons count=\"2\">") < xml.indexOf("<Entities count=\"1\">"), xml);
+        assertTrue(xml.indexOf("<tg_entities count=\"1\">") < xml.indexOf("<tg_persons count=\"2\">"), xml);
 
         // ---- Data versions: unchanged data reuses the newest version.
         String v1 = asMaker(post("/api/data-versions?familyId=" + family));
         assertEquals(true, JsonPath.read(v1, "$.created"));
-        assertEquals(2, ((Number) JsonPath.read(v1, "$.version.groups.Person")).intValue());
+        assertEquals(2, ((Number) JsonPath.read(v1, "$.version.groups.tg_person")).intValue());
         Number first = JsonPath.read(v1, "$.version.id");
         assertEquals(false, JsonPath.read(asMaker(post("/api/data-versions?familyId=" + family)), "$.created"));
 
@@ -124,20 +135,21 @@ class GroupExportFlowTest {
         // ---- Synthesis between the two versions.
         String base = "/api/data-versions/" + second + "/compare/" + first;
         String summary = asMaker(get(base + "/summary"));
-        assertEquals(List.of(1, 0, 2, 0), List.of(JsonPath.read(summary, "$.groups[0].added"), JsonPath.read(summary, "$.groups[0].removed"),
-                JsonPath.read(summary, "$.groups[0].changed"), JsonPath.read(summary, "$.groups[0].unchanged")));
-        assertEquals(1, ((Number) JsonPath.read(summary, "$.groups[1].unchanged")).intValue());
-        assertEquals(List.of(1, 2, 1, 0), JsonPath.read(summary, "$.groups[0].tables[*].records"));
-        assertEquals(List.of(0, 1, 0, 0), JsonPath.read(summary, "$.groups[0].tables[*].rowsAdded"));
-        assertEquals(List.of(0, 1, 0, 0), JsonPath.read(summary, "$.groups[0].tables[*].rowsRemoved"));
-        assertEquals(List.of(1, 0, 1, 0), JsonPath.read(summary, "$.groups[0].tables[*].valuesChanged"));
-        String records = asMaker(get(base + "/records?group=Person"));
+        assertEquals(List.of(1, 0, 2, 0), List.of(JsonPath.read(summary, "$.groups[1].added"), JsonPath.read(summary, "$.groups[1].removed"),
+                JsonPath.read(summary, "$.groups[1].changed"), JsonPath.read(summary, "$.groups[1].unchanged")));
+        assertEquals(1, ((Number) JsonPath.read(summary, "$.groups[0].unchanged")).intValue());
+        assertEquals(List.of("tg_person", "tg_person_address", "tg_person_name", "tg_address_country"), JsonPath.read(summary, "$.groups[1].tables[*].table"));
+        assertEquals(List.of(1, 1, 2, 0), JsonPath.read(summary, "$.groups[1].tables[*].records"));
+        assertEquals(List.of(0, 0, 1, 0), JsonPath.read(summary, "$.groups[1].tables[*].rowsAdded"));
+        assertEquals(List.of(0, 0, 1, 0), JsonPath.read(summary, "$.groups[1].tables[*].rowsRemoved"));
+        assertEquals(List.of(1, 1, 0, 0), JsonPath.read(summary, "$.groups[1].tables[*].valuesChanged"));
+        String records = asMaker(get(base + "/records?group=tg_person"));
         assertEquals(List.of("1", "2", "3"), JsonPath.read(records, "$.records[*].key"));
         assertEquals(List.of("CHANGED", "CHANGED", "ADDED"), JsonPath.read(records, "$.records[*].change"));
-        assertEquals("birth_year changed · Names: 1 removed · Addresses: 1 value changed", JsonPath.read(records, "$.records[0].summary"));
-        assertEquals(1, ((Number) JsonPath.read(asMaker(get(base + "/records?group=Person&change=ADDED")), "$.total")).intValue());
-        List<Map<String, Object>> differences = JsonPath.read(asMaker(get(base + "/record?group=Person&key=1")), "$.differences");
-        assertTrue(differences.stream().anyMatch(d -> "Address 11".equals(d.get("path")) && "Paris".equals(d.get("before"))
+        assertEquals("birth_year changed · tg_person_addresses: 1 value changed · tg_person_names: 1 removed", JsonPath.read(records, "$.records[0].summary"));
+        assertEquals(1, ((Number) JsonPath.read(asMaker(get(base + "/records?group=tg_person&change=ADDED")), "$.total")).intValue());
+        List<Map<String, Object>> differences = JsonPath.read(asMaker(get(base + "/record?group=tg_person&key=1")), "$.differences");
+        assertTrue(differences.stream().anyMatch(d -> "tg_person_address 11".equals(d.get("path")) && "Paris".equals(d.get("before"))
                 && "Lyon".equals(d.get("after"))), differences.toString());
         assertTrue(differences.stream().anyMatch(d -> "ROW_REMOVED".equals(d.get("kind")) && String.valueOf(d.get("before")).contains("Johnny")),
                 differences.toString());

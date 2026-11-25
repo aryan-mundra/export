@@ -1,6 +1,5 @@
 # Defaults of the Export module, packed in the jar. Settings you change per machine go in the config/ folder:
 #   config/database.properties   the PostgreSQL connection (used by the sidebar's Database switch)
-#   config/table-groups.yml      the table groups and their foreign keys (see config/table-groups.example.yml)
 #   config/application.yml       optional: any setting below, to override it without rebuilding (Spring Boot reads it)
 #
 # Without a choice the module runs on an in-memory H2 database (PostgreSQL mode, the same SQL as on PostgreSQL).
@@ -40,9 +39,13 @@ spring:
         period: 0
 
 export:
-  # The table groups: which tables lists are built from, and how they are joined.
-  groups:
-    file: config/table-groups.yml
+  # The source tables: the table groups are discovered from the primary and foreign keys of this schema
+  # (information_schema), so nothing is configured per table. Empty = the connection's current schema
+  # (PostgreSQL: the first schema of the search_path). Example: dj_demo.
+  source:
+    schema: ${REGLISS_SOURCE_SCHEMA:}
+    # How long the discovered groups are kept before the keys are read again.
+    cache-seconds: 60
   delivery:
     # true: CFT sends are simulated. false: files are POSTed to each subscriber's endpoint.
     mock: true

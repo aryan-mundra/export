@@ -5,8 +5,8 @@ import java.util.List;
 import java.util.Optional;
 
 /**
- * One group of related tables, as written in {@code config/table-groups.yml}: a root table, one element per root row, and
- * related tables joined to it (or to each other) by foreign key.
+ * One group of related tables, discovered from the primary and foreign keys of the source schema (see TableGroupBuilder): a root table, one element per
+ * root row, and related tables joined to it (or to each other) by foreign key.
  *
  * @param name    the XML element of one record, e.g. {@code Person}
  * @param section the XML element around all records of the group, e.g. {@code Persons}

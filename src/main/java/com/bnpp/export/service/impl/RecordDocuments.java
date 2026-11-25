@@ -17,11 +17,11 @@ import java.util.TreeMap;
 /**
  * A group record as stored in a data version: canonical JSON {@code {"values": {header: value}, "_id": ...,
  * "tables": {table: [row, ...]}}}. Keys are sorted, empty values left out, related rows sorted (by their id when the
- * groups file gives one, else by content), so equal data always gives equal JSON and equal hashes.
+ * table's primary key gives one, else by content), so equal data always gives equal JSON and equal hashes.
  */
 final class RecordDocuments {
 
-    /** The row id of a related row, when its table has one in the groups file. */
+    /** The row id of a related row, when its table has a one-column primary key. */
     static final String ID = "_id";
     static final String VALUES = "values";
     static final String TABLES = "tables";

@@ -4,7 +4,7 @@ import java.util.Locale;
 import java.util.Map;
 
 /**
- * A table group checked against the database: its definition from the groups file, and each of its tables as found
+ * A table group checked against the database: its definition discovered from the foreign keys, and each of its tables as found
  * in the database (real names, schema and columns), keyed by lower-case table name.
  */
 public record ResolvedGroup(TableGroup group, Map<String, SourceTable> tables) {

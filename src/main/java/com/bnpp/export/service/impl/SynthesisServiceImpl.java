@@ -30,8 +30,8 @@ import java.util.TreeSet;
  *
  * <p>Records are matched on (group, key). Added, removed, changed and unchanged records are counted in SQL (equal
  * hashes mean equal records, so unchanged records are never read). What changed inside a record comes from comparing
- * its two stored documents: its own values, then each related table row by row, in the order of the groups file.
- * Rows are matched on their id when the groups file gives one (so a row can be "changed"); otherwise identical rows
+ * its two stored documents: its own values, then each related table row by row, in the order of the group's foreign keys.
+ * Rows are matched on their id when the table has a one-column primary key (so a row can be "changed"); otherwise identical rows
  * match and the others are "removed" and "added".
  */
 @Service
@@ -205,7 +205,7 @@ public class SynthesisServiceImpl implements SynthesisService {
                 differences.add(new Difference(path, table, VALUE_CHANGED, column, text(was.get(column)), text(now.get(column))));
             }
         }
-        // Related tables in the order of the groups file, then any the layout no longer knows.
+        // Related tables in the order of the layout, then any the layout no longer knows.
         Set<String> present = new TreeSet<>(String.CASE_INSENSITIVE_ORDER);
         present.addAll(RecordDocuments.tables(before).keySet());
         present.addAll(RecordDocuments.tables(after).keySet());

@@ -14,7 +14,7 @@ com.bnpp.export
 ├── entity          JPA entities: the module's ver_export_* tables
 ├── model           internal domain types (TableGroup, GroupSelection, GroupRow, DataVersion, VersionLayout...)
 ├── dto             request and response objects of the API (records)
-├── config          Spring configuration: security, the groups file reader, database switch, dump import, start-up jobs
+├── config          Spring configuration: security, the source-schema settings, database switch, dump import, start-up jobs
 ├── security        the signed-in user (CurrentUser, ExportPrincipal)
 ├── delivery        CFT adapters (CftDeliveryAdapter: mock or real)
 ├── exception       the module's exceptions and the one handler that turns them into responses
@@ -23,9 +23,11 @@ com.bnpp.export
 
 ## How it works
 
-1. **Table groups** (`config/table-groups.yml`, read by `TableGroupsConfig`): each group (Person, Entity…) has a root
-   table with a common key, and related tables joined by the foreign keys written in the file. `TableGroupService`
-   checks every table and column against the database.
+1. **Table groups** (discovered, no configuration file): `SourceConstraintRepository` reads the primary and foreign keys
+   of the source schema from `information_schema`; `TableGroupBuilder` turns them into groups. A table with a one-column
+   primary key and no foreign key is the **root** of a group (its primary key is the group's common key); every table whose
+   foreign key points at a table of the group is related to it, level by level. `TableGroupService` checks every table and
+   column against the database and keeps the result for 60 seconds. XML names come from the table names.
 2. **Lists** (`FormatTemplateService`): columns picked from the group tables. Each group's key is always on the list.
    Every version is approved by a List Owner before subscribers receive it.
 3. **Preview and XML** (`GroupExportService`, `GroupRecordRepository`): a group's records are read root table first,
@@ -51,13 +53,13 @@ com.bnpp.export
 
 ## Configuration
 
-Every per-machine setting is in the `config/` folder (see `config/README.md`): `table-groups.yml`,
-`database.properties`, and an optional `application.yml` overriding any default of
+Every per-machine setting is in the `config/` folder (see `config/README.md`): `database.properties`, and an optional `application.yml` overriding any default of
 `src/main/resources/application.yml`. The module's tables are created by `db/postgres/ver-export-schema.sql`.
 
 ## Adding something
 
-- **A new group:** add it to `config/table-groups.yml`. No code change; the List page shows it on its next load.
+- **A new group:** create its tables with their primary and foreign keys in the source schema. No code change and no
+  file to edit; the List page shows it within a minute (`export.source.cache-seconds`).
 - **A new endpoint:** add a method to the service interface, implement it in the Impl class, add a DTO for its
   response, and a one-line controller method.
 - **A new error case:** throw the matching exception from the service.
@@ -80,7 +82,7 @@ The jar starts from any folder. These are read or written **next to it** (the fo
 
 | Path | What |
 |---|---|
-| `config/` | `table-groups.yml`, `database.properties`, optional `application.yml` |
+| `config/` | `database.properties`, optional `application.yml` |
 | `db/dumps/` | Dumps to import into PostgreSQL at start-up |
 | `data/` | Built and archived files (`data/exports`) and the chosen database (`data/database.properties`) |
 

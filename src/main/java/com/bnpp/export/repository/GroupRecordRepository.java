@@ -24,7 +24,7 @@ import java.util.function.Consumer;
 
 /**
  * Reads the records of a table group from the source database: the rows of its root table, each with its related
- * rows nested under it, following the foreign keys of the groups file.
+ * rows nested under it, following the foreign keys discovered in the source schema.
  *
  * <p>Root rows are read in key order, a batch at a time (keyset paging: no cursor, no OFFSET over large tables).
  * For each batch, every related table is read once per 500 parent values with {@code WHERE foreign_key IN (...)},
