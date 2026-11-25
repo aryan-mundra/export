@@ -44,6 +44,9 @@ export:
   # (PostgreSQL: the first schema of the search_path). Example: dj_demo.
   source:
     schema: ${REGLISS_SOURCE_SCHEMA:}
+    # Only the tables whose name starts with this (any case) are offered on the List page and exported; the other tables
+    # of the schema are ignored. Empty: every table that has keys.
+    table-prefix: ${REGLISS_SOURCE_TABLE_PREFIX:gs_}
     # How long the discovered groups are kept before the keys are read again.
     cache-seconds: 60
   delivery:

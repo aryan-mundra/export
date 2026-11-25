@@ -1,0 +1,7 @@
+# Settings of this machine, read by Spring Boot from the config/ folder next to where the module starts.
+# They override src/main/resources/application.yml without a rebuild (see config/README.md).
+
+export:
+  source:
+    # The schema of the dump whose tables lists are built from (the module's own ver_export_ tables stay in public).
+    schema: dj_demo

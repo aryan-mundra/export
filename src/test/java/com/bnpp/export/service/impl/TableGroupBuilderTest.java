@@ -145,4 +145,22 @@ class TableGroupBuilderTest {
         // "a_" would be left with an empty name, so the prefix stays: a_x is not shortened to x (a trailing _ is cleaned by XmlNames).
         assertEquals(List.of("a", "a_x"), TableGroupBuilder.build(rows).stream().map(TableGroup::name).toList());
     }
+
+    @Test
+    void onlyTablesWithThePrefixAreUsedWhateverTheCase() {
+        pk("GS_Party", "id");
+        pk("gs_party_name", "id");
+        fk("gs_party_name", "party_ref", "GS_Party", "id");
+        pk("cfg_code", "id");                      // outside the prefix
+        pk("gs_other", "id");
+        fk("gs_other", "code_ref", "cfg_code", "id"); // points at a table outside the prefix: ignored, gs_other is a root
+        pk("audit_log", "id");
+
+        List<TableGroup> groups = TableGroupBuilder.build(rows, "GS_");
+
+        assertEquals(List.of("GS_Party", "gs_other"), groups.stream().map(group -> group.root().table()).toList());
+        assertEquals(List.of("gs_party_name"), groups.get(0).links().stream().map(TableGroup.Link::table).toList());
+        assertEquals(List.of("Party", "other"), groups.stream().map(TableGroup::name).toList(), "the gs_ prefix is not in the XML names");
+        assertEquals(3, TableGroupBuilder.build(rows, "").size(), "without a prefix GS_Party, cfg_code and audit_log are roots");
+    }
 }

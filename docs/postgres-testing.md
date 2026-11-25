@@ -60,7 +60,9 @@ Reconnect pgAdmin and check with `SHOW search_path;` (it shows `testdb, public`)
   a table with a one-column primary key and no foreign key is the root of a group, and the tables whose foreign key points
   at it (at any level) belong to it. Check they are declared in the database (pgAdmin: table → **Properties → Constraints →
   Foreign Key**), or run `SELECT … FROM information_schema.table_constraints …` (see `SourceConstraintRepository`).
-  Set `REGLISS_SOURCE_SCHEMA` when they are not in the first schema of the `search_path`.
+  Set `export.source.schema` (committed in `config/application.yml`, `dj_demo`) to the schema of the dump. Only tables whose
+  name starts with `gs_` (any case) are used: change `export.source.table-prefix` to use another prefix, or leave it empty for
+  every table.
 - `config/database.properties` holds the connection for the Database switch (host, port, database, username,
   password). Only ever put a local test password in it: the file is committed.
 

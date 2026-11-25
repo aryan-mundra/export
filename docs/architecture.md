@@ -24,7 +24,8 @@ com.bnpp.export
 ## How it works
 
 1. **Table groups** (discovered, no configuration file): `SourceConstraintRepository` reads the primary and foreign keys
-   of the source schema from `information_schema`; `TableGroupBuilder` turns them into groups. A table with a one-column
+   of the source schema from `information_schema` (only the tables whose name starts with `export.source.table-prefix`,
+   `gs_` by default, in any case; the other tables of the schema are ignored); `TableGroupBuilder` turns them into groups. A table with a one-column
    primary key and no foreign key is the **root** of a group (its primary key is the group's common key); every table whose
    foreign key points at a table of the group is related to it, level by level. `TableGroupService` checks every table and
    column against the database and keeps the result for 60 seconds. XML names come from the table names.

@@ -25,7 +25,8 @@ import java.util.Set;
 
 /**
  * Implementation of {@link TableGroupService}. The groups are not configured: they are discovered from the primary and
- * foreign keys of the source schema ({@code export.source.schema}, default: the connection's current schema) by
+ * foreign keys of the source schema ({@code export.source.schema}, default: the connection's current schema), among the
+ * tables whose name starts with {@code export.source.table-prefix} (case-insensitive; empty: all), by
  * {@link TableGroupBuilder}, then checked against the tables and columns the database really has. The result is kept
  * for {@code export.source.cache-seconds} so the catalog is not queried on every request.
  */
@@ -37,16 +38,19 @@ public class TableGroupServiceImpl implements TableGroupService {
     private final SourceConstraintRepository constraints;
     private final SourceTableRepository sourceTables;
     private final String configuredSchema;
+    private final String tablePrefix;
     private final long cacheMillis;
     private List<ResolvedGroup> cached;
     private long cachedAt;
 
     public TableGroupServiceImpl(SourceConstraintRepository constraints, SourceTableRepository sourceTables,
                                  @Value("${export.source.schema:}") String configuredSchema,
+                                 @Value("${export.source.table-prefix:}") String tablePrefix,
                                  @Value("${export.source.cache-seconds:60}") long cacheSeconds) {
         this.constraints = constraints;
         this.sourceTables = sourceTables;
         this.configuredSchema = configuredSchema == null ? "" : configuredSchema.trim();
+        this.tablePrefix = tablePrefix == null ? "" : tablePrefix.trim();
         this.cacheMillis = Math.max(0, cacheSeconds) * 1000;
     }
 
@@ -56,9 +60,10 @@ public class TableGroupServiceImpl implements TableGroupService {
             return cached;
         }
         String schema = configuredSchema.isEmpty() ? constraints.currentSchema() : configuredSchema;
-        List<TableGroup> discovered = TableGroupBuilder.build(constraints.find(schema));
+        List<TableGroup> discovered = TableGroupBuilder.build(constraints.find(schema), tablePrefix);
         if (discovered.isEmpty()) {
-            throw new ServiceUnavailableException("No table group found in schema " + schema + ": a group is a table with a one-column "
+            throw new ServiceUnavailableException("No table group found in schema " + schema + (tablePrefix.isEmpty() ? "" : " among the tables starting with " + tablePrefix)
+                    + ": a group is a table with a one-column "
                     + "primary key and no foreign key, with the tables that have a foreign key to it. Check that the schema holds such tables "
                     + "(export.source.schema) and that the foreign keys are declared in the database");
         }

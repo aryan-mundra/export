@@ -46,6 +46,22 @@ public final class TableGroupBuilder {
     }
 
     public static List<TableGroup> build(List<Constraint> constraints) {
+        return build(constraints, "");
+    }
+
+    /**
+     * Builds the groups from the tables whose name starts with {@code tablePrefix} (case-insensitive; empty: every table).
+     * A foreign key to a table that is left out is ignored, as if it did not exist: a table that only points at a lookup
+     * table outside the prefix still counts as a root.
+     */
+    public static List<TableGroup> build(List<Constraint> constraints, String tablePrefix) {
+        String prefix = tablePrefix == null ? "" : tablePrefix.trim().toLowerCase(Locale.ROOT);
+        if (!prefix.isEmpty()) {
+            constraints = constraints.stream()
+                    .filter(c -> c.table().toLowerCase(Locale.ROOT).startsWith(prefix))
+                    .filter(c -> c.refTable() == null || c.refTable().toLowerCase(Locale.ROOT).startsWith(prefix))
+                    .toList();
+        }
         Map<String, String> schemaOf = new TreeMap<>();
         Map<String, List<String>> primaryKey = new TreeMap<>();
         Map<String, Map<String, List<Constraint>>> foreignKeys = new TreeMap<>();
