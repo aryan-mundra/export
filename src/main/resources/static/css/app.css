@@ -183,7 +183,7 @@ body.signed-out main { display: none; }
         0 0 0 8px rgba(255, 255, 255, .14);
     animation: brandFloat 2.4s ease-in-out infinite;
 }
-.login-brand img { display: block; width: min(460px, 76vw); height: auto; }
+.login-brand img { display: block; width: min(520px, 76vw); height: auto; }
 
 .login-kicker {
     position: relative;
